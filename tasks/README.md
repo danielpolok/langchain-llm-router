@@ -20,7 +20,7 @@ Work breakdown for `RouterChatModel`, derived from [PRD.md](../PRD.md). One file
 | ID | Task | Principles | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | [T-001](T-001-project-scaffold.md) | Project scaffold | C9, R8 | — | done |
-| [T-002](T-002-spike-router-skeleton.md) | Spike: minimal router skeleton | C1, C2, R1, R2, R5, R9 | T-001 | todo |
+| [T-002](T-002-spike-router-skeleton.md) | Spike: minimal router skeleton | C1, C2, R1, R2, R5, R9 | T-001 | done |
 | [T-003](T-003-spike-tools-structured-output.md) | Spike: tools and structured output (C3) | C3, C1, R10 | T-002 | todo |
 | [T-004](T-004-spike-cost-and-tracing.md) | Spike: cost counted once, real call traced (R3 vs C5) | R3, C5, R1 | T-002 | todo |
 | [T-005](T-005-v0-closeout.md) | v0 close-out — reread §3 against the spike | — | T-003, T-004 | todo |
