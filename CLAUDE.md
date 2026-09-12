@@ -26,13 +26,20 @@ models (`GenericFakeChatModel`). Layout: `tests/unit_tests`, `tests/integration_
 
 ## Spike
 
-The spike, per PRD §6 (tasks T-001–T-005), proves the two riskiest principles:
+The spike (T-001–T-005) is **built and written up** in `docs/spike-findings.md`. It tested the
+two riskiest principles:
 - **C3** — `bind_tools` and `with_structured_output` work through the router.
 - **R3** — cost is counted exactly once, attributed to the model that actually ran, while that
   model's call still appears as a nested run in LangSmith traces (C5).
 
-If either fails, PRD §8 already records the fallback (C3 failing → reconsider the agent-middleware
-form; R3 vs C5 conflict → decide which gives way). Don't re-debate settled decisions in PRD §11.
+Neither failed. **C3 holds with caveats**, and **R3 and C5 both hold** once the router's own run
+is a chain run rather than a model run — the one design decision the spike forced, now in PRD
+§11. Read `docs/spike-findings.md` before starting v1 work: it lists the caveats against the task
+that answers each. Don't re-debate settled decisions in PRD §11.
+
+What is left of v0 is one real-provider run (T-003) and one LangSmith trace (T-004), both written
+as tests that skip until `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `LANGSMITH_API_KEY` are set.
+After those, the next task is T-101 (v1 requirements).
 
 ## What is being built
 
