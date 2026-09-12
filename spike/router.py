@@ -1,6 +1,6 @@
-"""T-002: the smallest router that T-003 and T-004 can test against.
+"""T-002 and T-003: the smallest router that T-004 can test against.
 
-Spike quality: it answers questions, it is not v1. Principles: C1, C2, R1, R2, R5, R9.
+Spike quality: it answers questions, it is not v1. Principles: C1, C2, C3, R1, R2, R5, R9.
 
 The naive delegation design on purpose — T-004 starts by confirming the double count this
 produces, then scores alternatives against R1, R3 and C5.
@@ -9,9 +9,9 @@ produces, then scores alternatives against R1, R3 and C5.
 from __future__ import annotations
 
 import warnings
-from collections.abc import AsyncIterator, Callable, Iterator
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from langchain_core.callbacks import (
     AsyncCallbackManager,
@@ -19,10 +19,13 @@ from langchain_core.callbacks import (
     CallbackManager,
     CallbackManagerForLLMRun,
 )
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.language_models import BaseChatModel, LanguageModelInput
+from langchain_core.language_models.model_profile import ModelProfile
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
-from pydantic import Field, model_validator
+from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field, model_validator
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -30,10 +33,15 @@ if TYPE_CHECKING:
 ROUTING_KEY = "routing"
 """Key the decision record rides under in ``response_metadata`` (R2). Shape is not final."""
 
+TOOL_BINDING_KEY = "__router_tool_binding"
+"""Call kwarg carrying the tools the caller bound, unconverted, until a route is chosen."""
+
 Strategy = Callable[[list[BaseMessage]], str | None]
 """A policy applied to one request: pick a route by name, or ``None`` to abstain."""
 
 MessageT = TypeVar("MessageT", bound=AIMessage)
+
+ToolLike = dict[str, Any] | type | Callable[..., Any] | BaseTool
 
 
 class RoutingWarning(UserWarning):
@@ -49,6 +57,21 @@ class RoutingDecision:
 
     def as_dict(self) -> dict[str, str]:
         return {"route": self.route, "reason": self.reason}
+
+
+@dataclass(frozen=True)
+class ToolBinding:
+    """What `bind_tools` was called with, kept until a route can convert it (C3)."""
+
+    tools: tuple[ToolLike, ...]
+    tool_choice: str | None = None
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+    def apply(self, route: BaseChatModel) -> Runnable[LanguageModelInput, AIMessage]:
+        """Let the *selected* route do the provider-specific conversion, at call time."""
+        if self.tool_choice is None:
+            return route.bind_tools(list(self.tools), **self.kwargs)
+        return route.bind_tools(list(self.tools), tool_choice=self.tool_choice, **self.kwargs)
 
 
 def _child_callbacks(
@@ -108,6 +131,29 @@ class SpikeRouterChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "spike_router"
 
+    def _resolve_model_profile(self) -> ModelProfile | None:
+        """Report only what *every* route can do.
+
+        `create_agent` reads `profile` to choose a structured-output strategy. A router that
+        claimed a capability only some of its routes have would have a strategy picked that a
+        route cannot serve, so the shared capabilities are the honest answer (C3, R10).
+        """
+        profiles = [route.profile for route in self.routes.values()]
+        if not profiles or any(profile is None for profile in profiles):
+            return None
+
+        known = [cast("dict[str, Any]", profile) for profile in profiles]
+        shared: dict[str, Any] = {}
+        for key in set.intersection(*(set(profile) for profile in known)):
+            values = [profile[key] for profile in known]
+            if all(isinstance(value, bool) for value in values):
+                shared[key] = all(values)
+            elif all(isinstance(value, int) for value in values):
+                shared[key] = min(values)
+            elif all(value == values[0] for value in values):
+                shared[key] = values[0]
+        return cast("ModelProfile", shared)
+
     def decide(self, messages: list[BaseMessage]) -> RoutingDecision:
         """Apply the strategy, falling back to the default route on failure (R9)."""
         if self.strategy is None:
@@ -134,6 +180,58 @@ class SpikeRouterChatModel(BaseChatModel):
             stacklevel=3,
         )
 
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Keep the tools as they are; the chosen route converts them at call time (C3).
+
+        `tools` is bound as well, in its usual place, so LangChain's own checks that look for
+        it — `disable_streaming="tool_calling"`, for one — behave as on any chat model.
+        """
+        binding = ToolBinding(tools=tuple(tools), tool_choice=tool_choice, kwargs=dict(kwargs))
+        return self.bind(**{TOOL_BINDING_KEY: binding, "tools": list(tools)})
+
+    def with_structured_output(
+        self,
+        schema: dict[str, Any] | type,
+        *,
+        include_raw: bool = False,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
+        """Forward to the selected route's own implementation, per request (C3).
+
+        `BaseChatModel`'s default would build on *this* model's `bind_tools` and silently drop
+        provider arguments such as `method=`, so every route would be forced through function
+        calling. Forwarding keeps each route's native structured-output modes.
+        """
+
+        def pick(model_input: LanguageModelInput) -> Runnable[LanguageModelInput, Any]:
+            decision = self.decide(self._convert_input(model_input).to_messages())
+            return self.routes[decision.route].with_structured_output(
+                schema, include_raw=include_raw, **kwargs
+            )
+
+        return cast(
+            "Runnable[LanguageModelInput, dict[str, Any] | BaseModel]",
+            RunnableLambda(pick),
+        )
+
+    def _target(
+        self, decision: RoutingDecision, kwargs: dict[str, Any]
+    ) -> tuple[Runnable[LanguageModelInput, AIMessage], dict[str, Any]]:
+        """The runnable to call, and the call kwargs left once tool binding is replayed."""
+        route = self.routes[decision.route]
+        call_kwargs = dict(kwargs)
+        binding = call_kwargs.pop(TOOL_BINDING_KEY, None)
+        if binding is None:
+            return route, call_kwargs
+        call_kwargs.pop("tools", None)  # replayed through the route's own bind_tools
+        return cast("ToolBinding", binding).apply(route), call_kwargs
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -142,11 +240,12 @@ class SpikeRouterChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         decision = self.decide(messages)
-        message = self.routes[decision.route].invoke(
+        target, call_kwargs = self._target(decision, kwargs)
+        message = target.invoke(
             messages,
             config={"callbacks": _child_callbacks(run_manager)},
             stop=stop,
-            **kwargs,
+            **call_kwargs,
         )
         return ChatResult(generations=[ChatGeneration(message=_record(message, decision))])
 
@@ -158,11 +257,12 @@ class SpikeRouterChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         decision = self.decide(messages)
-        message = await self.routes[decision.route].ainvoke(
+        target, call_kwargs = self._target(decision, kwargs)
+        message = await target.ainvoke(
             messages,
             config={"callbacks": _achild_callbacks(run_manager)},
             stop=stop,
-            **kwargs,
+            **call_kwargs,
         )
         return ChatResult(generations=[ChatGeneration(message=_record(message, decision))])
 
@@ -174,13 +274,15 @@ class SpikeRouterChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         decision = self.decide(messages)
+        target, call_kwargs = self._target(decision, kwargs)
         first = True
-        for chunk in self.routes[decision.route].stream(
+        for message in target.stream(
             messages,
             config={"callbacks": _child_callbacks(run_manager)},
             stop=stop,
-            **kwargs,
+            **call_kwargs,
         ):
+            chunk = cast("AIMessageChunk", message)
             if first:
                 # Only one chunk may carry the record: merge_dicts concatenates strings
                 # that repeat across chunks, so a record on every chunk would come out
@@ -197,13 +299,15 @@ class SpikeRouterChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         decision = self.decide(messages)
+        target, call_kwargs = self._target(decision, kwargs)
         first = True
-        async for chunk in self.routes[decision.route].astream(
+        async for message in target.astream(
             messages,
             config={"callbacks": _achild_callbacks(run_manager)},
             stop=stop,
-            **kwargs,
+            **call_kwargs,
         ):
+            chunk = cast("AIMessageChunk", message)
             if first:
                 _record(chunk, decision)
                 first = False
