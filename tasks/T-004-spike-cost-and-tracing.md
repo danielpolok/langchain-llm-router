@@ -38,15 +38,17 @@ score each against R1, R3 and C5, for example:
 
 - [x] `get_usage_metadata_callback()` reports usage once, keyed by the selected model's name —
       for both `invoke` and `stream`. (Design A, `spike/tests/test_cost_and_tracing.py`.)
-- [ ] A LangSmith trace shows the routing decision and the real model call, and the trace cost
-      equals one call of the selected model. **Blocked:** checked offline against a stand-in
-      that mirrors LangSmith's pricing inputs (`spike/tracing.py`), not against LangSmith —
-      `LANGSMITH_API_KEY` is not set in this environment.
+- [x] A LangSmith trace shows the routing decision and the real model call, and the trace cost
+      equals one call of the selected model. Confirmed live (project `llm-router`, run
+      `01a0a161-…`): one `chain` run (`DelegatingRouterChatModel`) with one nested `llm` run
+      (`ChatGoogleGenerativeAI`, `ls_model_name: gemini-3-flash-preview`) carrying
+      `routing: {route: gemini, reason: 'no strategy configured'}` and `usage_metadata`; both
+      runs report the same `total_cost` ($0.0001745) because there is only one billed call.
 - [x] The caller's `AIMessage.usage_metadata` is identical to the route's (R1).
 - [x] Written verdict in this file: **both hold**, or **which gives way and why**, recorded in
       PRD §11.
 
-## Verdict — both hold, once the router stops being a model run
+## Verdict — both hold, once the router stops being a model run (confirmed against LangSmith)
 
 R3 and C5 do not conflict. They only appear to while the router emits a *model* run of its own:
 two model runs mean the same tokens are billed twice. The fix is that the router's own run is a

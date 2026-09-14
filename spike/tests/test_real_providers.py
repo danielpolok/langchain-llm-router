@@ -1,7 +1,7 @@
-"""T-003: the same tests against two real providers. Skipped unless both keys are set.
+"""T-003: the same tests against two real providers. Skipped unless both are reachable.
 
-The routes are deliberately from different providers: tool schemas and structured-output
-modes differ between them, which is what C3 has to survive.
+The routes are deliberately one cloud provider and one local one: tool schemas and
+structured-output modes differ between them, which is what C3 has to survive.
 """
 
 from __future__ import annotations
@@ -16,12 +16,10 @@ from pydantic import BaseModel, Field
 
 from spike.router import SpikeRouterChatModel, routing_decision
 
-OPENAI_MODEL = os.environ.get("LLM_ROUTER_OPENAI_MODEL", "openai:gpt-5.4-mini")
-ANTHROPIC_MODEL = os.environ.get(
-    "LLM_ROUTER_ANTHROPIC_MODEL", "anthropic:claude-haiku-4-5-20251001"
-)
+GEMINI_MODEL = os.environ.get("LLM_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
+OLLAMA_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
 
-pytestmark = pytest.mark.requires_env("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+pytestmark = [pytest.mark.requires_env("GEMINI_API_KEY"), pytest.mark.requires_ollama]
 
 
 @tool
@@ -41,19 +39,19 @@ def router() -> SpikeRouterChatModel:
     """Routes on a marker in the request, so a test can choose the route it exercises."""
 
     def by_marker(messages: list[Any]) -> str | None:
-        return "anthropic" if "[anthropic]" in messages[-1].text else "openai"
+        return "ollama" if "[ollama]" in messages[-1].text else "gemini"
 
     return SpikeRouterChatModel(
         routes={
-            "openai": init_chat_model(OPENAI_MODEL),
-            "anthropic": init_chat_model(ANTHROPIC_MODEL),
+            "gemini": init_chat_model(GEMINI_MODEL),
+            "ollama": init_chat_model(OLLAMA_MODEL),
         },
-        default_route="openai",
+        default_route="gemini",
         strategy=by_marker,
     )
 
 
-@pytest.mark.parametrize("route", ["openai", "anthropic"])
+@pytest.mark.parametrize("route", ["gemini", "ollama"])
 def test_a_tool_call_works_through_the_router(route: str) -> None:
     answer = (
         router()
@@ -65,7 +63,7 @@ def test_a_tool_call_works_through_the_router(route: str) -> None:
     assert routing_decision(answer) == {"route": route, "reason": "strategy"}
 
 
-@pytest.mark.parametrize("route", ["openai", "anthropic"])
+@pytest.mark.parametrize("route", ["gemini", "ollama"])
 def test_structured_output_works_through_the_router(route: str) -> None:
     result = (
         router()

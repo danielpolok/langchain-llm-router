@@ -1,7 +1,6 @@
 # PRD — `RouterChatModel`: in-process model routing for LangChain
 
-**Owner:** Daniel Polok · **Phase:** v0 — principles · **Status:** Spike complete; two
-credential-gated checks outstanding · **Updated:** 2026-09-12
+**Owner:** Daniel Polok · **Phase:** v0 — complete · **Updated:** 2026-09-14
 
 ---
 
@@ -99,11 +98,12 @@ v0 is done when:
 2. **§3 still holds after the spike** — reread it once the spike is built; it stands as written.
 3. **The open questions in §10 are answered.**
 
-**Status (2026-09-12).** The spike is built and written up in
+**Status (2026-09-14). v0 is done.** The spike is built and written up in
 [docs/spike-findings.md](docs/spike-findings.md). **C3 holds with caveats**, and **R3 and C5 both
 hold** once the router's own run is a chain run rather than a model run (§11). §3 was reread line
-by line and stands as written. §10 has none open. Outstanding: one real-provider run and one
-LangSmith trace — both written as tests that skip without API keys (T-003, T-004).
+by line and stands as written. §10 has none open. Both credential-gated checks have run: a
+real-provider pass (Gemini, cloud; Ollama, local — T-003) and a live LangSmith trace showing one
+`chain` run wrapping one `llm` run, priced once (T-004). Next: T-101 (v1 requirements).
 
 ## 7. Success metrics
 

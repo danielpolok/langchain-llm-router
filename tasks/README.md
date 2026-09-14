@@ -21,16 +21,15 @@ Work breakdown for `RouterChatModel`, derived from [PRD.md](../PRD.md). One file
 | --- | --- | --- | --- | --- |
 | [T-001](T-001-project-scaffold.md) | Project scaffold | C9, R8 | — | done |
 | [T-002](T-002-spike-router-skeleton.md) | Spike: minimal router skeleton | C1, C2, R1, R2, R5, R9 | T-001 | done |
-| [T-003](T-003-spike-tools-structured-output.md) | Spike: tools and structured output (C3) | C3, C1, R10 | T-002 | blocked |
-| [T-004](T-004-spike-cost-and-tracing.md) | Spike: cost counted once, real call traced (R3 vs C5) | R3, C5, R1 | T-002 | blocked |
+| [T-003](T-003-spike-tools-structured-output.md) | Spike: tools and structured output (C3) | C3, C1, R10 | T-002 | done |
+| [T-004](T-004-spike-cost-and-tracing.md) | Spike: cost counted once, real call traced (R3 vs C5) | R3, C5, R1 | T-002 | done |
 | [T-005](T-005-v0-closeout.md) | v0 close-out — reread §3 against the spike | — | T-003, T-004 | done |
 
 Exit criterion 3 (§10 open questions answered) is already met — §10 has none open. T-005 checks it
 again after the spike.
 
-T-003 and T-004 are `blocked` on one criterion each — a real-provider run and a LangSmith trace —
-both written as tests that skip until `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `LANGSMITH_API_KEY`
-are set. Their verdicts are recorded, so T-005 closed without them; v0 itself closes when they run.
+T-003 and T-004 are `done`; their one credential-gated criterion each has since run — a
+real-provider pass (Gemini, cloud; Ollama, local) and a live LangSmith trace. **v0 is closed.**
 
 ## v1 — build, benchmark, ship (PRD §9)
 

@@ -41,8 +41,8 @@ code.
 - §11 gained one row from the spike: the router's own run is a chain run, not a model run.
 - PRD header and §6 updated with where v0 actually stands.
 
-**Ran with T-003 and T-004 still `blocked`**, which is a deliberate departure from the
-dependency rule. Both verdicts — what this task needs — are recorded; what is outstanding in
-those tasks is one real-provider run and one LangSmith trace, each gated on API keys that are
-not set in this environment. Everything else in v0 is finished, so the phase closes as soon as
-those two run.
+**Ran with T-003 and T-004 still `blocked`**, which was a deliberate departure from the
+dependency rule: both verdicts were already recorded, and what remained in those tasks was one
+real-provider run and one LangSmith trace, each gated on credentials not set in that environment
+at the time. Both have since run — against Gemini and Ollama, and a live LangSmith project — and
+T-003/T-004 are now `done`. **v0 is closed.**

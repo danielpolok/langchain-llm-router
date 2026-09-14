@@ -11,8 +11,8 @@ starts from evidence rather than from the spike's code.
 
 | Principle | Verdict |
 | --- | --- |
-| **C3** — tools and structured output through the router | **Holds, with caveats.** Nothing here disproves C1, so the §8 fork is not triggered. |
-| **R3 vs C5** — cost counted once while the real call stays traced | **Both hold**, once the router's own run stops being a model run. |
+| **C3** — tools and structured output through the router | **Holds, with caveats.** Nothing here disproves C1, so the §8 fork is not triggered. Confirmed offline and against two real providers. |
+| **R3 vs C5** — cost counted once while the real call stays traced | **Both hold**, once the router's own run stops being a model run. Confirmed offline and against a live LangSmith trace. |
 
 The C3 caveats are in [T-003](../tasks/T-003-spike-tools-structured-output.md); the R3/C5
 scoring of three designs is in [T-004](../tasks/T-004-spike-cost-and-tracing.md).
@@ -68,16 +68,28 @@ Things that were not obvious from the documentation, each of which cost time:
 | The router's run being a chain run changes what `stream_mode="messages"` sees; confirm against a real graph | T-113, T-117 |
 | Raw tool objects ride in the router's invocation params, which are traced and used as a cache key | T-117, T-119 |
 
-## Still unverified
+## Verified live
 
-Both need credentials that were not available when the spike ran, and both are written and
-skipping, not missing:
+Both criteria that needed credentials have since run, against Gemini (cloud) and a local Ollama
+server — not OpenAI and Anthropic as first planned; see below.
 
-- **One real-provider run across two providers** — a tool call and structured output on each
-  (`spike/tests/test_real_providers.py`, needs `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`).
-- **A LangSmith trace** showing the decision and the real call, costing one call of the selected
-  model (needs `LANGSMITH_API_KEY`). Checked offline against a stand-in that mirrors LangSmith's
-  pricing inputs — `usage_metadata` plus `ls_model_name`, per run (`spike/tracing.py`).
+- **A real-provider run across two providers** — a tool call and structured output on each,
+  `spike/tests/test_real_providers.py`: Gemini (`gemini-3-flash-preview`) and Ollama
+  (`qwen3:8b`), 4/4 pass.
+- **A LangSmith trace.** Project `llm-router`, run `01a0a161-…`: one `chain` run
+  (`DelegatingRouterChatModel`) wrapping one `llm` run (`ChatGoogleGenerativeAI`), the child
+  carrying both `routing: {route: gemini, reason: 'no strategy configured'}` and
+  `usage_metadata`; chain and llm run report the same `total_cost` ($0.0001745) — one call
+  billed once. Matches the offline stand-in (`spike/tracing.py`) exactly.
+
+## A provider substitution
+
+The plan going into T-003/T-004 was OpenAI and Anthropic; what was actually available in this
+environment was a Gemini API key and a local Ollama server running `qwen3:8b`. Swapped rather
+than left blocked — if anything a sharper test of C3, since a cloud API and a local server
+differ more than two cloud APIs do. `pyproject.toml`'s `providers` group, `conftest.py` (which
+now also loads `.env` and adds a `requires_ollama` marker that pings the local server), and both
+real-provider test files were updated accordingly.
 
 ## §3 after the spike
 

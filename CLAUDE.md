@@ -19,9 +19,12 @@ uv manages the environment (Python 3.12 for development; the package supports �
 - Lint: `uv run ruff check . && uv run ruff format --check .`
 - Type-check: `uv run mypy`
 
-Tests that call real providers are marked `@pytest.mark.requires_env("OPENAI_API_KEY", ...)`
-and skip when a named variable is unset (hook in the root `conftest.py`). Offline tests use fake
-models (`GenericFakeChatModel`). Layout: `tests/unit_tests`, `tests/integration_tests`,
+Tests that call real providers are marked `@pytest.mark.requires_env("GEMINI_API_KEY", ...)` or
+`@pytest.mark.requires_ollama`, and skip when a named variable is unset or the local Ollama
+server is unreachable (hooks in the root `conftest.py`, which also loads `.env`). Real providers
+are Gemini (cloud, `google_genai:gemini-3-flash-preview`) and Ollama (local, `ollama:qwen3:8b`)
+— set via `LLM_ROUTER_GEMINI_MODEL` / `LLM_ROUTER_OLLAMA_MODEL` to override. Offline tests use
+fake models (`GenericFakeChatModel`). Layout: `tests/unit_tests`, `tests/integration_tests`,
 `spike/tests`.
 
 ## Spike
@@ -37,9 +40,8 @@ is a chain run rather than a model run — the one design decision the spike for
 §11. Read `docs/spike-findings.md` before starting v1 work: it lists the caveats against the task
 that answers each. Don't re-debate settled decisions in PRD §11.
 
-What is left of v0 is one real-provider run (T-003) and one LangSmith trace (T-004), both written
-as tests that skip until `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `LANGSMITH_API_KEY` are set.
-After those, the next task is T-101 (v1 requirements).
+**v0 is closed.** The real-provider run (T-003, Gemini + Ollama) and the LangSmith trace (T-004)
+have both run. The next task is T-101 (v1 requirements).
 
 ## What is being built
 

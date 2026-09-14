@@ -2,7 +2,7 @@
 id: T-003
 title: "Spike: tools and structured output through the router (C3)"
 phase: v0
-status: blocked
+status: done
 principles: [C3, C1, R10]
 depends_on: [T-002]
 prd: ["§6", "§8"]
@@ -35,14 +35,13 @@ selected model. If they can't, C1 ("it is a chat model") is revisited before v1 
 
 - [x] Offline tests with fake routes — one that implements `bind_tools`, one that doesn't — cover
       questions 1–4. (`spike/tests/test_tools.py`, 18 tests.)
-- [ ] One real-provider run with two different models: a tool call and structured output both
-      succeed on each route. **Blocked:** written as `spike/tests/test_real_providers.py`
-      (OpenAI and Anthropic, a tool call and structured output on each), but it skips —
-      `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are not set in this environment.
+- [x] One real-provider run with two different models: a tool call and structured output both
+      succeed on each route. `spike/tests/test_real_providers.py` — Gemini (`gemini-3-flash-preview`,
+      cloud) and Ollama (`qwen3:8b`, local); 4/4 pass.
 - [x] Written verdict in this file: **C3 holds / holds with caveats / fails**, caveats listed. A
       fail triggers the §8 fork, recorded in PRD §11.
 
-## Verdict — C3 holds with caveats (offline; one real-provider run outstanding)
+## Verdict — C3 holds with caveats
 
 Nothing here disproves C1, so the §8 fork is not triggered. The caveats are v1 requirements,
 not obstacles.
@@ -81,3 +80,8 @@ which route will run. The failure is `NotImplementedError` from `BaseChatModel.b
 at *call* time and only when such a route is selected, so a policy can hide it until live traffic
 reaches that route. This is the case R10 turns into an up-front warning naming the routes that
 cannot use tools, plus a diversion per request (T-115).
+
+**Real-provider run.** Gemini and Ollama, not OpenAI and Anthropic — the pairing available in
+this environment (`GEMINI_API_KEY`, and a local Ollama server serving `qwen3:8b`), and if
+anything a sharper test of C3: one cloud API, one local server. Both bind tools and produce
+structured output through the router unchanged; the four caveats above hold on both.

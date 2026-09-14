@@ -17,11 +17,14 @@ dev = [
     # Compatibility targets (C1): agents and graphs that use the router.
     "langchain>=1.1",
     "langgraph>=1.0",
+    # Loads .env for the requires_env-gated provider tests; never imported by src/.
+    "python-dotenv>=1.0",
 ]
-# Real providers for integration tests; their tests skip when API keys are absent.
+# Real providers for integration tests: one cloud (Gemini), one local (Ollama). Their tests
+# skip when GEMINI_API_KEY is absent or the local Ollama server is unreachable.
 providers = [
-    "langchain-openai>=1.0",
-    "langchain-anthropic>=1.0",
+    "langchain-google-genai>=3.0",
+    "langchain-ollama>=1.0",
 ]
 
 [tool.uv]
@@ -38,6 +41,7 @@ asyncio_default_fixture_loop_scope = "function"
 addopts = "--strict-markers --strict-config"
 markers = [
     "requires_env(*names): skip unless every named environment variable is set",
+    "requires_ollama: skip unless a local Ollama server is reachable",
 ]
 
 [tool.ruff]
