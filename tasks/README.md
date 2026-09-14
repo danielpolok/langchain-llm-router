@@ -1,6 +1,6 @@
 # Tasks
 
-Work breakdown for `RouterChatModel`, derived from [PRD.md](../PRD.md). One file per task.
+Work breakdown for `ChatRouter`, derived from [PRD.md](../PRD.md). One file per task.
 
 ## Conventions
 

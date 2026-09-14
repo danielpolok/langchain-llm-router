@@ -1,4 +1,4 @@
-# PRD — `RouterChatModel`: in-process model routing for LangChain
+# PRD — `ChatRouter`: in-process model routing for LangChain
 
 **Owner:** Daniel Polok · **Phase:** v0 — complete · **Updated:** 2026-09-14
 

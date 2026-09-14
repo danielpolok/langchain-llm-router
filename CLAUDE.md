@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project state
 
 v0. The repo holds `PRD.md` (v0: principles, no implementation), `tasks/` (the work breakdown
-derived from it), an empty package `src/llm_router/` (v1 code goes here, from T-101's
+derived from it), an empty package `src/langchain_llm_router/` (v1 code goes here, from T-101's
 requirements) and `spike/` (throwaway spike code and its tests — never import it from
 `src/`).
 
@@ -45,7 +45,7 @@ have both run. The next task is T-101 (v1 requirements).
 
 ## What is being built
 
-`RouterChatModel`: a LangChain 1.x chat model (`BaseChatModel`, `langchain-core` 1.x) that, per
+`ChatRouter` (PyPI `langchain-llm-router`, MIT): a LangChain 1.x chat model (`BaseChatModel`, `langchain-core` 1.x) that, per
 request, picks one of several named candidate chat models and returns that model's response
 unchanged plus a record of the routing decision. The routing *policy* lives in the application's
 code; a *strategy* applies it.

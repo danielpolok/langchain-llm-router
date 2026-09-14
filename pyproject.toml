@@ -1,11 +1,30 @@
 [project]
-name = "llm-router"
+name = "langchain-llm-router"
 version = "0.0.0"
 description = "In-process model routing for LangChain: a chat model that picks one of several candidate chat models per request."
 authors = [{ name = "Daniel Polok" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["langchain", "llm", "routing", "chat-model", "model-router"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 requires-python = ">=3.10"
 # R8: no runtime dependency beyond LangChain's core. C9: langchain-core 1.x.
 dependencies = ["langchain-core>=1.1,<2"]
+
+[project.urls]
+Repository = "https://github.com/danielpolok/llm-router"
+Issues = "https://github.com/danielpolok/llm-router/issues"
 
 [dependency-groups]
 dev = [
@@ -13,7 +32,8 @@ dev = [
     "pytest-asyncio>=1.0",
     "ruff>=0.16",
     "mypy>=2.0",
-    "langchain-tests>=1.1",
+    # Pinned: new langchain-tests releases add standard tests that can break CI.
+    "langchain-tests==1.1.9",
     # Compatibility targets (C1): agents and graphs that use the router.
     "langchain>=1.1",
     "langgraph>=1.0",
