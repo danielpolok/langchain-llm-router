@@ -1,0 +1,57 @@
+[project]
+name = "llm-router"
+version = "0.0.0"
+description = "In-process model routing for LangChain: a chat model that picks one of several candidate chat models per request."
+authors = [{ name = "Daniel Polok" }]
+requires-python = ">=3.10"
+# R8: no runtime dependency beyond LangChain's core. C9: langchain-core 1.x.
+dependencies = ["langchain-core>=1.1,<2"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.16",
+    "mypy>=2.0",
+    "langchain-tests>=1.1",
+    # Compatibility targets (C1): agents and graphs that use the router.
+    "langchain>=1.1",
+    "langgraph>=1.0",
+    # Loads .env for the requires_env-gated provider tests; never imported by src/.
+    "python-dotenv>=1.0",
+]
+# Real providers for integration tests: one cloud (Gemini), one local (Ollama). Their tests
+# skip when GEMINI_API_KEY is absent or the local Ollama server is unreachable.
+providers = [
+    "langchain-google-genai>=3.0",
+    "langchain-ollama>=1.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "providers"]
+
+[build-system]
+requires = ["uv_build>=0.8.19,<0.9"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "spike"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "--strict-markers --strict-config"
+markers = [
+    "requires_env(*names): skip unless every named environment variable is set",
+    "requires_ollama: skip unless a local Ollama server is reachable",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "PT"]
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+files = ["src", "tests", "spike", "conftest.py"]

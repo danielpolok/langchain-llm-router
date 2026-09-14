@@ -1,6 +1,6 @@
 # PRD — `RouterChatModel`: in-process model routing for LangChain
 
-**Owner:** Daniel Polok · **Phase:** v0 — principles · **Status:** Draft · **Updated:** 2026-09-11
+**Owner:** Daniel Polok · **Phase:** v0 — complete · **Updated:** 2026-09-14
 
 ---
 
@@ -98,6 +98,13 @@ v0 is done when:
 2. **§3 still holds after the spike** — reread it once the spike is built; it stands as written.
 3. **The open questions in §10 are answered.**
 
+**Status (2026-09-14). v0 is done.** The spike is built and written up in
+[docs/spike-findings.md](docs/spike-findings.md). **C3 holds with caveats**, and **R3 and C5 both
+hold** once the router's own run is a chain run rather than a model run (§11). §3 was reread line
+by line and stands as written. §10 has none open. Both credential-gated checks have run: a
+real-provider pass (Gemini, cloud; Ollama, local — T-003) and a live LangSmith trace showing one
+`chain` run wrapping one `llm` run, priced once (T-004). Next: T-101 (v1 requirements).
+
 ## 7. Success metrics
 
 Exit criteria say v0 is *done*; these say the project *worked*.
@@ -151,3 +158,4 @@ _None open._ Q1–Q3 were answered on 2026-09-11 and folded into **R10** (non-to
 | Ready-made strategies plus from-scratch configuration | A fast start for common setups, full control when needed, custom code as the escape hatch (R6). |
 | A default route is mandatory | The router always answers: a strategy that fails or can't decide degrades to the default model instead of failing the request (R9). |
 | Forced routes error by default, configurable | An explicit choice shouldn't be silently overridden — otherwise experiments compare the wrong model. Falling back instead is available as a setting (R11). |
+| The router's own run is a chain run, not a model run | While the router emits a model run too, the same tokens are billed twice (R3) and the streamed route call vanishes from the trace. A chain run that delegates leaves the selected route's call as the only model run, so cost stays exact and the real call stays traced (C5). Settled by the T-004 spike; R3 and C5 do not conflict. |
