@@ -44,25 +44,63 @@ back its response unchanged, plus a record of which route was taken and why.
 - **No extra infrastructure** — no proxy, no service, no credentials; depends only on
   `langchain-core`.
 
+## 📖 Documentation
+
+- [PRD.md](PRD.md) — what the router is and the principles it holds to (C1–C10, R1–R11).
+- [docs/spike-findings.md](docs/spike-findings.md) — what the v0 spike proved and the caveats carried
+  into v1.
+- [tasks/](tasks/README.md) — the work breakdown.
+- [LangChain docs](https://docs.langchain.com/oss/python/langchain/models) — chat models, tools,
+  structured output and middleware.
+
 ## Overview
 
 ### Integration details
 
-| Class | Package | Depends on | Version |
-| :--- | :--- | :--- | :--- |
-| `ChatRouter` | `langchain-llm-router` | `langchain-core` 1.x | unreleased |
+| Class | Package | Serializable | JS support | Downloads | Version |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `ChatRouter` | `langchain-llm-router` | — | ❌ | — | unreleased |
+
+*Serializable and downloads are unknown until there's an implementation and a release; there is no
+JS/TS port planned.*
 
 ### Model features
 
 `ChatRouter` has no capabilities of its own: each feature is whatever the **selected route**
 supports.
 
-| Tool calling | Structured output | Multimodal input | Token-level streaming | Native async | Token usage |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| via route | via route | via route | via route | via route | via route |
+| Tool calling | Structured output | Image input | Audio input | Video input | Token-level streaming | Native async | Token usage | Logprobs |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| via route | via route | via route | via route | via route | via route | via route | via route | via route |
 
 When tools or structured output are bound, routes that can't use tools are skipped with a warning;
 if none can, binding raises an error.
+
+## Setup
+
+`ChatRouter` itself needs no credentials — each route is an ordinary chat model, so credentials are
+whatever that route's provider requires (see its own integration page).
+
+### Installation
+
+```bash
+pip install -U langchain-llm-router
+# or
+uv add langchain-llm-router
+```
+
+### Tracing
+
+To see the routing decision and the real model call in one trace, set a [LangSmith](https://docs.langchain.com/langsmith/observability)
+API key:
+
+```python
+import getpass
+import os
+
+os.environ["LANGSMITH_API_KEY"] = getpass.getpass("Enter your LangSmith API key: ")
+os.environ["LANGSMITH_TRACING"] = "true"
+```
 
 ## Instantiation
 
@@ -93,13 +131,25 @@ do make calls, are explicit opt-ins.
 
 ```python
 messages = [
-    ("system", "You are a helpful assistant."),
-    ("human", "Prove that there are infinitely many primes."),
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Prove that there are infinitely many primes."},
 ]
 response = router.invoke(messages)
 
 response.text
 response.response_metadata["routing"]  # {"route": "frontier", "reason": "..."}
+```
+
+Message objects work the same way:
+
+```python
+from langchain_core.messages import HumanMessage, SystemMessage
+
+messages = [
+    SystemMessage("You are a helpful assistant."),
+    HumanMessage("Prove that there are infinitely many primes."),
+]
+response = router.invoke(messages)
 ```
 
 The response is the selected model's own `AIMessage` — content, tool calls, usage metadata — with
@@ -164,15 +214,6 @@ router.invoke(messages, config={"configurable": {"route": "frontier"}})
 One caveat: provider-side prompt caching is per model, so routing consecutive turns of a conversation
 to different models loses the cached prefix.
 
-## 📖 Documentation
-
-- [PRD.md](PRD.md) — what the router is and the principles it holds to (C1–C10, R1–R11).
-- [docs/spike-findings.md](docs/spike-findings.md) — what the v0 spike proved and the caveats carried
-  into v1.
-- [tasks/](tasks/README.md) — the work breakdown.
-- [LangChain docs](https://docs.langchain.com/oss/python/langchain/models) — chat models, tools,
-  structured output and middleware.
-
 ## 🚧 Project status
 
 **v0 is complete.** A spike tested the two riskiest principles against Gemini (cloud), Ollama
@@ -184,6 +225,13 @@ to different models loses the cached prefix.
 
 **Next:** the v1 requirements ([T-101](tasks/T-101-v1-requirements.md)), then the core router,
 built-in strategies, a cost/quality benchmark and a PyPI release.
+
+## 📕 Releases & Versioning
+
+Unreleased — `pyproject.toml` pins the placeholder version `0.0.0`. There is no PyPI release, no
+changelog and no versioning policy yet; both are [T-151](tasks/T-151-packaging.md)'s job, including
+the stability promise for the strategy interface (R6). Until then, nothing here is a compatibility
+guarantee.
 
 ## 💁 Contributing
 
