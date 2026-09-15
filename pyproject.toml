@@ -3,6 +3,7 @@ name = "langchain-llm-router"
 version = "0.0.0"
 description = "In-process model routing for LangChain: a chat model that picks one of several candidate chat models per request."
 authors = [{ name = "Daniel Polok" }]
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["langchain", "llm", "routing", "chat-model", "model-router"]
