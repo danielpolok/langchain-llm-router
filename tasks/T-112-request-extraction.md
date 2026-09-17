@@ -16,18 +16,25 @@ By default, strategies see the user's *current request* — not tool output, sys
 conversation length (R4). The PRD's survey found that last-message or length-based routing
 misroutes agent conversations.
 
+Requirements: **REQ-R4-1, REQ-R4-2, REQ-R4-4, REQ-C7-1, REQ-C7-2**
+([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
-- Define "current request" for real transcripts: plain chat, and agent loops where the trailing
-  messages are AI tool calls and `ToolMessage`s.
-- Read messages as LangChain defines them (C7): string content and content blocks. Extract text
-  from multimodal content and expose non-text modalities so a strategy can route on them.
-- Opt-in wider context for strategies that ask for it.
-- No user message at all → the strategy can't decide → default route (R9).
+- Build the `RoutingRequest` from a transcript. "Current request" is the most recent
+  `HumanMessage` by position, ignoring trailing AI and tool messages — so an agent loop keeps
+  routing on the request that started it.
+- Read messages as LangChain defines them (C7): string content and content blocks. Join text into
+  `text`; expose the content blocks and the set of `modalities` so a strategy can route on a
+  non-text request.
+- Every input form a chat model accepts (string, dicts, `BaseMessage`s, a `ChatPromptValue`)
+  reaches extraction through the same path.
+- Opt-in wider context: populate `messages` only when the strategy sets `wants_full_context`.
+- No user message at all → "can't decide" → default route (R9).
 
 ## Acceptance criteria
 
 - [ ] Fixture transcripts: single turn, multi-turn, agent tool loop, multimodal (text + image),
       system prompt only.
-- [ ] In an agent loop, every model call routes on the originating user request, not the latest
-      tool output.
+- [ ] In a three-iteration agent loop, all three model calls route on the originating user request.
+- [ ] The four input forms produce an identical `RoutingRequest`.

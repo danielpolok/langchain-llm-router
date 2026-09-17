@@ -15,6 +15,8 @@ prd: ["§3.2", "§4", "§9"]
 Route on keywords or patterns in the current request, with sensible defaults — the fast start for
 domain routing (§4, e.g. code requests to a code-strong model).
 
+Requirements: **REQ-R7-1**, **REQ-R6-1** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - Rules mapping keywords or patterns to routes; ordering and tie-breaking; case handling.

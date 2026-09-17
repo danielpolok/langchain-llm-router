@@ -12,8 +12,9 @@ Work breakdown for `ChatRouter`, derived from [PRD.md](../PRD.md). One file per 
 - **Picking work:** the lowest-numbered `todo` whose dependencies are all `done`.
 - **The PRD wins.** If a task's findings contradict a principle, amend the PRD and record the
   decision in §11 — don't let the code quietly diverge.
-- **v1 tasks are provisional.** v0 deliberately says nothing about implementation; T-101 turns the
-  principles into detailed requirements and may split, merge or re-scope everything after it.
+- **Requirements live in [docs/v1-requirements.md](../docs/v1-requirements.md).** T-101 turned the
+  §3 principles into numbered `REQ-` requirements and settled the rules they left open (D1–D8,
+  recorded in PRD §11). Each v1 task names the requirements it owns; don't re-decide them.
 
 ## v0 — prove the principles (PRD §6)
 
@@ -37,13 +38,16 @@ real-provider pass (Gemini, cloud; Ollama, local) and a live LangSmith trace. **
 
 | ID | Task | Principles | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| [T-101](T-101-v1-requirements.md) | v1 detailed requirements | all | T-005 | todo |
+| [T-101](T-101-v1-requirements.md) | v1 detailed requirements | all | T-005 | done |
+
+T-101 produced [docs/v1-requirements.md](../docs/v1-requirements.md): 61 `REQ-` requirements
+covering all 21 principles, eight settled rules (D1–D8, now PRD §11) and one new task, T-121.
 
 ### Core router
 
 | ID | Task | Principles | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| [T-110](T-110-routes-and-default-route.md) | Named routes and the mandatory default route | R5, R9, R2 | T-101 | todo |
+| [T-110](T-110-routes-and-default-route.md) | Named routes, the default route and the public API | R5, R9, R2 | T-101 | todo |
 | [T-111](T-111-strategy-interface.md) | Strategy interface | R6, R4, R7 | T-101 | todo |
 | [T-112](T-112-request-extraction.md) | Current-request extraction | R4, C7 | T-111 | todo |
 | [T-113](T-113-calling-conventions.md) | Sync, async, streaming and batch | C2, R1 | T-110, T-111 | todo |
@@ -53,7 +57,8 @@ real-provider pass (Gemini, cloud; Ollama, local) and a live LangSmith trace. **
 | [T-117](T-117-tracing-and-cost.md) | Tracing and cost attribution | C5, R3 | T-113, T-114 | todo |
 | [T-118](T-118-error-semantics.md) | Error semantics — leave retries and fallbacks to LangChain | C6, R9 | T-110 | todo |
 | [T-119](T-119-response-cache.md) | Response cache correctness | C10 | T-115, T-116 | todo |
-| [T-120](T-120-compatibility-suite.md) | LangChain compatibility suite | C1, C8, C9 | T-113, T-115–T-119 | todo |
+| [T-120](T-120-compatibility-suite.md) | LangChain compatibility suite | C1, C8, C9 | T-113, T-115–T-119, T-121 | todo |
+| [T-121](T-121-capability-reporting.md) | Capability reporting — the router's own profile | C3, C1, R10 | T-110, T-115 | todo |
 
 ### Strategies
 

@@ -15,6 +15,8 @@ prd: ["§3.2", "§4", "§11"]
 The middle level of R6: define a strategy from scratch through configuration — rules, conditions
 and priorities — without writing a strategy class.
 
+Requirements: **REQ-R6-3** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - A declarative way to combine conditions (keywords, heuristic signals, modality, custom

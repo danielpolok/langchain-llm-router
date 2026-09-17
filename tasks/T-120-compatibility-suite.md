@@ -4,7 +4,7 @@ title: LangChain compatibility suite
 phase: v1
 status: todo
 principles: [C1, C8, C9]
-depends_on: [T-113, T-115, T-116, T-117, T-118, T-119]
+depends_on: [T-113, T-115, T-116, T-117, T-118, T-119, T-121]
 prd: ["§3.1", "§4"]
 ---
 
@@ -15,13 +15,17 @@ prd: ["§3.1", "§4"]
 Prove "it is a chat model" (C1): anything that works with a LangChain chat model works the same
 way with the router.
 
+Requirements: **REQ-C1-1, REQ-C1-2, REQ-C1-3, REQ-C8-1, REQ-C9-1**
+([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - `langchain-tests` standard suites: `ChatModelUnitTests` offline, `ChatModelIntegrationTests`
-  with real routes.
+  with real routes (Gemini, Ollama — skipped without credentials).
 - Placement tests: LCEL chain, `create_agent(model=router)` (the "agent backbone" use case, §4),
   LangGraph node, message-history wrapper.
-- C8: coexists with `@wrap_model_call` middleware inside `create_agent`.
+- C8: coexists with `@wrap_model_call` middleware inside `create_agent` — both run, neither
+  interferes.
 - C9: CI matrix on the minimum supported and the latest `langchain-core` 1.x.
 
 ## Acceptance criteria

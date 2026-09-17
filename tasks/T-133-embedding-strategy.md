@@ -15,6 +15,8 @@ prd: ["§3.2", "§8", "§9"]
 Route by semantic similarity between the current request and example requests for each route. It
 makes extra API calls, so it is an explicit opt-in (R7).
 
+Requirements: **REQ-R7-2**, **REQ-R3-2** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - The application supplies a LangChain `Embeddings` instance — no new dependencies (R8), no hidden

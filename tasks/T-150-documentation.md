@@ -15,6 +15,8 @@ prd: ["§4", "§5", "§8", "§9"]
 Enough documentation for another LangChain developer to adopt the router without reading its
 source.
 
+Requirements: **REQ-C8-2** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - Quickstart.

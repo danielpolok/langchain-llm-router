@@ -15,6 +15,8 @@ prd: ["§5", "§9"]
 Publish the package so other LangChain developers can install it (§9; packaging was a v0
 non-goal, §5).
 
+Requirements: **REQ-R8-1**, **REQ-R8-2**, **REQ-R6-4**, **REQ-C9-2** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - Package name and import path.

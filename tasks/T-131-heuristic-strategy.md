@@ -15,6 +15,8 @@ prd: ["§3.2", "§4", "§8", "§9"]
 Cost tiering without extra calls: score the current request's difficulty from cheap local signals
 and map the score to routes (§4, "cost tiering").
 
+Requirements: **REQ-R7-1**, **REQ-R6-1** ([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
 - Signals computable locally from the request (e.g. length, code, multi-part questions, non-text

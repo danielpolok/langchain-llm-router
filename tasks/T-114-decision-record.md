@@ -15,11 +15,18 @@ prd: ["§3.2"]
 Every response carries the selected model's output untouched, plus a record of which route was
 taken and why.
 
+Requirements: **REQ-R1-1, REQ-R2-1, REQ-R2-2, REQ-R2-4**
+([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
-- Schema from T-101: route name, reason, strategy, and flags for fallback (R9), tool diversion
-  (R10) and forced route (R11).
-- Placement on the returned message (e.g. `response_metadata`) and on the trace (C5).
+- The six-field `RoutingDecision` schema (D8): `route`, `reason`, `strategy`, `fallback`, `forced`,
+  `diverted_from`. It rides under `response_metadata["routing"]` and, as the same dict, in the
+  router's chain-run metadata (C5).
+- `routing_decision(message)` reads it back off a response.
+- Structured output (D3): the parsed object has nowhere to carry a record, so the chain run always
+  has it, `include_raw=True` puts it on the raw message, and `last_routing_decision()` — a context
+  variable set per call — covers the parsed-only path. Document the limit.
 - R1: content, tool calls, `usage_metadata`, `response_metadata`, ids — nothing dropped or renamed.
 
 ## Acceptance criteria
@@ -28,4 +35,6 @@ taken and why.
       decision record differs.
 - [ ] The record is present for invoke, stream, batch and every fallback, diversion and forced
       path.
-- [ ] The record is visible in LangSmith on the router's run.
+- [ ] The record is visible on the router's run in LangSmith.
+- [ ] Structured output: `include_raw=True` carries it, and `last_routing_decision()` returns the
+      same record after a parsed-only call.

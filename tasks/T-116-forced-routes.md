@@ -15,17 +15,25 @@ prd: ["§3.1", "§3.2", "§4", "§11"]
 Force a specific route for one call through LangChain's normal runtime configuration (C4) — the
 "experimentation" use case (§4) — and never silently swap it (R11).
 
+Requirements: **REQ-C4-1, REQ-C4-2, REQ-R11-1…3**
+([v1 requirements](../docs/v1-requirements.md)).
+
 ## Scope
 
-- Expose the forced route through standard mechanisms (`configurable_fields` plus `with_config` or
-  `config={"configurable": ...}`); other runtime configuration keeps working as usual.
-- If the forced route doesn't exist or can't use the bound tools: explicit error by default; a
-  setting switches to falling back per R9/R10 with a warning.
-- Record forced routes and fallbacks in the decision record.
+- The configurable key is `route` (D7), declared through `config_specs` as a
+  `ConfigurableFieldSpec` (`runnables/utils.py:655`), so `config={"configurable": {"route": …}}`,
+  `with_config` and config-schema introspection all work. Other runtime configuration — tags,
+  metadata, callbacks, run name, concurrency — keeps reaching the route unchanged.
+- **A forced route skips the strategy entirely (D2).** It is not a suggestion, and running a
+  strategy whose answer is discarded costs a call under T-133 / T-134.
+- If the forced route doesn't exist or can't use the bound tools: `ForcedRouteError` by default;
+  `on_unavailable_forced_route="fallback"` switches to the R9 / R10 path with one warning.
+- Record `forced=True`, and `fallback=True` with a reason when it gave way.
 
 ## Acceptance criteria
 
-- [ ] The forced route is used even when the strategy would choose otherwise (whether the strategy
-      still runs is a T-101 decision).
-- [ ] Unknown and tool-incompatible forced routes: error by default; fallback plus warning with the
-      setting.
+- [ ] The forced route is used even when the strategy would choose otherwise, and the strategy's
+      `decide` is never called.
+- [ ] Unknown and tool-incompatible forced routes: error by default; fallback plus exactly one
+      warning under the setting.
+- [ ] Runtime configuration other than `route` is observed on the route's run.

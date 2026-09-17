@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-v0. The repo holds `PRD.md` (v0: principles, no implementation), `tasks/` (the work breakdown
-derived from it), an empty package `src/langchain_llm_router/` (v1 code goes here, from T-101's
-requirements) and `spike/` (throwaway spike code and its tests — never import it from
-`src/`).
+v1, starting. The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered
+requirements v1 builds to), `tasks/` (the work breakdown), a still-empty package
+`src/langchain_llm_router/` (v1 code goes here) and `spike/` (throwaway spike code and its tests —
+never import it from `src/`).
 
 ## Commands
 
@@ -41,7 +41,10 @@ is a chain run rather than a model run — the one design decision the spike for
 that answers each. Don't re-debate settled decisions in PRD §11.
 
 **v0 is closed.** The real-provider run (T-003, Gemini + Ollama) and the LangSmith trace (T-004)
-have both run. The next task is T-101 (v1 requirements).
+have both run. **T-101 is done too:** `docs/v1-requirements.md` holds the public API, the decision
+record schema, and all 21 principles as numbered `REQ-` requirements with a testable check each.
+Read it before any v1 code — it, not the spike, is what T-110 onward build. The eight rules it
+settled are D1–D8 in PRD §11; don't re-decide them. The next task is T-110.
 
 ## What is being built
 
@@ -77,8 +80,8 @@ optimisation, hosted proxy, replacing `@wrap_model_call` agent middleware.
 
 `tasks/README.md` is the index; each `tasks/T-NNN-*.md` has front matter (`status`, `principles`,
 `depends_on`). Pick the lowest-numbered `todo` whose dependencies are `done`, and update `status`
-in both the task file and the index. v1 tasks (T-1xx) are provisional until T-101 writes the
-detailed requirements.
+in both the task file and the index. Each v1 task names the `REQ-` requirements it owns; they are
+the acceptance criteria.
 
 ## Tooling
 
