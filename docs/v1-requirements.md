@@ -9,7 +9,8 @@ on. Line references are to that `langchain_core`.
 
 ## How to read this
 
-- **`REQ-<principle>-<n>`** — one requirement, owned by exactly one task. The principle in the ID
+- **`REQ-<principle>-<n>`** — one requirement, owned by exactly one task. Tasks are GitHub issues
+  titled `T-NNN · …`; [tasks/README.md](../tasks/README.md) maps each ID to its issue. The principle in the ID
   is the one it comes from; a requirement often serves others too.
 - **Check** — phrased as the assertion a test makes. If it can't be written as one, it isn't a
   requirement yet.

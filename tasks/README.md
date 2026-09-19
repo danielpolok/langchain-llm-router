@@ -1,22 +1,88 @@
 # Tasks
 
-Work breakdown for `ChatRouter`, derived from [PRD.md](../PRD.md). One file per task.
+Work breakdown for `ChatRouter`. **Open work lives in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues?q=is%3Aissue+milestone%3Av1);
+this directory keeps the rules and the archive of closed tasks.**
+
+The split: what the router *is* and *must do* stays in the repo, where it changes through reviewed
+PRs — [PRD.md](../PRD.md) (principles and settled decisions) and
+[docs/v1-requirements.md](../docs/v1-requirements.md) (the numbered `REQ-` requirements). *Work*
+— who's on what, what's blocked, what's done — lives in the tracker, where it has one status and
+PRs close it.
 
 ## Conventions
 
-- **Front matter** on every task: `id`, `title`, `phase`, `status`, `principles` (PRD §3 IDs),
-  `depends_on`, `prd` (the sections it comes from).
-- **Status:** `todo` · `in-progress` · `blocked` · `done` · `dropped`. Change it in the task's
-  front matter *and* in the index below.
-- **IDs are stable** and never reused. Ranges by phase: `T-0xx` v0, `T-1xx` v1.
-- **Picking work:** the lowest-numbered `todo` whose dependencies are all `done`.
+- **One issue per task**, titled `T-NNN · Title`, in milestone `v1`. **IDs are stable and never
+  reused** — the requirements' *Task* column and commit messages refer to them. Ranges by phase:
+  `T-0xx` v0, `T-1xx` v1.
+- **Body:** a header line (principles, PRD sections, dependencies), then *Goal*, a
+  *Requirements* line naming the `REQ-` IDs the task owns, *Scope* and *Acceptance criteria*.
+- **Labels:** `principle:<ID>` for each PRD §3 principle it serves; one `area:` label —
+  `core`, `strategies`, `benchmark` or `ship`.
+- **Dependencies** are GitHub's native *blocked by* links, not text. An issue with an open blocker
+  shows as *Blocked*.
+- **Status is the issue's own state, and nothing else:**
+
+  | Status | On GitHub |
+  | --- | --- |
+  | todo | open, unassigned |
+  | in progress | open, assigned (a PR says `Closes #N`) |
+  | blocked | open, with an open *blocked by* link |
+  | done | closed as *completed* — usually by its PR merging |
+  | dropped | closed as *not planned*, with a comment saying why |
+
+- **Picking work:** the lowest-numbered open, unassigned, unblocked `v1` issue.
+
+  ```bash
+  gh issue list --milestone v1 --search "-is:blocked no:assignee" --json number,title
+  ```
+
 - **The PRD wins.** If a task's findings contradict a principle, amend the PRD and record the
   decision in §11 — don't let the code quietly diverge.
-- **Requirements live in [docs/v1-requirements.md](../docs/v1-requirements.md).** T-101 turned the
-  §3 principles into numbered `REQ-` requirements and settled the rules they left open (D1–D9,
-  recorded in PRD §11). Each v1 task names the requirements it owns; don't re-decide them.
+- **Requirements change in the repo first.** Don't re-decide D1–D9 (PRD §11) in an issue thread.
+  When a requirement changes, the PR changes `docs/v1-requirements.md`; the affected issues are
+  edited to match once it merges — the one step the old in-repo task files did atomically.
+- **Adding a task:** take the next free ID in its phase range, open the issue in the format above,
+  and add its row to the lookup below.
 
-## v0 — prove the principles (PRD §6)
+## v1 — task ID → issue
+
+A lookup only — status is on the issue.
+
+| ID | Task | Issue |
+| --- | --- | --- |
+| **Core router** | | |
+| T-110 | Named routes, the default route and the public API | [#5](https://github.com/danielpolok/langchain-llm-router/issues/5) |
+| T-111 | Strategy interface | [#6](https://github.com/danielpolok/langchain-llm-router/issues/6) |
+| T-112 | Current-request extraction | [#7](https://github.com/danielpolok/langchain-llm-router/issues/7) |
+| T-113 | Sync, async, streaming and batch | [#8](https://github.com/danielpolok/langchain-llm-router/issues/8) |
+| T-114 | Routing decision record | [#9](https://github.com/danielpolok/langchain-llm-router/issues/9) |
+| T-115 | Tool-aware routing | [#10](https://github.com/danielpolok/langchain-llm-router/issues/10) |
+| T-116 | Forced routes via runtime config | [#11](https://github.com/danielpolok/langchain-llm-router/issues/11) |
+| T-117 | Tracing and cost attribution | [#12](https://github.com/danielpolok/langchain-llm-router/issues/12) |
+| T-118 | Error semantics — leave retries and fallbacks to LangChain | [#13](https://github.com/danielpolok/langchain-llm-router/issues/13) |
+| T-119 | Response cache correctness | [#14](https://github.com/danielpolok/langchain-llm-router/issues/14) |
+| T-120 | LangChain compatibility suite | [#15](https://github.com/danielpolok/langchain-llm-router/issues/15) |
+| T-121 | Capability reporting — the router's own profile | [#16](https://github.com/danielpolok/langchain-llm-router/issues/16) |
+| **Strategies** | | |
+| T-130 | Ready-made strategy: keyword | [#17](https://github.com/danielpolok/langchain-llm-router/issues/17) |
+| T-131 | Ready-made strategy: heuristic | [#18](https://github.com/danielpolok/langchain-llm-router/issues/18) |
+| T-132 | Configurable strategy component | [#19](https://github.com/danielpolok/langchain-llm-router/issues/19) |
+| T-133 | Opt-in strategy: embedding similarity | [#20](https://github.com/danielpolok/langchain-llm-router/issues/20) |
+| T-134 | Opt-in strategy: small-LLM classifier | [#21](https://github.com/danielpolok/langchain-llm-router/issues/21) |
+| **Benchmark** | | |
+| T-140 | Cost/quality benchmark | [#22](https://github.com/danielpolok/langchain-llm-router/issues/22) |
+| T-141 | Measure provider prompt-caching loss from route switching | [#23](https://github.com/danielpolok/langchain-llm-router/issues/23) |
+| **Docs, packaging, adoption** | | |
+| T-150 | Documentation | [#24](https://github.com/danielpolok/langchain-llm-router/issues/24) |
+| T-151 | Packaging and publishing | [#25](https://github.com/danielpolok/langchain-llm-router/issues/25) |
+| T-160 | First real-application adoption | [#26](https://github.com/danielpolok/langchain-llm-router/issues/26) |
+
+## Archive — closed tasks
+
+Closed tasks from before the move stay here as files: T-003 and T-004 hold the spike verdicts that
+[docs/spike-findings.md](../docs/spike-findings.md) cites.
+
+### v0 — prove the principles (PRD §6)
 
 | ID | Task | Principles | Depends on | Status |
 | --- | --- | --- | --- | --- |
@@ -32,59 +98,11 @@ again after the spike.
 T-003 and T-004 are `done`; their one credential-gated criterion each has since run — a
 real-provider pass (Gemini, cloud; Ollama, local) and a live LangSmith trace. **v0 is closed.**
 
-## v1 — build, benchmark, ship (PRD §9)
-
-### Requirements
+### v1 — requirements
 
 | ID | Task | Principles | Depends on | Status |
 | --- | --- | --- | --- | --- |
 | [T-101](T-101-v1-requirements.md) | v1 detailed requirements | all | T-005 | done |
-
-T-101 produced [docs/v1-requirements.md](../docs/v1-requirements.md): 63 `REQ-` requirements
-covering all 21 principles, nine settled rules (D1–D9, now PRD §11) and one new task, T-121.
-D9 — how a strategy's own model calls are traced — was added after T-101 closed.
-
-### Core router
-
-| ID | Task | Principles | Depends on | Status |
-| --- | --- | --- | --- | --- |
-| [T-110](T-110-routes-and-default-route.md) | Named routes, the default route and the public API | R5, R9, R2 | T-101 | todo |
-| [T-111](T-111-strategy-interface.md) | Strategy interface | R6, R4, R7 | T-101 | todo |
-| [T-112](T-112-request-extraction.md) | Current-request extraction | R4, C7 | T-111 | todo |
-| [T-113](T-113-calling-conventions.md) | Sync, async, streaming and batch | C2, R1 | T-110, T-111 | todo |
-| [T-114](T-114-decision-record.md) | Routing decision record | R1, R2 | T-110 | todo |
-| [T-115](T-115-tool-aware-routing.md) | Tool-aware routing | R10, C3, R2 | T-110, T-114 | todo |
-| [T-116](T-116-forced-routes.md) | Forced routes via runtime config | C4, R11, R2 | T-110, T-114, T-115 | todo |
-| [T-117](T-117-tracing-and-cost.md) | Tracing and cost attribution | C5, R3 | T-113, T-114 | todo |
-| [T-118](T-118-error-semantics.md) | Error semantics — leave retries and fallbacks to LangChain | C6, R9 | T-110 | todo |
-| [T-119](T-119-response-cache.md) | Response cache correctness | C10 | T-115, T-116 | todo |
-| [T-120](T-120-compatibility-suite.md) | LangChain compatibility suite | C1, C8, C9 | T-113, T-115–T-119, T-121 | todo |
-| [T-121](T-121-capability-reporting.md) | Capability reporting — the router's own profile | C3, C1, R10 | T-110, T-115 | todo |
-
-### Strategies
-
-| ID | Task | Principles | Depends on | Status |
-| --- | --- | --- | --- | --- |
-| [T-130](T-130-keyword-strategy.md) | Ready-made strategy: keyword | R6, R7, R8 | T-111, T-112 | todo |
-| [T-131](T-131-heuristic-strategy.md) | Ready-made strategy: heuristic | R6, R7, R8 | T-111, T-112 | todo |
-| [T-132](T-132-configurable-strategy.md) | Configurable strategy component | R6, R7 | T-111, T-112 | todo |
-| [T-133](T-133-embedding-strategy.md) | Opt-in strategy: embedding similarity | R6, R7, R8, R3 | T-111, T-112, T-117 | todo |
-| [T-134](T-134-classifier-strategy.md) | Opt-in strategy: small-LLM classifier | R6, R7, R3, R9 | T-111, T-112, T-117 | todo |
-
-### Benchmark
-
-| ID | Task | Principles | Depends on | Status |
-| --- | --- | --- | --- | --- |
-| [T-140](T-140-benchmark.md) | Cost/quality benchmark | R3, R7 | T-120, T-130, T-131 | todo |
-| [T-141](T-141-prompt-cache-impact.md) | Measure provider prompt-caching loss from route switching | R3 | T-140 | todo |
-
-### Docs, packaging, adoption
-
-| ID | Task | Principles | Depends on | Status |
-| --- | --- | --- | --- | --- |
-| [T-150](T-150-documentation.md) | Documentation | C8, R6 | T-120, T-130–T-132 | todo |
-| [T-151](T-151-packaging.md) | Packaging and publishing | C9, R8 | T-120 | todo |
-| [T-160](T-160-first-adoption.md) | First real-application adoption | — | T-120 | todo |
 
 ## Backlog — not broken down yet
 

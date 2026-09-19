@@ -52,7 +52,7 @@ owning task, and eight settled rules **D1–D8**, recorded in PRD §11:
 | D7 | The `route` configurable key |
 | D8 | The decision record schema, on exactly one streamed chunk |
 
-**One new task: [T-121](T-121-capability-reporting.md)** — the router must report a `profile`
+**One new task: [T-121](https://github.com/danielpolok/langchain-llm-router/issues/16)** — the router must report a `profile`
 (the intersection of its routes'), because `create_agent` picks a structured-output strategy from
 it. T-115 reads routes' profiles and T-120 tests placement; nobody owned the router reporting its
 own.

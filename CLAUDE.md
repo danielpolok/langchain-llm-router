@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project state
 
 v1, starting. The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered
-requirements v1 builds to), `tasks/` (the work breakdown), a still-empty package
+requirements v1 builds to), `tasks/` (tracking rules and closed tasks — open work is in GitHub
+Issues), a still-empty package
 `src/langchain_llm_router/` (v1 code goes here) and `spike/` (throwaway spike code and its tests —
 never import it from `src/`).
 
@@ -78,10 +79,20 @@ optimisation, hosted proxy, replacing `@wrap_model_call` agent middleware.
 
 ## Tasks
 
-`tasks/README.md` is the index; each `tasks/T-NNN-*.md` has front matter (`status`, `principles`,
-`depends_on`). Pick the lowest-numbered `todo` whose dependencies are `done`, and update `status`
-in both the task file and the index. Each v1 task names the `REQ-` requirements it owns; they are
-the acceptance criteria.
+Open tasks are **GitHub issues** in milestone `v1`, titled `T-NNN · Title`; `tasks/README.md` holds
+the rules, a task-ID → issue lookup and the archive of closed tasks (T-001–T-005, T-101), which stay
+as files. Status is the issue's own state — open/unassigned is todo, assigned is in progress,
+closed is done — and dependencies are native *blocked by* links. Pick the lowest-numbered issue
+that is open, unassigned and unblocked:
+
+```bash
+gh issue list --milestone v1 --search "-is:blocked no:assignee" --json number,title
+```
+
+Read the task with `gh issue view <N>`, assign yourself (`gh issue edit <N> --add-assignee @me`),
+and put `Closes #<N>` in the PR. Each task names the `REQ-` requirements it owns; they are the
+acceptance criteria. Requirements change in `docs/v1-requirements.md` through a PR, never in an
+issue thread; update the affected issues once it merges.
 
 ## Tooling
 
