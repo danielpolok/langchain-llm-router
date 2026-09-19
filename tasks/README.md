@@ -1,7 +1,8 @@
 # Tasks
 
-Work breakdown for `ChatRouter`. **Open work lives in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues?q=is%3Aissue+milestone%3Av1);
-this directory keeps the rules and the archive of closed tasks.**
+Work breakdown for `ChatRouter`. **Open work lives in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues?q=is%3Aissue+milestone%3Av1),
+tracked on the [v1 Project board](https://github.com/users/danielpolok/projects/2); this directory keeps the rules and the archive of
+closed tasks.**
 
 The split: what the router *is* and *must do* stays in the repo, where it changes through reviewed
 PRs — [PRD.md](../PRD.md) (principles and settled decisions) and
@@ -20,20 +21,36 @@ PRs close it.
   `core`, `strategies`, `benchmark` or `ship`.
 - **Dependencies** are GitHub's native *blocked by* links, not text. An issue with an open blocker
   shows as *Blocked*.
-- **Status is the issue's own state, and nothing else:**
+- **Status is the board's *Status* field** — one place, kept in step with the issue by the
+  project's built-in workflows:
 
-  | Status | On GitHub |
+  | Status | How it gets there |
   | --- | --- |
-  | todo | open, unassigned |
-  | in progress | open, assigned (a PR says `Closes #N`) |
-  | blocked | open, with an open *blocked by* link |
-  | done | closed as *completed* — usually by its PR merging |
-  | dropped | closed as *not planned*, with a comment saying why |
+  | Todo | adding the issue to the board |
+  | In Progress | set it when you start (below) |
+  | Done | closing the issue or merging its PR — and setting *Done* closes the issue |
+  | *blocked* | not a column: the issue's native *blocked by* link |
+  | *dropped* | close as *not planned* with a comment saying why, then archive the item |
+
+  The board also has an **Area** field (core / strategies / benchmark / ship) matching the
+  `area:` labels.
 
 - **Picking work:** the lowest-numbered open, unassigned, unblocked `v1` issue.
 
   ```bash
   gh issue list --milestone v1 --search "-is:blocked no:assignee" --json number,title
+  ```
+
+- **Starting it:** assign yourself and move it to *In Progress*. The IDs are the board's and are
+  stable.
+
+  ```bash
+  N=5  # the issue number
+  gh issue edit $N --add-assignee @me
+  ITEM=$(gh project item-list 2 --owner danielpolok --limit 200 --format json \
+    -q ".items[] | select(.content.number == $N) | .id")
+  gh project item-edit --project-id PVT_kwHOBHhDIc4Bj_bT --id "$ITEM" \
+    --field-id PVTSSF_lAHOBHhDIc4Bj_bTzhixvIU --single-select-option-id 47fc9ee4
   ```
 
 - **The PRD wins.** If a task's findings contradict a principle, amend the PRD and record the
@@ -42,11 +59,12 @@ PRs close it.
   When a requirement changes, the PR changes `docs/v1-requirements.md`; the affected issues are
   edited to match once it merges — the one step the old in-repo task files did atomically.
 - **Adding a task:** take the next free ID in its phase range, open the issue in the format above,
-  and add its row to the lookup below.
+  add it to the board (`gh project item-add 2 --owner danielpolok --url <issue URL>`) and set its
+  Area, then add its row to the lookup below.
 
 ## v1 — task ID → issue
 
-A lookup only — status is on the issue.
+A lookup only — status is on the board.
 
 | ID | Task | Issue |
 | --- | --- | --- |

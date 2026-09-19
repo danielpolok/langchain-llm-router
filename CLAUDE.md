@@ -81,16 +81,16 @@ optimisation, hosted proxy, replacing `@wrap_model_call` agent middleware.
 
 Open tasks are **GitHub issues** in milestone `v1`, titled `T-NNN · Title`; `tasks/README.md` holds
 the rules, a task-ID → issue lookup and the archive of closed tasks (T-001–T-005, T-101), which stay
-as files. Status is the issue's own state — open/unassigned is todo, assigned is in progress,
-closed is done — and dependencies are native *blocked by* links. Pick the lowest-numbered issue
-that is open, unassigned and unblocked:
+as files. Status is the *Status* field on the [v1 Project board](https://github.com/users/danielpolok/projects/2)
+(Todo / In Progress / Done; closing the issue moves it to Done), and dependencies are native
+*blocked by* links. Pick the lowest-numbered issue that is open, unassigned and unblocked:
 
 ```bash
 gh issue list --milestone v1 --search "-is:blocked no:assignee" --json number,title
 ```
 
-Read the task with `gh issue view <N>`, assign yourself (`gh issue edit <N> --add-assignee @me`),
-and put `Closes #<N>` in the PR. Each task names the `REQ-` requirements it owns; they are the
+Read the task with `gh issue view <N>`, then assign yourself and move it to *In Progress* — the
+exact commands are under *Starting it* in `tasks/README.md` — and put `Closes #<N>` in the PR. Each task names the `REQ-` requirements it owns; they are the
 acceptance criteria. Requirements change in `docs/v1-requirements.md` through a PR, never in an
 issue thread; update the affected issues once it merges.
 
