@@ -11,8 +11,8 @@ several candidate chat models and returns that model's response.
 > [!WARNING]
 > **Pre-alpha — nothing to install yet.** The design is settled and its riskiest parts have been
 > proven in a spike, but the package ships no implementation and is not on PyPI. The examples below
-> show the **planned** API; names can still change until the v1 requirements are written. See
-> [Project status](#-project-status).
+> show the API as [the v1 requirements](docs/v1-requirements.md) pin it; nothing is a compatibility
+> guarantee until the first release. See [Project status](#-project-status).
 
 ## Quick Install
 
@@ -47,9 +47,12 @@ back its response unchanged, plus a record of which route was taken and why.
 ## 📖 Documentation
 
 - [PRD.md](PRD.md) — what the router is and the principles it holds to (C1–C10, R1–R11).
+- [docs/v1-requirements.md](docs/v1-requirements.md) — the public API, the decision record, and every
+  principle as a numbered, testable requirement.
 - [docs/spike-findings.md](docs/spike-findings.md) — what the v0 spike proved and the caveats carried
   into v1.
-- [tasks/](tasks/README.md) — the work breakdown.
+- [Issues](https://github.com/danielpolok/langchain-llm-router/issues?q=is%3Aissue+milestone%3Av1) — the open work; [tasks/](tasks/README.md) holds the
+  tracking rules and the archive of closed tasks.
 - [LangChain docs](https://docs.langchain.com/oss/python/langchain/models) — chat models, tools,
   structured output and middleware.
 
@@ -162,13 +165,18 @@ from langchain_core.prompts import ChatPromptTemplate
 
 prompt = ChatPromptTemplate.from_messages(
     [
-        ("system", "You are a helpful assistant that translates {input_language} to {output_language}."),
+        (
+            "system",
+            "You are a helpful assistant that translates {input_language} to {output_language}.",
+        ),
         ("human", "{input}"),
     ]
 )
 
 chain = prompt | router
-chain.invoke({"input_language": "English", "output_language": "German", "input": "I love programming."})
+chain.invoke(
+    {"input_language": "English", "output_language": "German", "input": "I love programming."}
+)
 ```
 
 ## Agents
@@ -223,13 +231,17 @@ to different models loses the cached prefix.
 - Cost is counted exactly once while the real model call stays in the trace, once the router's own
   run is a chain run rather than a model run.
 
-**Next:** the v1 requirements ([T-101](tasks/T-101-v1-requirements.md)), then the core router,
-built-in strategies, a cost/quality benchmark and a PyPI release.
+**v1 is under way.** [T-101](tasks/T-101-v1-requirements.md) turned the principles into 63 numbered
+requirements in [docs/v1-requirements.md](docs/v1-requirements.md) and settled the nine rules they
+left open (PRD §11).
+
+**Next:** the core router ([T-110](https://github.com/danielpolok/langchain-llm-router/issues/5) onward), built-in
+strategies, a cost/quality benchmark and a PyPI release.
 
 ## 📕 Releases & Versioning
 
 Unreleased — `pyproject.toml` pins the placeholder version `0.0.0`. There is no PyPI release, no
-changelog and no versioning policy yet; both are [T-151](tasks/T-151-packaging.md)'s job, including
+changelog and no versioning policy yet; both are [T-151](https://github.com/danielpolok/langchain-llm-router/issues/25)'s job, including
 the stability promise for the strategy interface (R6). Until then, nothing here is a compatibility
 guarantee.
 
@@ -253,7 +265,7 @@ Tests that call real providers skip unless their credentials or server are avail
 `GEMINI_API_KEY` for Gemini, a reachable local Ollama server for Ollama (a `.env` file is loaded).
 Offline tests use fake chat models.
 
-Work is tracked in [tasks/](tasks/README.md); reference principles by their PRD ID (e.g. `R4`, `C10`)
+Work is tracked in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues) (rules in [tasks/](tasks/README.md)); reference principles by their PRD ID (e.g. `R4`, `C10`)
 in code, tests and commits.
 
 ## License

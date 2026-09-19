@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-v0. The repo holds `PRD.md` (v0: principles, no implementation), `tasks/` (the work breakdown
-derived from it), an empty package `src/langchain_llm_router/` (v1 code goes here, from T-101's
-requirements) and `spike/` (throwaway spike code and its tests — never import it from
-`src/`).
+v1, starting. The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered
+requirements v1 builds to), `tasks/` (tracking rules and closed tasks — open work is in GitHub
+Issues), a still-empty package
+`src/langchain_llm_router/` (v1 code goes here) and `spike/` (throwaway spike code and its tests —
+never import it from `src/`).
 
 ## Commands
 
@@ -41,7 +42,10 @@ is a chain run rather than a model run — the one design decision the spike for
 that answers each. Don't re-debate settled decisions in PRD §11.
 
 **v0 is closed.** The real-provider run (T-003, Gemini + Ollama) and the LangSmith trace (T-004)
-have both run. The next task is T-101 (v1 requirements).
+have both run. **T-101 is done too:** `docs/v1-requirements.md` holds the public API, the decision
+record schema, and all 21 principles as numbered `REQ-` requirements with a testable check each.
+Read it before any v1 code — it, not the spike, is what T-110 onward build. The nine rules it
+settled are D1–D9 in PRD §11; don't re-decide them. The next task is T-110.
 
 ## What is being built
 
@@ -75,10 +79,20 @@ optimisation, hosted proxy, replacing `@wrap_model_call` agent middleware.
 
 ## Tasks
 
-`tasks/README.md` is the index; each `tasks/T-NNN-*.md` has front matter (`status`, `principles`,
-`depends_on`). Pick the lowest-numbered `todo` whose dependencies are `done`, and update `status`
-in both the task file and the index. v1 tasks (T-1xx) are provisional until T-101 writes the
-detailed requirements.
+Open tasks are **GitHub issues** in milestone `v1`, titled `T-NNN · Title`; `tasks/README.md` holds
+the rules, a task-ID → issue lookup and the archive of closed tasks (T-001–T-005, T-101), which stay
+as files. Status is the *Status* field on the [v1 Project board](https://github.com/users/danielpolok/projects/2)
+(Todo / In Progress / Done; closing the issue moves it to Done), and dependencies are native
+*blocked by* links. Pick the lowest-numbered issue that is open, unassigned and unblocked:
+
+```bash
+gh issue list --milestone v1 --search "-is:blocked no:assignee" --json number,title
+```
+
+Read the task with `gh issue view <N>`, then assign yourself and move it to *In Progress* — the
+exact commands are under *Starting it* in `tasks/README.md` — and put `Closes #<N>` in the PR. Each task names the `REQ-` requirements it owns; they are the
+acceptance criteria. Requirements change in `docs/v1-requirements.md` through a PR, never in an
+issue thread; update the affected issues once it merges.
 
 ## Tooling
 

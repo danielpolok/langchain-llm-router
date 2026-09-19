@@ -2,7 +2,7 @@
 id: T-004
 title: "Spike: cost counted once, real call still traced (R3 vs C5)"
 phase: v0
-status: blocked
+status: done
 principles: [R3, C5, R1]
 depends_on: [T-002]
 prd: ["§6", "§8"]

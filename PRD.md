@@ -1,6 +1,6 @@
 # PRD — `ChatRouter`: in-process model routing for LangChain
 
-**Owner:** Daniel Polok · **Phase:** v0 — complete · **Updated:** 2026-09-14
+**Owner:** Daniel Polok · **Phase:** v1 — in progress · **Updated:** 2026-09-17
 
 ---
 
@@ -103,7 +103,11 @@ v0 is done when:
 hold** once the router's own run is a chain run rather than a model run (§11). §3 was reread line
 by line and stands as written. §10 has none open. Both credential-gated checks have run: a
 real-provider pass (Gemini, cloud; Ollama, local — T-003) and a live LangSmith trace showing one
-`chain` run wrapping one `llm` run, priced once (T-004). Next: T-101 (v1 requirements).
+`chain` run wrapping one `llm` run, priced once (T-004).
+
+**v1 began on 2026-09-17.** T-101 turned §3 into 63 numbered requirements in
+[docs/v1-requirements.md](docs/v1-requirements.md) and settled the nine rules the principles
+left open (D1–D9 in §11). Next: T-110 (the public API and routes).
 
 ## 7. Success metrics
 
@@ -154,8 +158,25 @@ _None open._ Q1–Q3 were answered on 2026-09-11 and folded into **R10** (non-to
 | Static policy first | Learning from traffic needs a feedback signal that doesn't exist yet. |
 | Route on the current user request by default | Surveyed RouteLLM, LiteLLM, semantic-router and LangChain's middleware example: routing on the last message or on conversation length misroutes agent conversations (R4). |
 | Divert non-tool routes, with warnings — don't refuse | Keeps tool-calling requests working instead of failing them; the warnings keep every diversion visible (R10). |
-| Response cache is the router's concern; provider prompt caching is not | LangChain's cache is in-process and keyed on the router, so the router must keep it correct (C10). Provider prompt caching is outside its control — only its hit rate is affected (§8). |
+| Response cache is the router's concern; provider prompt caching is not | LangChain's response cache is in-process, so keeping it correct is the router's job (C10) — **how** was settled later, by D4: the route owns the cache and the router rejects a `cache=` of its own. Provider prompt caching is outside its control — only its hit rate is affected (§8). |
 | Ready-made strategies plus from-scratch configuration | A fast start for common setups, full control when needed, custom code as the escape hatch (R6). |
 | A default route is mandatory | The router always answers: a strategy that fails or can't decide degrades to the default model instead of failing the request (R9). |
 | Forced routes error by default, configurable | An explicit choice shouldn't be silently overridden — otherwise experiments compare the wrong model. Falling back instead is available as a setting (R11). |
 | The router's own run is a chain run, not a model run | While the router emits a model run too, the same tokens are billed twice (R3) and the streamed route call vanishes from the trace. A chain run that delegates leaves the selected route's call as the only model run, so cost stays exact and the real call stays traced (C5). Settled by the T-004 spike; R3 and C5 do not conflict. |
+
+### Settled by T-101 (2026-09-17)
+
+The rules the principles left open, decided while writing
+[docs/v1-requirements.md](docs/v1-requirements.md). Referenced there as D1–D9. D9 was added on 2026-09-19, after T-101 closed.
+
+| # | Decision | Why |
+| --- | --- | --- |
+| D1 | A request diverted off a tool-incapable route goes to the default route if it can use tools, otherwise the first tool-capable route in declaration order (R10) | Deterministic and explainable. Re-running the strategy would spend a call under the opt-in strategies (R7) and could divert in a loop. |
+| D2 | A forced route skips the strategy entirely (R11) | A forced route is not a suggestion, and running a strategy whose answer is discarded costs money and trace space under T-133/T-134. |
+| D3 | The decision always reaches the trace (placement per D9); on messages it reaches `response_metadata`, and under `with_structured_output` only when `include_raw=True` (R2) | A parsed Pydantic object has nowhere to carry it (T-003 caveat). The trace is the one placement always available; `last_routing_decision()` covers the parsed-only path. |
+| D4 | The route owns response caching; the router's own `cache=` is rejected at construction (C10) | The router delegates from `invoke`/`stream`, so its own `_generate_with_cache` never runs. The key is the route's, so "never reused for a different route" holds structurally instead of by arithmetic the router maintains. |
+| D5 | Tool capability is `profile["tool_calling"]`, else whether the route overrides `BaseChatModel.bind_tools`, with a per-route override that wins (R10) | The base `bind_tools` raises only at call time — the late failure R10 exists to pre-empt — and `profile` is beta, so it can't be the only signal. |
+| D6 | One strategy interface: `decide`/`adecide` over a `RoutingRequest`, `None` meaning "can't decide"; wider context only when the strategy declares it (R6, R4) | R6's three levels must be one interface, and R4's default must be the current request with more context an opt-in. |
+| D7 | Forced routes travel under the configurable key `route`, declared through `config_specs` (C4) | Makes `with_config`, `config={"configurable": …}` and config-schema introspection work through the standard mechanism. |
+| D8 | The decision record is six fields, and exactly one streamed chunk carries it (R2) | `merge_dicts` concatenates a string repeated across chunks, so a record on every chunk aggregates to `"frontierfrontier…"`. |
+| D9 | The router opens its run before it decides; the strategy runs in a child run of its own and receives that run's config as `RoutingRequest.config`, which built-in strategies pass on every call. The decision goes on the strategy run's output, the router run's output and the route run's metadata (C5, R3) | A strategy that calls a model needs a parent run, and deciding before the run existed left the classifier's call un-nested — R3's "costed to the strategy's own model" couldn't be seen in a trace. Below Python 3.11 an async call must be handed its config for callbacks to propagate (LangChain docs), and the package supports 3.10, so the config is passed explicitly rather than left to context propagation. |
