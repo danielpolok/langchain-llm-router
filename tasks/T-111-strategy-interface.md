@@ -14,7 +14,7 @@ prd: ["§3.2", "§4", "§11"]
 
 The one small, stable interface every strategy implements — ready-made, configured or custom (R6).
 
-Requirements: **REQ-R6-1, REQ-R6-2, REQ-R4-3**
+Requirements: **REQ-R6-1, REQ-R6-2, REQ-R6-5, REQ-R4-3**
 ([v1 requirements](../docs/v1-requirements.md)).
 
 ## Scope
@@ -27,6 +27,10 @@ Requirements: **REQ-R6-1, REQ-R6-2, REQ-R4-3**
   blocks an async caller (C2); strategies that call models override it properly (T-133, T-134).
 - Wider context only when the strategy sets `wants_full_context` — otherwise `messages` is `None`
   (R4).
+- `RoutingRequest.config` carries the strategy run's child config (D9), excluded from the request's
+  equality and repr. It's how a strategy's own model calls get traced and costed under the
+  strategy's run — and on Python 3.10 async it's the *only* way, so the built-ins always pass it.
+  T-111 defines the field; T-117 opens the run it points at.
 - A plain callable passed as `strategy=` is coerced to a `RoutingStrategy` at construction, and a
   bare route-name string return is accepted.
 - Document the interface and state its stability promise (the promise is enforced at T-151).
@@ -38,3 +42,4 @@ Requirements: **REQ-R6-1, REQ-R6-2, REQ-R4-3**
 - [ ] The built-in strategies (T-130–T-134) implement this interface with no private hooks.
 - [ ] Sync and async paths are both tested, including the executor default.
 - [ ] `messages` is `None` unless the strategy opts in.
+- [ ] Two requests with the same content but different `config` compare equal.

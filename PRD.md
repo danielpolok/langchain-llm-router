@@ -105,9 +105,9 @@ by line and stands as written. §10 has none open. Both credential-gated checks 
 real-provider pass (Gemini, cloud; Ollama, local — T-003) and a live LangSmith trace showing one
 `chain` run wrapping one `llm` run, priced once (T-004).
 
-**v1 began on 2026-09-17.** T-101 turned §3 into 61 numbered requirements in
-[docs/v1-requirements.md](docs/v1-requirements.md) and settled the eight rules the principles
-left open (D1–D8 in §11). Next: T-110 (the public API and routes).
+**v1 began on 2026-09-17.** T-101 turned §3 into 63 numbered requirements in
+[docs/v1-requirements.md](docs/v1-requirements.md) and settled the nine rules the principles
+left open (D1–D9 in §11). Next: T-110 (the public API and routes).
 
 ## 7. Success metrics
 
@@ -167,15 +167,16 @@ _None open._ Q1–Q3 were answered on 2026-09-11 and folded into **R10** (non-to
 ### Settled by T-101 (2026-09-17)
 
 The rules the principles left open, decided while writing
-[docs/v1-requirements.md](docs/v1-requirements.md). Referenced there as D1–D8.
+[docs/v1-requirements.md](docs/v1-requirements.md). Referenced there as D1–D9. D9 was added on 2026-09-19, after T-101 closed.
 
 | # | Decision | Why |
 | --- | --- | --- |
 | D1 | A request diverted off a tool-incapable route goes to the default route if it can use tools, otherwise the first tool-capable route in declaration order (R10) | Deterministic and explainable. Re-running the strategy would spend a call under the opt-in strategies (R7) and could divert in a loop. |
 | D2 | A forced route skips the strategy entirely (R11) | A forced route is not a suggestion, and running a strategy whose answer is discarded costs money and trace space under T-133/T-134. |
-| D3 | The decision always reaches the chain run's metadata; on messages it reaches `response_metadata`, and under `with_structured_output` only when `include_raw=True` (R2) | A parsed Pydantic object has nowhere to carry it (T-003 caveat). The trace is the one placement always available; `last_routing_decision()` covers the parsed-only path. |
+| D3 | The decision always reaches the trace (placement per D9); on messages it reaches `response_metadata`, and under `with_structured_output` only when `include_raw=True` (R2) | A parsed Pydantic object has nowhere to carry it (T-003 caveat). The trace is the one placement always available; `last_routing_decision()` covers the parsed-only path. |
 | D4 | The route owns response caching; the router's own `cache=` is rejected at construction (C10) | The router delegates from `invoke`/`stream`, so its own `_generate_with_cache` never runs. The key is the route's, so "never reused for a different route" holds structurally instead of by arithmetic the router maintains. |
 | D5 | Tool capability is `profile["tool_calling"]`, else whether the route overrides `BaseChatModel.bind_tools`, with a per-route override that wins (R10) | The base `bind_tools` raises only at call time — the late failure R10 exists to pre-empt — and `profile` is beta, so it can't be the only signal. |
 | D6 | One strategy interface: `decide`/`adecide` over a `RoutingRequest`, `None` meaning "can't decide"; wider context only when the strategy declares it (R6, R4) | R6's three levels must be one interface, and R4's default must be the current request with more context an opt-in. |
 | D7 | Forced routes travel under the configurable key `route`, declared through `config_specs` (C4) | Makes `with_config`, `config={"configurable": …}` and config-schema introspection work through the standard mechanism. |
 | D8 | The decision record is six fields, and exactly one streamed chunk carries it (R2) | `merge_dicts` concatenates a string repeated across chunks, so a record on every chunk aggregates to `"frontierfrontier…"`. |
+| D9 | The router opens its run before it decides; the strategy runs in a child run of its own and receives that run's config as `RoutingRequest.config`, which built-in strategies pass on every call. The decision goes on the strategy run's output, the router run's output and the route run's metadata (C5, R3) | A strategy that calls a model needs a parent run, and deciding before the run existed left the classifier's call un-nested — R3's "costed to the strategy's own model" couldn't be seen in a trace. Below Python 3.11 an async call must be handed its config for callbacks to propagate (LangChain docs), and the package supports 3.10, so the config is passed explicitly rather than left to context propagation. |

@@ -21,8 +21,9 @@ Requirements: **REQ-R1-1, REQ-R2-1, REQ-R2-2, REQ-R2-4**
 ## Scope
 
 - The six-field `RoutingDecision` schema (D8): `route`, `reason`, `strategy`, `fallback`, `forced`,
-  `diverted_from`. It rides under `response_metadata["routing"]` and, as the same dict, in the
-  router's chain-run metadata (C5).
+  `diverted_from`. It rides under `response_metadata["routing"]` and, as the same dict, on the
+  trace as D9 places it: the strategy run's output, the router run's output and the route run's
+  metadata (C5). Not the router run's start metadata — the router run now starts before deciding.
 - `routing_decision(message)` reads it back off a response.
 - Structured output (D3): the parsed object has nowhere to carry a record, so the chain run always
   has it, `include_raw=True` puts it on the raw message, and `last_routing_decision()` — a context

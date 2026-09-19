@@ -26,7 +26,9 @@ Requirements: **REQ-C1-1, REQ-C1-2, REQ-C1-3, REQ-C8-1, REQ-C9-1**
   LangGraph node, message-history wrapper.
 - C8: coexists with `@wrap_model_call` middleware inside `create_agent` — both run, neither
   interferes.
-- C9: CI matrix on the minimum supported and the latest `langchain-core` 1.x.
+- C9: CI matrix on the minimum supported and the latest `langchain-core` 1.x, and on the lowest
+  and highest supported Python (3.10, 3.13) — 3.10 is where async callback propagation differs
+  (D9).
 
 ## Acceptance criteria
 

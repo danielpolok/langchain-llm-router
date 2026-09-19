@@ -59,3 +59,16 @@ own.
 
 D4 supersedes the mechanism in an earlier §11 row ("keyed on the router"); that row was amended
 rather than left to contradict.
+
+## Amended 2026-09-19 — D9
+
+Found after close: a strategy that calls a model had no parent run to nest under, because the
+spike's design decided *before* opening the router's run — and below Python 3.11 an async call
+doesn't propagate callbacks unless handed its config. **D9** settles it: the router opens its run
+first, the strategy runs in a child run and receives that run's config as
+`RoutingRequest.config`, and the decision moves from the router run's start metadata to the
+strategy run's output, the router run's output and the route run's metadata. Two requirements
+added (REQ-C5-5, REQ-R6-5; 63 in total), REQ-C5-1, REQ-R2-2 and REQ-R3-2 reworded, and T-111,
+T-114, T-117, T-120, T-133, T-134 and T-140 updated. REQ-R3-2 was narrowed on the way:
+LangChain's `Embeddings` emits no callbacks and reports no usage, so embedding cost can only be
+estimated, not measured.

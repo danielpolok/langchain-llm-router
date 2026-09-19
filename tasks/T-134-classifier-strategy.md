@@ -23,11 +23,12 @@ Requirements: **REQ-R7-2**, **REQ-R3-2** ([v1 requirements](../docs/v1-requireme
 - The application supplies the classifier chat model; route descriptions drive the prompt; output
   is constrained to route names (structured output where available).
 - The classifier's cost is real: traced as its own run and attributed to the classifier model —
-  never to the router or the answering route (R3, T-117).
+  never to the router or the answering route (R3, T-117). Every classifier call passes
+  `request.config` (D9), sync and async — without it the call doesn't nest on Python 3.10 async.
 - Unparseable output, unknown route, timeout or error → default route with a warning (R9).
 
 ## Acceptance criteria
 
 - [ ] Offline tests with a fake classifier cover valid, invalid and failing outputs.
 - [ ] The trace shows the classifier run, the decision and the answering run as separate,
-      correctly costed runs.
+      correctly costed runs — the classifier run inside the strategy run, on Python 3.10 and 3.12.

@@ -24,11 +24,17 @@ Requirements: **REQ-R7-2**, **REQ-R3-2** ([v1 requirements](../docs/v1-requireme
 - Example utterances per route; a similarity threshold below which the strategy can't decide
   (→ default route, R9).
 - Route examples are embedded once, not per request; async path included.
-- Embedding calls are traced and costed as their own runs (T-117).
+- Embedding calls are traced as their own runs, nested in the strategy run (T-117, D9). LangChain's
+  `Embeddings` is a plain ABC — no callbacks, no `config`, no usage — so its calls are invisible
+  to tracing unless the strategy opens a child run from `request.config` around each one. Do
+  that, recording the input length on the run.
+- Cost can't be measured through the interface, only estimated from input length. Record the
+  estimate method; T-140 uses it for strategy overhead.
 - Embedding failure → default route with a warning (R9).
 
 ## Acceptance criteria
 
 - [ ] It can't be enabled implicitly; construction requires the embeddings instance.
+- [ ] Each per-request embedding call appears as a child run of the strategy run, sync and async.
 - [ ] Offline tests with fake embeddings (e.g. `DeterministicFakeEmbedding`); one integration test
       with real embeddings.

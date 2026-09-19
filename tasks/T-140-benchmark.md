@@ -22,6 +22,8 @@ quality** on a mixed workload — and settle whether heuristic strategies are en
 - Baseline: always-frontier. Compare strategies: keyword, heuristic and — if built — embedding and
   classifier.
 - Cost from recorded usage × price, including strategy overhead (embedding / classifier calls).
+  Embedding calls report no usage through LangChain's `Embeddings`, so their overhead is the
+  input-length estimate from T-133.
 - Quality via an evaluation method fixed up front (e.g. LangSmith evals). A judge model evaluates;
   it never routes.
 - Reproducible: pinned models, a versioned dataset, one command to rerun.

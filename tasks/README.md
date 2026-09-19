@@ -13,7 +13,7 @@ Work breakdown for `ChatRouter`, derived from [PRD.md](../PRD.md). One file per 
 - **The PRD wins.** If a task's findings contradict a principle, amend the PRD and record the
   decision in §11 — don't let the code quietly diverge.
 - **Requirements live in [docs/v1-requirements.md](../docs/v1-requirements.md).** T-101 turned the
-  §3 principles into numbered `REQ-` requirements and settled the rules they left open (D1–D8,
+  §3 principles into numbered `REQ-` requirements and settled the rules they left open (D1–D9,
   recorded in PRD §11). Each v1 task names the requirements it owns; don't re-decide them.
 
 ## v0 — prove the principles (PRD §6)
@@ -40,8 +40,9 @@ real-provider pass (Gemini, cloud; Ollama, local) and a live LangSmith trace. **
 | --- | --- | --- | --- | --- |
 | [T-101](T-101-v1-requirements.md) | v1 detailed requirements | all | T-005 | done |
 
-T-101 produced [docs/v1-requirements.md](../docs/v1-requirements.md): 61 `REQ-` requirements
-covering all 21 principles, eight settled rules (D1–D8, now PRD §11) and one new task, T-121.
+T-101 produced [docs/v1-requirements.md](../docs/v1-requirements.md): 63 `REQ-` requirements
+covering all 21 principles, nine settled rules (D1–D9, now PRD §11) and one new task, T-121.
+D9 — how a strategy's own model calls are traced — was added after T-101 closed.
 
 ### Core router
 

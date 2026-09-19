@@ -43,8 +43,8 @@ that answers each. Don't re-debate settled decisions in PRD §11.
 **v0 is closed.** The real-provider run (T-003, Gemini + Ollama) and the LangSmith trace (T-004)
 have both run. **T-101 is done too:** `docs/v1-requirements.md` holds the public API, the decision
 record schema, and all 21 principles as numbered `REQ-` requirements with a testable check each.
-Read it before any v1 code — it, not the spike, is what T-110 onward build. The eight rules it
-settled are D1–D8 in PRD §11; don't re-decide them. The next task is T-110.
+Read it before any v1 code — it, not the spike, is what T-110 onward build. The nine rules it
+settled are D1–D9 in PRD §11; don't re-decide them. The next task is T-110.
 
 ## What is being built
 

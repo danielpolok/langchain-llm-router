@@ -230,8 +230,8 @@ to different models loses the cached prefix.
 - Cost is counted exactly once while the real model call stays in the trace, once the router's own
   run is a chain run rather than a model run.
 
-**v1 is under way.** [T-101](tasks/T-101-v1-requirements.md) turned the principles into 61 numbered
-requirements in [docs/v1-requirements.md](docs/v1-requirements.md) and settled the eight rules they
+**v1 is under way.** [T-101](tasks/T-101-v1-requirements.md) turned the principles into 63 numbered
+requirements in [docs/v1-requirements.md](docs/v1-requirements.md) and settled the nine rules they
 left open (PRD §11).
 
 **Next:** the core router ([T-110](tasks/T-110-routes-and-default-route.md) onward), built-in
