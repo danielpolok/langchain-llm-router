@@ -4,11 +4,32 @@ from importlib.metadata import requires, version
 
 from packaging.requirements import Requirement
 
+# The public API pinned in docs/v1-requirements.md. Tasks add their names as they land:
+# `ChatRouter` (T-110) and the built-in strategies (T-130 to T-134).
+PINNED_EXPORTS = {
+    "RoutingStrategy",
+    "RoutingRequest",
+    "RoutingChoice",
+    "RoutingCallable",
+    "RoutingDecision",
+    "routing_decision",
+    "last_routing_decision",
+    "RoutingWarning",
+    "FallbackWarning",
+    "ToolSupportWarning",
+    "ForcedRouteWarning",
+    "RoutingError",
+    "NoToolCapableRouteError",
+    "ForcedRouteError",
+}
 
-def test_package_imports() -> None:
+
+def test_package_exports_the_pinned_api() -> None:
     import langchain_llm_router
 
-    assert langchain_llm_router.__all__ == []
+    assert set(langchain_llm_router.__all__) >= PINNED_EXPORTS
+    for name in langchain_llm_router.__all__:
+        assert getattr(langchain_llm_router, name) is not None
 
 
 def test_runtime_dependencies_are_langchain_core_only() -> None:
