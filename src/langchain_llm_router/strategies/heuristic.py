@@ -53,6 +53,23 @@ the tier tests in `tests/unit_tests/test_heuristic_strategy.py`:
 Nothing else about the strategy depends on these values, and `signals=` lets the benchmark try a
 signal set that isn't in this module at all.
 
+What the score cannot see
+-------------------------
+Measured, not guessed — the cases below are pinned in
+`tests/unit_tests/test_heuristic_strategy.py::test_the_defaults_blind_spots_are_the_ones_we_know_of`,
+and are the evidence T-140 argues with:
+
+- **Scripts that don't separate words with spaces.** `length_signal` counts whitespace-separated
+  words, so Chinese, Japanese and Thai read as a handful of words however much they say; the
+  analysis vocabulary is English, so it never fires on them either. A hard request in those
+  languages scores `0.00` and takes the cheapest tier. Replace `length` through `signals=` if
+  that is your traffic.
+- **Length stands in for difficulty, and sometimes it is wrong in both directions.** A pasted log
+  with "what does this mean?" reads as hard (`length 1.00`); "prove that P != NP implies one-way
+  functions exist" reads as easy (`analysis 0.50`, one term of the two a full signal needs).
+  Local signals cannot read intent — that is the trade R7 makes, and the price of no extra call.
+  The embedding and classifier strategies (T-133, T-134) are where a router buys its way out.
+
 Deciding, and not deciding
 --------------------------
 - **A request with nothing to judge** — no text and no other modality — scores nothing, so the

@@ -707,3 +707,35 @@ def test_the_no_call_check_catches_a_call(model_calls: ModelCallCounter) -> None
     assert model_calls.outside_a_route == ["ChatRouter/CallsAModel", "(no run)"]
     # Deliberate: forgotten so this test's own calls don't fail the module-wide check.
     model_calls.forget()
+
+
+def test_the_defaults_blind_spots_are_the_ones_we_know_of() -> None:
+    """R7, T-140: what local signals cannot see, pinned so the benchmark argues with numbers.
+
+    Not a specification of good routing — the opposite. Each case is a request the defaults
+    score wrongly, kept here so T-140 can measure whether retuning fixes it.
+    """
+    strategy = HeuristicStrategy("small", "frontier")
+
+    def route_for(text: str) -> str:
+        request = build_request(
+            [HumanMessage(text)],
+            routes=("small", "frontier"),
+            tools_bound=False,
+            wants_full_context=False,
+            config=RunnableConfig(),
+        )
+        assert request is not None
+        choice = strategy.decide(request)
+        assert choice is not None
+        return choice.route
+
+    # A script without spaces between words: "compare Transformers with RNNs on long
+    # dependencies, and analyse the computational cost" — hard, and scored 0.00.
+    chinese = "请比较 Transformer 与 RNN 在长依赖建模上的差异，并分析计算成本。"  # noqa: RUF001
+    assert route_for(chinese) == "small"
+    # Short and genuinely hard: one analysis term where a full signal needs two.
+    assert route_for("Prove that if P != NP then one-way functions exist.") == "small"
+    # Long and trivial: length alone clears the bar.
+    pasted_log = "Here is my log:\n" + "INFO served in 12ms\n" * 60 + "what does this mean?"
+    assert route_for(pasted_log) == "frontier"
