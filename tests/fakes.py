@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
@@ -145,3 +145,12 @@ class NativeStructuredFakeChatModel(ToolCallingFakeChatModel):
             {"method": method, "include_raw": include_raw, **kwargs}
         )
         return super().with_structured_output(schema, include_raw=include_raw, **kwargs)
+
+
+def call_log(route: BaseChatModel) -> list[dict[str, Any]]:
+    """Every call a fake route took, reached through `BaseChatModel`.
+
+    `ChatRouter.routes` is typed to LangChain's base class, and `dict` is invariant, so tests
+    hold their routes as `dict[str, BaseChatModel]` and come back here for the fake's own record.
+    """
+    return cast("FakeChatModel", route).calls

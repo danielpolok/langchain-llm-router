@@ -5,8 +5,9 @@ from importlib.metadata import requires, version
 from packaging.requirements import Requirement
 
 # The public API pinned in docs/v1-requirements.md. Tasks add their names as they land:
-# `ChatRouter` (T-110) and the built-in strategies (T-130 to T-134).
+# the built-in strategies (T-130 to T-134) are still to come.
 PINNED_EXPORTS = {
+    "ChatRouter",
     "RoutingStrategy",
     "RoutingRequest",
     "RoutingChoice",
