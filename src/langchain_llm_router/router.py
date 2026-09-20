@@ -14,9 +14,9 @@ Every entry point runs the same pipeline, in D9's order:
    did into a `RoutingDecision`, falling back to the default route when it can't (R9).
 3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata.
-4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8),
-   and the router's run closes with the record in its outputs. A route's error closes it as an
-   error and propagates unchanged (C6).
+4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
+   and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
+   record in its outputs. A route's error closes it as an error and propagates unchanged (C6).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from langchain_core.runnables.utils import coro_with_context
 from pydantic import Field, field_validator, model_validator
 
 from langchain_llm_router._extraction import build_request
-from langchain_llm_router.decision import ROUTING_KEY, RoutingDecision
+from langchain_llm_router.decision import ROUTING_KEY, RoutingDecision, record_decision
 from langchain_llm_router.errors import FallbackWarning, RoutingError
 from langchain_llm_router.strategy import (
     RoutingCallable,
@@ -517,7 +517,12 @@ def _with_record(message: MessageT, decision: RoutingDecision) -> MessageT:
 
     A copy, not an edit in place: the route may keep the object it returned — its response
     cache does — and must not find one call's record on another call's answer (C10).
+
+    Also publishes the decision for `last_routing_decision()` (D3). Every entry point passes
+    through here, and so does anything built on them — including the structured-output path
+    whose parsed object has nowhere to carry a record, which is what D3 exists for.
     """
+    record_decision(decision)
     return message.model_copy(
         update={"response_metadata": {**message.response_metadata, ROUTING_KEY: decision.as_dict()}}
     )
