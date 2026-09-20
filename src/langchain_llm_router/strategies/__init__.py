@@ -5,4 +5,6 @@ The heuristic ones make no model or API call (R7); the opt-in ones (embedding si
 small-LLM classifier) take the model or embeddings they use from the application.
 """
 
-__all__: list[str] = []
+from langchain_llm_router.strategies.heuristic import HeuristicStrategy
+
+__all__ = ["HeuristicStrategy"]
