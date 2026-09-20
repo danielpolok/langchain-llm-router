@@ -50,7 +50,7 @@ The strategy interface (R6) — small and stable, one method:
 class RoutingRequest:
     text: str  # the current request's text (R4, D6)
     content_blocks: list[ContentBlock]  # as LangChain defines them (C7)
-    modalities: frozenset[str]  # {"text", "image", ...} present in the request
+    modalities: frozenset[str]  # "text", "image", "audio", "video", "file", "other" (T-112)
     routes: tuple[str, ...]  # available route names, declaration order
     tools_bound: bool  # tools or structured output are bound
     messages: list[BaseMessage] | None  # only when wants_full_context (R4)

@@ -73,7 +73,12 @@ class RoutingRequest:
     """The current request's content, as LangChain defines content blocks (C7)."""
 
     modalities: frozenset[str]
-    """The modalities present in the request — `{"text", "image", ...}`."""
+    """The modalities present in the request, from a closed vocabulary (C7).
+
+    `"text"` (whenever `text` is non-empty), `"image"`, `"audio"`, `"video"`, `"file"` — a
+    document, including a plain-text one, whose text is not part of `text` — and `"other"` for
+    content LangChain does not translate into a standard block. New values arrive only as
+    LangChain adds content-block types."""
 
     routes: tuple[str, ...]
     """The available route names, in declaration order."""
