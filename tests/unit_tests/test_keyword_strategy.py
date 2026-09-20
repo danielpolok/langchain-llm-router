@@ -109,7 +109,9 @@ def _model_name(serialized: dict[str, Any]) -> str:
 _model_calls: ContextVar[ModelCalls | None] = ContextVar("keyword_model_calls", default=None)
 # A configure hook adds the current counter to every callback manager LangChain configures, so
 # a call made with no config at all is still counted. Registering it is a no-op while the
-# context variable is unset, which it is outside this module.
+# context variable is unset, which it is outside this module — but the registry is global and
+# per-process: it holds this entry for the rest of the session, and every strategy suite that
+# registers one of its own (T-131 does) adds another. Inert, not free.
 register_configure_hook(_model_calls, inheritable=True)
 
 
@@ -181,10 +183,23 @@ WHOLE_WORD = [
     pytest.param("python", "in python, please", True, id="punctuation around it"),
     pytest.param("python", "write pythonic code", False, id="not inside a longer word"),
     pytest.param("python", "monty-python", True, id="hyphen is a word boundary"),
+    pytest.param("  python  ", "python, please", True, id="stripped of its own spaces"),
     pytest.param("stack trace", "here is the stack trace", True, id="several words"),
-    pytest.param("stack trace", "here is the stack  trace", False, id="literally one space"),
+    pytest.param("stack trace", "here is the stack  trace", True, id="any run of whitespace"),
+    pytest.param("stack trace", "here is the stack\ntrace", True, id="across a line break"),
+    pytest.param("stack trace", "a trace of the stack", False, id="in the order written"),
     pytest.param("c++", "rewrite it in c++", True, id="trailing punctuation"),
     pytest.param(".net", "the .net runtime", True, id="leading punctuation"),
+    # Every character is literal: without `re.escape` each of these would be a metacharacter,
+    # and the rule would quietly match something else.
+    pytest.param("a.b", "the a.b file", True, id="a dot is a dot"),
+    pytest.param("a.b", "axb", False, id="a dot is not any character"),
+    pytest.param("(beta)", "the (beta) build", True, id="brackets are literal"),
+    pytest.param("(beta)", "the beta build", False, id="brackets are not a group"),
+    pytest.param("[draft]", "a [draft] spec", True, id="a class is literal"),
+    pytest.param("[draft]", "a draft spec", False, id="a class is not a choice of letters"),
+    pytest.param("cost*", "what is the cost* of this", True, id="a star is literal"),
+    pytest.param("cost*", "what is the cost of this", False, id="a star is not a repeat"),
 ]
 
 
@@ -192,11 +207,24 @@ WHOLE_WORD = [
 def test_a_keyword_matches_a_whole_word_whatever_its_case(
     keyword: str, text: str, *, matches: bool
 ) -> None:
-    """The documented default: whole words, ignoring case, with a keyword's own punctuation
-    edge left open — so `'c++'` can be a keyword while `'pythonic'` is not `'python'`."""
-    expected = RoutingChoice("coder", f"matched keyword {keyword!r}") if matches else None
+    """The documented default: whole words, ignoring case, every character literal, the words
+    of a keyword across any whitespace — and a keyword's own punctuation edge left open, so
+    `'c++'` can be a keyword while `'pythonic'` is not `'python'`."""
+    expected = RoutingChoice("coder", f"matched keyword {keyword.strip()!r}") if matches else None
 
     assert KeywordStrategy({"coder": [keyword]}).decide(request_for(text)) == expected
+
+
+def test_a_keyword_in_an_unspaced_script_needs_a_pattern() -> None:
+    """A documented limit, not a bug: a word boundary needs a non-word character beside the
+    keyword, and running Chinese, Japanese or Thai text never offers one. The pattern is the
+    way round, as it is for every other matching rule the default doesn't fit."""
+    request = request_for("我在北京工作")
+
+    assert KeywordStrategy({"coder": ["北京"]}).decide(request) is None
+    assert KeywordStrategy({"coder": [re.compile("北京")]}).decide(request) == RoutingChoice(
+        route="coder", reason='matched pattern r"北京"'
+    )
 
 
 def test_a_compiled_pattern_is_searched_exactly_as_compiled() -> None:
@@ -206,21 +234,25 @@ def test_a_compiled_pattern_is_searched_exactly_as_compiled() -> None:
     sensitive = KeywordStrategy({"coder": re.compile("SQL")})
 
     assert signature.decide(request_for("why does def parse( fail?")) == RoutingChoice(
-        route="coder", reason=r"matched pattern '\\bdef\\s+\\w+\\('"
+        route="coder", reason=r'matched pattern r"\bdef\s+\w+\("'
     )
     assert sensitive.decide(request_for("this SQL query")) == RoutingChoice(
-        route="coder", reason="matched pattern 'SQL'"
+        route="coder", reason='matched pattern r"SQL"'
     )
     assert sensitive.decide(request_for("this sql query")) is None
 
 
 def test_a_pattern_is_the_way_past_whole_word_matching() -> None:
-    """A keyword is literal on purpose; anything cleverer is the caller's pattern to write."""
+    """A keyword is literal on purpose; anything cleverer is the caller's pattern to write.
+
+    The reason keeps the pattern as its author wrote it, flags included: `repr` would double
+    every backslash and drop `re.IGNORECASE`, which is half of what the rule means (R2).
+    """
     strategy = KeywordStrategy({"coder": [re.compile(r"regexe?s?", re.IGNORECASE)]})
 
     assert KeywordStrategy({"coder": ["regex"]}).decide(request_for("two regexes")) is None
     assert strategy.decide(request_for("two Regexes")) == RoutingChoice(
-        route="coder", reason="matched pattern 'regexe?s?'"
+        route="coder", reason='matched pattern r"regexe?s?" with re.IGNORECASE'
     )
 
 
@@ -291,24 +323,54 @@ def test_a_request_with_no_text_matches_nothing() -> None:
     assert one_line_setup().decide(request) is None
 
 
-def test_a_rule_naming_a_route_that_does_not_exist_is_reported_on_the_first_request() -> None:
-    """A renamed or mistyped route would otherwise match into the void. A strategy is built
-    before the router, so `request.routes` is its first sight of the real names — it checks
-    them there, before matching, and raises for the router to record (R9)."""
-    strategy = KeywordStrategy({"codr": ["python"], "frontier": ["prove"]})
+def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
+    """A typo costs the requests its own rule would have taken, and nothing else: matching
+    comes before any check of the router's names, so the working rules keep working and only
+    the mistyped one ends in a fallback (R9). Validating up front would send every request to
+    the default route over one bad key."""
+    strategy = KeywordStrategy({"coder": ["python"], "frontir": ["prove"], "small": ["hello"]})
+
+    assert strategy.decide(request_for("a question about python")) == RoutingChoice(
+        route="coder", reason="matched keyword 'python'"
+    )
+    assert strategy.decide(request_for("prove there are infinitely many primes")) == RoutingChoice(
+        route="frontir", reason="matched keyword 'prove'"
+    )
+    assert strategy.decide(request_for("nothing in this request matches a rule")) is None
+
+
+def test_rules_that_name_no_route_the_router_has_raise_on_the_first_request() -> None:
+    """The one case that can never decide anything: not a rule to fall back from, a rule set
+    with no answer to give. A strategy is built before the router, so `request.routes` is its
+    first sight of the real names — it says so there, and the router records it (R9)."""
+    strategy = KeywordStrategy({"codr": ["python"], "frontir": ["prove"]})
 
     with pytest.raises(
         RoutingError,
         match=(
-            r"^rules name routes that don't exist: 'codr'; "
+            r"^no rule names a route this router has: the rules name 'codr', 'frontir'; "
             r"the routes are 'coder', 'frontier', 'small'$"
         ),
     ):
-        strategy.decide(request_for("nothing in this request matches a rule"))
+        # Raised although a rule matches: there is nothing this rule set could answer with.
+        strategy.decide(request_for("a question about python"))
 
 
 BAD_RULES = [
     pytest.param({}, "rules is empty: a KeywordStrategy needs at least one rule", id="no rules"),
+    pytest.param(
+        [("coder", ["python"])],
+        "rules is list: a KeywordStrategy takes a mapping of route name to keywords, "
+        "such as {'coder': ['python', 'regex']}",
+        id="not a mapping",
+    ),
+    pytest.param(
+        {"coder": {"python", "regex"}},
+        "route 'coder' is given a set: the first rule in declaration order wins, and a set "
+        "has no order that survives a restart — the same rules would route the same request "
+        "differently. Use a list",
+        id="a set of keywords",
+    ),
     pytest.param(
         {" ": ["python"]},
         "the rule key ' ' is blank: a rule names the route it routes to",
@@ -403,9 +465,47 @@ async def test_no_matching_rule_takes_the_default_route(
     )
 
 
-def test_a_phantom_route_reaches_the_caller_as_a_fallback(model_calls: ModelCalls) -> None:
-    """R9, R2: a rule naming a route the router doesn't have is a fallback with the cause on
-    the record — so the typo is visible on the first call rather than on none."""
+@pytest.mark.parametrize("convention", CONVENTIONS)
+async def test_a_phantom_route_reaches_the_caller_as_a_fallback(
+    convention: Convention, model_calls: ModelCalls
+) -> None:
+    """R9, R2: the router is what reports a route that doesn't exist, and it does it precisely.
+    The mistyped rule's own requests fall back with the cause on the record; the requests the
+    other rules take are untouched, which is the point of matching first."""
+    model_calls.expect("FakeChatModel")
+    routes: dict[str, BaseChatModel] = {
+        "coder": FakeChatModel(reply="coder answer"),
+        "small": FakeChatModel(reply="small answer"),
+    }
+    rules = KeywordStrategy({"coder": ["python"], "frontir": ["prove"]})
+    router = ChatRouter(routes=routes, default_route="small", strategy=rules)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        message = await respond(router, convention, "prove there are infinitely many primes")
+
+    assert message.content == "small answer"
+    assert [warning.category for warning in routing_warnings(caught)] == [FallbackWarning]
+    assert str(routing_warnings(caught)[0].message) == (
+        "KeywordStrategy chose 'frontir', which is not one of the routes; "
+        "falling back to the default route 'small'"
+    )
+    assert routing_decision(message) == RoutingDecision(
+        route="small",
+        reason=(
+            "KeywordStrategy chose 'frontir', which is not one of the routes; "
+            "fell back to the default route"
+        ),
+        strategy="KeywordStrategy",
+        fallback=True,
+    )
+
+
+def test_rules_naming_no_route_at_all_reach_the_caller_as_a_fallback(
+    model_calls: ModelCalls,
+) -> None:
+    """R9, R2: the loud case, end to end — a rule set that can never decide says so on the
+    first request, with the cause and both name lists on the record for whoever fixes it."""
     model_calls.expect("FakeChatModel")
     routes: dict[str, BaseChatModel] = {"coder": FakeChatModel(), "small": FakeChatModel()}
     router = ChatRouter(
@@ -417,15 +517,12 @@ def test_a_phantom_route_reaches_the_caller_as_a_fallback(model_calls: ModelCall
         message = router.invoke("a python question")
 
     assert [warning.category for warning in routing_warnings(caught)] == [FallbackWarning]
-    assert str(routing_warnings(caught)[0].message) == (
-        "KeywordStrategy raised RoutingError: rules name routes that don't exist: 'codr'; "
-        "the routes are 'coder', 'small'; falling back to the default route 'small'"
-    )
     assert routing_decision(message) == RoutingDecision(
         route="small",
         reason=(
-            "KeywordStrategy raised RoutingError: rules name routes that don't exist: 'codr'; "
-            "the routes are 'coder', 'small'; fell back to the default route"
+            "KeywordStrategy raised RoutingError: no rule names a route this router has: "
+            "the rules name 'codr'; the routes are 'coder', 'small'; "
+            "fell back to the default route"
         ),
         strategy="KeywordStrategy",
         fallback=True,
