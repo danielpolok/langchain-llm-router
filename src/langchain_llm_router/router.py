@@ -16,7 +16,8 @@ Every entry point runs the same pipeline, in D9's order:
    decision in its metadata.
 4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
    and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
-   record in its outputs. A route's error closes it as an error and propagates unchanged (C6).
+   record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
+   and withdraws the record: a call that failed has no decision to report.
 """
 
 from __future__ import annotations
@@ -42,7 +43,12 @@ from langchain_core.runnables.utils import coro_with_context
 from pydantic import Field, field_validator, model_validator
 
 from langchain_llm_router._extraction import build_request
-from langchain_llm_router.decision import ROUTING_KEY, RoutingDecision, record_decision
+from langchain_llm_router.decision import (
+    ROUTING_KEY,
+    RoutingDecision,
+    discard_decision,
+    record_decision,
+)
 from langchain_llm_router.errors import FallbackWarning, RoutingError
 from langchain_llm_router.strategy import (
     RoutingCallable,
@@ -169,6 +175,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = call.route.invoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -192,6 +199,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = await call.route.ainvoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             await run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -223,6 +231,7 @@ class ChatRouter(BaseChatModel):
                     output += chunk
                 yield chunk
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             run_manager.on_chain_error(error)
             raise
         run_manager.on_chain_end(_run_outputs(output, decision))
@@ -254,6 +263,7 @@ class ChatRouter(BaseChatModel):
                     output += chunk
                 yield chunk
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             await run_manager.on_chain_error(error)
             raise
         await run_manager.on_chain_end(_run_outputs(output, decision))

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from langchain_core.callbacks import CallbackManagerForLLMRun
-    from langchain_core.outputs import ChatGenerationChunk
+    from langchain_core.outputs import ChatGenerationChunk, ChatResult
     from langchain_core.tracers.schemas import Run
 
 
@@ -139,8 +139,9 @@ def metadata_of(run: Run) -> dict[str, Any]:
 
 
 def forget_published_record() -> None:
-    """Forget what this thread last routed, so a test starts from nothing."""
-    decision_module._published.decision = None
+    """Forget both places a routed call publishes to, so a test starts from nothing."""
+    decision_module._in_context.set(None)
+    decision_module._on_thread.published = None
 
 
 @pytest.fixture(autouse=True)
@@ -403,18 +404,128 @@ def test_a_record_published_on_a_worker_thread_does_not_reach_the_caller() -> No
     )
 
 
-async def test_calls_that_overlap_on_one_thread_answer_with_the_last_to_return() -> None:
-    """D3's other documented limit: routed calls that overlap on a single thread overwrite each
-    other's published record, so `last_routing_decision()` names one of them rather than
-    yours. The record on each response is the one that stays right."""
+async def test_concurrent_calls_each_read_their_own_decision() -> None:
+    """REQ-R2-4, D3: two routed calls running at once each have a context of their own, so a
+    call running *beside* mine never answers for it — not even when it published later.
+
+    Both calls here finish before either reads, so the newest record on the thread is the
+    sibling's; what tells them apart is that a sibling inherits the same context the reader
+    started from, where a call made *inside* that context inherits the reader's own record.
+    """
     router = router_with(by_name)
+    first, second = asyncio.Event(), asyncio.Event()
 
-    frontier, cheap = await asyncio.gather(router.ainvoke("frontier"), router.ainvoke("cheap"))
+    async def routed(
+        route: str, mine: asyncio.Event, theirs: asyncio.Event
+    ) -> tuple[RoutingDecision, RoutingDecision | None]:
+        message = await router.ainvoke(route)
+        mine.set()
+        await theirs.wait()  # both calls have published before either one reads
+        return record_of(message), last_routing_decision()
 
-    assert (record_of(frontier).route, record_of(cheap).route) == ("frontier", "cheap")
-    last = last_routing_decision()
-    assert last is not None
-    assert last.route in {"frontier", "cheap"}
+    results = await asyncio.gather(
+        routed("cheap", first, second), routed("frontier", second, first)
+    )
+
+    assert [read for _, read in results] == [carried for carried, _ in results]
+    assert [carried.route for carried, _ in results] == ["cheap", "frontier"]
+
+
+async def test_overlapping_parsed_only_calls_cannot_be_told_apart() -> None:
+    """D3's documented limit, and the shape it is left in: a record that reaches only the
+    thread — the parsed-only path, whose context is a copy — has one slot for the whole
+    thread. Two of those at once overwrite each other, and both callers read the last of them.
+    A parsed object carries nothing to correct that with: ask for `include_raw=True` instead."""
+    parsing = router_with(by_name) | StrOutputParser()
+    first, second = asyncio.Event(), asyncio.Event()
+
+    async def parsed(
+        route: str, mine: asyncio.Event, theirs: asyncio.Event
+    ) -> RoutingDecision | None:
+        await parsing.ainvoke(route)
+        mine.set()
+        await theirs.wait()
+        return last_routing_decision()
+
+    reads = await asyncio.gather(parsed("cheap", first, second), parsed("frontier", second, first))
+
+    assert reads[0] == reads[1]
+    assert reads[0] is not None
+    assert reads[0].route in {"cheap", "frontier"}
+
+
+# --- A routed call that fails has no decision to report (C6) ---
+
+
+class RouteDown(Exception):
+    """What a provider raises when the route cannot answer."""
+
+
+class Failing(FakeChatModel):
+    """A route that raises instead of answering: at once, or partway through a stream."""
+
+    chunks_before_failure: int = 0
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        msg = "the provider is down"
+        raise RouteDown(msg)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        for index, chunk in enumerate(super()._stream(messages, stop, run_manager, **kwargs)):
+            if index >= self.chunks_before_failure:
+                msg = "the provider is down"
+                raise RouteDown(msg)
+            yield chunk
+
+
+@pytest.mark.parametrize("convention", CONVENTIONS)
+async def test_a_failed_call_leaves_no_decision_to_be_mistaken_for_its_own(
+    convention: Convention,
+) -> None:
+    """REQ-R2-4, C6: a routed call that raises has no decision to report, and the call before
+    it must not stand in for the one that failed. That is what `with_fallbacks` and
+    `with_retry` would otherwise read back: an answer that did not come from a routed call at
+    all, paired with some earlier call's record."""
+    router = ChatRouter(
+        routes={"cheap": FakeChatModel(reply="cheap answer"), "down": Failing()},
+        default_route="cheap",
+        strategy=by_name,
+    )
+
+    router.invoke("cheap")
+    with pytest.raises(RouteDown):
+        await respond(router, convention, "down")
+
+    assert last_routing_decision() is None
+
+
+@pytest.mark.parametrize("convention", ["stream", "astream"])
+async def test_a_stream_that_fails_after_publishing_takes_the_record_back(
+    convention: Convention,
+) -> None:
+    """C6, D3: a stream publishes its record with the first chunk, since the route is chosen
+    before it (D8) — so a failure partway through has to withdraw it again."""
+    router = ChatRouter(
+        routes={"down": Failing(chunks_before_failure=1, reply="half an answer")},
+        default_route="down",
+    )
+
+    with pytest.raises(RouteDown):
+        await respond(router, convention, "hello")
+
+    assert last_routing_decision() is None
 
 
 # --- Reading a record back off a message (R2) ---
@@ -427,12 +538,13 @@ def test_a_message_that_carries_no_record_reads_back_as_nothing() -> None:
 
 @pytest.mark.parametrize(
     "foreign",
-    ["frontier", ["frontier"], 7, None],
-    ids=["a string", "a list", "a number", "null"],
+    ["frontier", ["frontier"], 7, None, {"destination": "eu-west"}, {"route": 1}],
+    ids=["a string", "a list", "a number", "null", "another mapping", "half a record"],
 )
 def test_a_foreign_routing_value_is_not_read_as_a_record(foreign: object) -> None:
-    """R2: ours is a mapping. Another library's `"routing"` key is left alone, not guessed
-    at — a router's record is the only thing `routing_decision` claims to know."""
+    """R2: `"routing"` is a plain metadata key, so a provider may already be using it. Only a
+    mapping holding what a record must hold is read as one — anything else gives the caller
+    `None` rather than a `TypeError` from inside this library."""
     message = AIMessage(content="hello", response_metadata={ROUTING_KEY: foreign})
 
     assert routing_decision(message) is None
