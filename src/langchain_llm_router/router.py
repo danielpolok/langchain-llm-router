@@ -59,7 +59,11 @@ MessageT = TypeVar("MessageT", bound=BaseMessage)
 
 _CALLER = 5
 """`stacklevel` that points a `FallbackWarning` at the code that called the router: the frames
-are `_fallback` ← `_conclude` or `_plan` ← `_decide` / `_adecide` ← the entry point ← caller."""
+are `_fallback` ← `_conclude` or `_plan` ← `_decide` / `_adecide` ← the entry point ← caller.
+
+It counts *this* path, not every warning the router raises: a warning raised at another depth
+(T-115's `ToolSupportWarning`, T-116's `ForcedRouteWarning`) needs its own count, and a test
+that asserts where the warning points."""
 
 
 class ChatRouter(BaseChatModel):
@@ -68,6 +72,11 @@ class ChatRouter(BaseChatModel):
     The response is the selected route's own, with the routing decision added under
     `response_metadata["routing"]` (R1, R2). The routing policy is the application's: a
     strategy applies it, and when it can't decide the default route answers (R9).
+
+    Because the router delegates to the route rather than generating itself, the settings that
+    govern a call are the *route's*: its `cache`, `rate_limiter` and `disable_streaming` apply,
+    and the router's own would never be consulted (the same reasoning as D4 gives for the
+    cache, which T-119 rejects outright rather than letting it look effective).
     """
 
     routes: dict[str, BaseChatModel]
@@ -148,6 +157,11 @@ class ChatRouter(BaseChatModel):
     ) -> AIMessage:
         """The selected route's own answer, with the decision record added (R1, R2)."""
         config = ensure_config(config)
+        # private API: `_convert_input` is how every chat model turns its input into messages.
+        # Calling it keeps a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue`
+        # identical through the router (C2, C7, REQ-C7-2). `set_config_context` and
+        # `coro_with_context`, used below, are public names their modules leave out of
+        # `__all__`; D9 names both as how the strategy's run is entered.
         messages = self._convert_input(input).to_messages()
         run_manager = self._start_run(config, messages)
         try:
@@ -171,7 +185,7 @@ class ChatRouter(BaseChatModel):
     ) -> AIMessage:
         """Async `invoke`: the strategy is awaited too, so neither blocks the loop (C2)."""
         config = ensure_config(config)
-        messages = self._convert_input(input).to_messages()
+        messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = await self._astart_run(config, messages)
         try:
             decision = await self._adecide(messages, config, run_manager, kwargs)
@@ -194,7 +208,7 @@ class ChatRouter(BaseChatModel):
     ) -> Iterator[AIMessageChunk]:
         """The route's chunks, passed through unchanged bar the record on one of them (D8)."""
         config = ensure_config(config)
-        messages = self._convert_input(input).to_messages()
+        messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = self._start_run(config, messages)
         output: AIMessageChunk | None = None
         try:
@@ -223,7 +237,7 @@ class ChatRouter(BaseChatModel):
     ) -> AsyncIterator[AIMessageChunk]:
         """Async `stream`."""
         config = ensure_config(config)
-        messages = self._convert_input(input).to_messages()
+        messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = await self._astart_run(config, messages)
         output: AIMessageChunk | None = None
         try:
@@ -365,7 +379,13 @@ class ChatRouter(BaseChatModel):
             if not isinstance(error, Exception):
                 raise
             return self._conclude(pending, error)
-        decision = self._conclude(pending, choice)
+        try:
+            decision = self._conclude(pending, choice)
+        except BaseException as error:
+            # `_conclude` warns, and an application may have escalated that warning to an
+            # error; the strategy's run has to close either way.
+            strategy_run.on_chain_error(error)
+            raise
         strategy_run.on_chain_end(decision.as_dict())
         return decision
 
@@ -394,7 +414,12 @@ class ChatRouter(BaseChatModel):
             if not isinstance(error, Exception):
                 raise
             return self._conclude(pending, error)
-        decision = self._conclude(pending, choice)
+        try:
+            decision = self._conclude(pending, choice)
+        except BaseException as error:
+            # As in `_decide`: a warning escalated to an error must still close the run.
+            await strategy_run.on_chain_error(error)
+            raise
         await strategy_run.on_chain_end(decision.as_dict())
         return decision
 

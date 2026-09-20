@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import sys
 import warnings
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 from langchain_core.callbacks import BaseCallbackManager
@@ -20,6 +20,7 @@ from pydantic import ValidationError
 
 from langchain_llm_router import (
     ChatRouter,
+    FallbackWarning,
     RoutingChoice,
     RoutingDecision,
     RoutingError,
@@ -403,3 +404,99 @@ def test_the_caller_s_configuration_reaches_the_route() -> None:
         assert "experiment" in (run.tags or [])
         assert (run.extra or {})["metadata"]["user"] == "ada"
     assert (strategy_run.name, route_run.name) == ("ByText", "FakeChatModel")
+
+
+class Recording(FakeChatModel):
+    """A route that records how it was called — the object, the transcript and the arguments."""
+
+    calls_seen: ClassVar[list[tuple[Any, list[Any], Any, dict[str, Any]]]] = []
+
+    def _generate(
+        self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        Recording.calls_seen.append((self, list(messages), stop, dict(kwargs)))
+        return super()._generate(messages, stop, run_manager, **kwargs)
+
+    def _stream(
+        self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        Recording.calls_seen.append((self, list(messages), stop, dict(kwargs)))
+        return super()._stream(messages, stop, run_manager, **kwargs)
+
+
+@pytest.mark.parametrize("convention", CONVENTIONS)
+async def test_the_route_is_called_as_given_with_the_whole_transcript(
+    convention: Convention,
+) -> None:
+    """REQ-R5-1: "used as given" covers the call, not only the stored mapping — the route
+    object itself is invoked, with the caller's whole transcript, through every convention."""
+    route = Recording(model_name="model-only", reply="an answer")
+    Recording.calls_seen.clear()
+    router = ChatRouter(routes={"only": route}, default_route="only")
+    transcript = [
+        ("system", "be brief"),
+        ("human", "first"),
+        ("ai", "an answer"),
+        ("human", "second"),
+    ]
+
+    await respond(router, convention, transcript, None)
+
+    (called, messages, stop, kwargs) = Recording.calls_seen[0]
+    assert called is route  # not a binding, a copy, or a reconfigured clone
+    assert [message.text for message in messages] == ["be brief", "first", "an answer", "second"]
+    assert (stop, kwargs) == (None, {})
+
+
+def test_the_route_is_given_the_call_arguments_and_nothing_else() -> None:
+    """REQ-R5-1: `stop` and the caller's kwargs reach the route, and the router adds none."""
+    route = Recording(model_name="model-only")
+    Recording.calls_seen.clear()
+    router = ChatRouter(routes={"only": route}, default_route="only")
+
+    router.invoke("hi", stop=["END"], temperature=0.1)
+
+    (_, _, stop, kwargs) = Recording.calls_seen[0]
+    assert (stop, kwargs) == (["END"], {"temperature": 0.1})
+
+
+def test_the_routers_own_callbacks_tags_and_metadata_stay_on_its_own_run() -> None:
+    """C1: a chat model's constructor-level callbacks, tags and metadata are local to its own
+    run — the router's behave the same way, so the route's run doesn't inherit them."""
+    local = RunCollectorCallbackHandler()
+    inherited = RunCollectorCallbackHandler()
+    router = ChatRouter(
+        routes=fake_routes("only"),
+        default_route="only",
+        callbacks=[local],
+        tags=["router-tag"],
+        metadata={"owner": "router"},
+    )
+
+    router.invoke("hi", config={"callbacks": [inherited]})
+
+    (own_run,) = local.traced_runs
+    assert own_run.name == "ChatRouter"
+    assert own_run.child_runs == []  # local callbacks don't reach the route's run
+    assert "router-tag" in (own_run.tags or [])
+    assert (own_run.extra or {})["metadata"]["owner"] == "router"
+    (router_run,) = inherited.traced_runs
+    (route_run,) = router_run.child_runs
+    assert "router-tag" not in (route_run.tags or [])
+
+
+def test_a_fallback_warning_escalated_to_an_error_leaves_no_run_open() -> None:
+    """R9, C5: an application may turn warnings into errors; the strategy's run closes anyway."""
+    collector = RunCollectorCallbackHandler()
+    router = ChatRouter(
+        routes=fake_routes("cheap"), default_route="cheap", strategy=lambda request: None
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FallbackWarning)
+        with pytest.raises(FallbackWarning):
+            router.invoke("hi", config={"callbacks": [collector]})
+
+    runs = [run for run in collector.traced_runs for run in (run, *run.child_runs)]
+    assert [run.name for run in runs] == ["ChatRouter", "<lambda>"]
+    assert all(run.end_time is not None for run in runs)
