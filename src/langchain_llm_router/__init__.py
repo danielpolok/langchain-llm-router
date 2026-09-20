@@ -14,6 +14,7 @@ from langchain_llm_router.errors import (
     RoutingWarning,
     ToolSupportWarning,
 )
+from langchain_llm_router.router import ChatRouter
 from langchain_llm_router.strategy import (
     RoutingCallable,
     RoutingChoice,
@@ -22,6 +23,7 @@ from langchain_llm_router.strategy import (
 )
 
 __all__ = [
+    "ChatRouter",
     "FallbackWarning",
     "ForcedRouteError",
     "ForcedRouteWarning",
