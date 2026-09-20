@@ -13,7 +13,7 @@ strategy only if it opts in with `wants_full_context`.
 
 - A user message is a `HumanMessage` — so a `HumanMessageChunk` too, its subclass — or a
   `ChatMessage` whose role is `"user"` or `"human"`: the roles LangChain itself turns into a
-  `HumanMessage` (`messages/utils.py:651`), and that providers send as a user turn.
+  `HumanMessage` (`_convert_to_message`), and that providers send as a user turn.
 - Position alone decides. An empty user message is still the current request, with `text`
   `""` and no modalities; reaching back past it would route on a turn the user has moved on
   from.
@@ -30,13 +30,17 @@ LangChain can't translate stays `non_standard`; extraction doesn't guess at it.
   separator — `"Write code"` and `"in Python"` become `"Write codein Python"` — and misses the
   untyped text blocks of Google GenAI and Bedrock Converse content that `content_blocks` reads.
   A newline is what LangChain uses when it collapses text blocks into one string for a model
-  (`convert_to_openai_messages(text_format="string")`, `messages/utils.py:1679`). For string
-  content, the common case, the two agree.
+  (`convert_to_openai_messages(text_format="string")`). For string content, the common case,
+  the two agree.
 - `content_blocks` is a deep copy, so a strategy can't edit the caller's message through it.
-  Block ids LangChain *mints* while translating a provider-native block (`"lc_"` plus a fresh
-  uuid4 on every read — `ensure_id`, `utils/utils.py:521`) are dropped: they say nothing about
-  the request, and would make the same message read twice, or reached through two input forms,
-  two unequal requests (REQ-C7-2). Ids the content already carries are kept.
+  Ids LangChain generated itself (the reserved `"lc_"` prefix, minted by `ensure_id` — a fresh
+  uuid4 each time a provider-native block is translated) are dropped: they say nothing about the
+  request, and would make the same message read twice, or reached through two input forms, two
+  unequal requests (REQ-C7-2). Ids the provider gave the content are kept.
+- A `HumanMessage` carrying provider-native tool results — Anthropic sends tool output in a
+  user turn — is the current request like any other user message, though its `tool_result`
+  blocks stay `non_standard`, so no tool output reaches `text`. LangChain's own canonical form
+  is a `ToolMessage`, which R4 skips.
 - `modalities` names the kinds of content present, from a fixed vocabulary: `"text"` when `text`
   is not empty; `"image"`, `"audio"`, `"video"` and `"file"` for blocks of those types; `"file"`
   for a `text-plain` block too — a plain-text *document*, attached rather than typed, so its text
@@ -108,7 +112,8 @@ def build_request(
         modalities=frozenset(modalities),
         routes=routes,
         tools_bound=tools_bound,
-        # A new list: the strategy may reorder or trim it without touching the caller's (R4).
+        # A new list: the strategy may reorder or trim it without touching the caller's. The
+        # messages in it are the caller's own — a transcript is not worth deep-copying (R4).
         messages=list(messages) if wants_full_context else None,
         config=config,
     )
@@ -121,19 +126,10 @@ def _is_user_message(message: BaseMessage) -> bool:
 
 
 def _read_blocks(message: BaseMessage) -> list[dict[str, Any]]:
-    """The message's content blocks, copied, without the ids minted while reading them."""
-    stored_ids = (
-        {item.get("id") for item in message.content if isinstance(item, dict)}
-        if isinstance(message.content, list)
-        else set()
-    )
+    """The message's content blocks, copied, without LangChain's own generated ids."""
     blocks = cast("list[dict[str, Any]]", copy.deepcopy(message.content_blocks))
     for block in blocks:
         block_id = block.get("id")
-        if (
-            isinstance(block_id, str)
-            and block_id.startswith(LC_AUTO_PREFIX)
-            and block_id not in stored_ids
-        ):
+        if isinstance(block_id, str) and block_id.startswith(LC_AUTO_PREFIX):
             del block["id"]
     return blocks

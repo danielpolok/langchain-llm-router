@@ -79,6 +79,8 @@ def extract(
 
 def extract_input(model_input: LanguageModelInput, **kwargs: Any) -> RoutingRequest | None:
     """Extract from any chat model input, through the path every chat model converts it on."""
+    # private API: `_convert_input` is the conversion REQ-C7-2 is about — what every chat
+    # model does to its input before `_generate` sees it. The router calls it the same way.
     messages = FakeChatModel()._convert_input(model_input).to_messages()
     return extract(messages, **kwargs)
 
@@ -489,18 +491,28 @@ def test_string_content_text_is_the_messages_own_text() -> None:
 
 def test_reading_a_provider_native_block_twice_gives_equal_requests() -> None:
     """REQ-C7-1, REQ-C7-2: LangChain mints a fresh `lc_` id each time it translates an OpenAI
-    image block; extraction drops it, so the same message is the same request every time.
-    An id the content itself carries is kept."""
+    image block; extraction drops every id LangChain generated, so a message reads the same
+    whether it arrives provider-native or already stored as content blocks."""
     minted = HumanMessage(content=[{"type": "image_url", "image_url": {"url": IMAGE_URL}}])
     stored = HumanMessage(content_blocks=[create_image_block(url=IMAGE_URL)])
-    stored_id = stored.content_blocks[0].get("id")
+    blocks = [{"type": "image", "url": IMAGE_URL}]
 
     assert minted.content_blocks != minted.content_blocks  # LangChain's own reads differ
     assert extract([minted]) == extract([minted])
-    first = extract([stored])
-    assert first is not None
-    assert isinstance(stored_id, str)
-    assert first.content_blocks == [{"type": "image", "url": IMAGE_URL, "id": stored_id}]
+    assert extract([stored]) == extract([minted])
+    for request in (extract([minted]), extract([stored])):
+        assert request is not None
+        assert request.content_blocks == blocks
+
+
+def test_an_id_the_provider_gave_a_block_is_kept() -> None:
+    """REQ-C7-1: only LangChain's own `lc_` ids are dropped — a provider's id is content."""
+    message = HumanMessage(content=[{"type": "image", "url": IMAGE_URL, "id": "provider-1"}])
+
+    request = extract([message])
+
+    assert request is not None
+    assert [block.get("id") for block in request.content_blocks] == ["provider-1"]
 
 
 def test_the_strategy_cannot_edit_the_callers_messages_through_the_request() -> None:
