@@ -16,11 +16,12 @@ import importlib.util
 import inspect
 import pkgutil
 import threading
-from collections.abc import Callable
+import types
+from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, fields, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from uuid import uuid4
 
 import pytest
@@ -152,6 +153,10 @@ async def async_pick(request: RoutingRequest) -> str:
     return "coder"
 
 
+async def stream_pick(request: RoutingRequest) -> AsyncIterator[str]:
+    yield "coder"
+
+
 class AsyncClassifier:
     async def __call__(self, request: RoutingRequest) -> str:
         return "coder"
@@ -159,8 +164,14 @@ class AsyncClassifier:
 
 @pytest.mark.parametrize(
     "func",
-    [async_pick, functools.partial(async_pick), AsyncClassifier()],
-    ids=["async-def", "partial", "async-call"],
+    [
+        async_pick,
+        functools.partial(async_pick),
+        AsyncClassifier(),
+        functools.partial(AsyncClassifier()),
+        stream_pick,
+    ],
+    ids=["async-def", "partial", "async-call", "partial-async-call", "async-generator"],
 )
 def test_an_async_function_is_rejected_when_coerced(func: object) -> None:
     """REQ-R6-2: `RoutingCallable` is synchronous. An async function fails at coercion — at the
@@ -390,6 +401,17 @@ def test_messages_only_for_a_strategy_that_opts_in(
 # never names a built-in — so it can only reach one through `RoutingStrategy`.
 
 
+def _is_strategy_subclass(value: object) -> TypeGuard[type[RoutingStrategy]]:
+    """Below 3.11 a generic alias such as `RoutingCallable` passes `isclass`, and `issubclass`
+    then raises `TypeError` — so exclude aliases before asking."""
+    return (
+        inspect.isclass(value)
+        and not isinstance(value, types.GenericAlias)
+        and issubclass(value, RoutingStrategy)
+        and value is not RoutingStrategy
+    )
+
+
 def _published_strategies() -> list[type[RoutingStrategy]]:
     """Every public `RoutingStrategy` subclass the package ships. Built-ins join as they land."""
     modules = [langchain_llm_router]
@@ -404,10 +426,7 @@ def _published_strategies() -> list[type[RoutingStrategy]]:
         value
         for module in modules
         for name, value in vars(module).items()
-        if not name.startswith("_")
-        and inspect.isclass(value)
-        and issubclass(value, RoutingStrategy)
-        and value is not RoutingStrategy
+        if not name.startswith("_") and _is_strategy_subclass(value)
     }
     return sorted(found, key=lambda cls: f"{cls.__module__}.{cls.__qualname__}")
 
@@ -440,6 +459,17 @@ def _core_imports(source: str) -> set[str]:
     return imported
 
 
+def _public_surface() -> set[str]:
+    """What a built-in may use from the package core: every exported name, and every public
+    module of the package — importing `errors` as a module is as public as importing a name."""
+    modules = {
+        info.name
+        for info in pkgutil.iter_modules([str(Path(langchain_llm_router.__file__).parent)])
+        if not info.name.startswith("_")
+    }
+    return set(langchain_llm_router.__all__) | modules | {f"{PACKAGE}.{name}" for name in modules}
+
+
 def _identifiers(source: str) -> set[str]:
     """The names a module's code uses — not its docstrings or comments."""
     names: set[str] = set()
@@ -465,17 +495,32 @@ def test_the_interface_has_no_private_hooks() -> None:
     assert members == {"decide", "adecide", "wants_full_context"}
 
 
+def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
+    """REQ-R6-1, D6: the fields, and their order, that docs/v1-requirements.md pins under
+    *Public API* — what the stability promise is a promise about."""
+    assert [f.name for f in fields(RoutingRequest)] == [
+        "text",
+        "content_blocks",
+        "modalities",
+        "routes",
+        "tools_bound",
+        "messages",
+        "config",
+    ]
+    assert [f.name for f in fields(RoutingChoice)] == ["route", "reason"]
+
+
 @pytest.mark.parametrize("cls", BUILTINS)
 def test_a_builtin_is_a_public_strategy_like_any_other(cls: type[RoutingStrategy]) -> None:
     """REQ-R6-1: every built-in is a concrete `RoutingStrategy`, exported from the package, and
-    imports from the package core only what the package exports to anyone."""
-    public = set(langchain_llm_router.__all__)
+    imports from the package core only what the package offers anyone."""
+    source = Path(inspect.getfile(cls)).read_text(encoding="utf-8")
 
     assert issubclass(cls, RoutingStrategy)
     assert not inspect.isabstract(cls)
-    assert cls.__name__ in public
+    assert cls.__name__ in langchain_llm_router.__all__
     assert getattr(langchain_llm_router, cls.__name__) is cls
-    assert _core_imports(Path(inspect.getfile(cls)).read_text(encoding="utf-8")) - public == set()
+    assert _core_imports(source) - _public_surface() == set()
 
 
 @pytest.mark.parametrize("cls", BUILTINS)
@@ -495,21 +540,24 @@ def test_the_core_never_names_a_builtin(cls: type[RoutingStrategy]) -> None:
 
 
 def test_the_builtin_checks_catch_what_they_look_for() -> None:
-    """REQ-R6-1: the two source checks above are not vacuous while no built-in exists."""
+    """REQ-R6-1: the two source checks above are not vacuous while no built-in exists — a
+    private name or module is caught, an exported name or a public module is not."""
     source = (
         "from langchain_llm_router import RoutingChoice, RoutingStrategy\n"
+        "from langchain_llm_router import errors\n"
         "from langchain_llm_router._extraction import build_request\n"
         "from ..strategy import as_strategy\n"
         "from .configurable import ConfigurableStrategy\n"
         "import langchain_llm_router.decision\n"
+        "import langchain_llm_router._extraction\n"
         "import langchain_llm_router.strategies.keyword as keyword\n"
         "isinstance(strategy, keyword.KeywordStrategy)\n"
     )
 
-    assert _core_imports(source) - set(langchain_llm_router.__all__) == {
+    assert _core_imports(source) - _public_surface() == {
         "build_request",
         "as_strategy",
-        "langchain_llm_router.decision",
+        "langchain_llm_router._extraction",
     }
     assert {"KeywordStrategy", "ConfigurableStrategy"} <= _identifiers(source)
     assert "KeywordStrategy" not in _identifiers('"""Unlike KeywordStrategy, ..."""\n')

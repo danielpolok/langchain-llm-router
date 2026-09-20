@@ -27,10 +27,12 @@ Versions follow semantic versioning; until 1.0, the minor version stands in for 
 - **Minor release (compatible):** a new `RoutingRequest` field, added last with a default; a new
   optional `RoutingStrategy` member whose default keeps today's behaviour, as
   `wants_full_context` does; new values in `modalities` as LangChain adds content-block types;
-  new wording in the reasons the package writes.
-- **Major release (breaking):** removing, renaming or retyping anything above; a new abstract
-  method; changing what `None` or a bare route name means; changing the signature of `decide`
-  or `adecide`; changing `wants_full_context`'s default (R4).
+  new wording in the reasons the package writes; a widened type that keeps accepting everything
+  it accepts today, such as `ClassVar[bool]` becoming `bool`.
+- **Major release (breaking):** removing or renaming anything above, or retyping it so that code
+  which type-checks today no longer does; a new abstract method; changing what `None` or a bare
+  route name means; changing the signature of `decide` or `adecide`; changing
+  `wants_full_context`'s default (R4).
 
 Everything else in this module — `as_strategy`, `strategy_name` and the underscore names — is
 the router's own and may change in any release.
@@ -124,11 +126,12 @@ class RoutingStrategy(ABC):
         `decide` therefore has to be thread-safe. Strategies that call models override this
         with a native async implementation, passing `request.config` to their calls (D9).
         """
-        # With a config (rather than an executor), `run_in_executor` runs `decide` on the
-        # loop's default executor inside a copy of the current context
-        # (`runnables/config.py:705`). The copy carries the config and tracing context the
-        # router sets with `set_config_context` into `decide`'s thread (D9); passing the
-        # config is `Runnable.ainvoke`'s own convention (`runnables/base.py:929`).
+        # A config sends `run_in_executor` down the same path as no executor at all: the loop's
+        # default one, running `decide` in a copy of the *current* context
+        # (`runnables/config.py:705`). That copy — not the argument — is what carries the config
+        # and tracing context the router sets with `set_config_context` into `decide`'s thread
+        # (D9). The config is passed because it is the one a strategy's calls take, and because
+        # `Runnable.ainvoke` passes its own here too (`runnables/base.py:929`).
         return await run_in_executor(request.config, self.decide, request)
 
 
@@ -165,15 +168,31 @@ class _CallableStrategy(RoutingStrategy):
         raise TypeError(msg)
 
 
+def _unwrap(func: object) -> object:
+    """What a `functools.partial` chain ends in — what a call actually reaches."""
+    while isinstance(func, functools.partial):
+        func = func.func
+    return func
+
+
 def _callable_name(func: Callable[..., object]) -> str:
     """The function's own name, seen through `functools.partial`.
 
     A lambda is `<lambda>`, as Python names it; a callable object goes by its class name.
     """
-    while isinstance(func, functools.partial):
-        func = func.func
-    name = getattr(func, "__name__", None)
-    return name if isinstance(name, str) else type(func).__name__
+    unwrapped = _unwrap(func)
+    name = getattr(unwrapped, "__name__", None)
+    return name if isinstance(name, str) else type(unwrapped).__name__
+
+
+def _is_async(func: object) -> bool:
+    """Whether calling `func` hands back something to await rather than a choice.
+
+    Checked on the type's `__call__` as well, as a call looks it up, so a callable object with
+    an `async def __call__` is caught too. A sync function that hides an async one behind
+    `functools.wraps` can't be told apart — that one surfaces on the first request (R9).
+    """
+    return inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func)
 
 
 def as_strategy(strategy: RoutingStrategy | RoutingCallable) -> RoutingStrategy:
@@ -189,10 +208,8 @@ def as_strategy(strategy: RoutingStrategy | RoutingCallable) -> RoutingStrategy:
     if inspect.isclass(strategy) and RoutingStrategy in strategy.__mro__:
         msg = f"strategy= takes an instance: pass {strategy.__name__}(), not the class"
         raise TypeError(msg)
-    # The type's `__call__`, as a call looks it up: catches an object with `async def __call__`.
-    if inspect.iscoroutinefunction(strategy) or inspect.iscoroutinefunction(
-        type(strategy).__call__
-    ):
+    target = _unwrap(strategy)
+    if _is_async(target) or _is_async(type(target).__call__):
         msg = (
             f"strategy {_callable_name(strategy)!r} is async, and a plain function must be "
             "synchronous: subclass RoutingStrategy and override adecide instead"
