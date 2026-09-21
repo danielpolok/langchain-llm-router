@@ -5,8 +5,13 @@ A caller has three ways to the record, in the order they are worth reaching for:
 `last_routing_decision()` for the one path where nothing comes back that could carry it —
 structured output without `include_raw=True`, which returns a parsed object.
 
-`record_decision` is the router's own, not public API; everything `langchain_llm_router`
-exports from here is.
+`record_decision` and `discard_decision` are the router's own, not public API; everything
+`langchain_llm_router` exports from here is.
+
+A route may itself be a `ChatRouter`. The inner router records its decision on its answer, and
+the outer router then replaces it with its own, so the message and `last_routing_decision()`
+both report the *outermost* decision — the one the caller made. Nothing is lost: the inner
+router's chain run carries its own record on the trace, where D9 put it.
 """
 
 from __future__ import annotations
@@ -59,16 +64,22 @@ class RoutingDecision:
         return cls(**{key: value for key, value in record.items() if key in names})
 
 
-_REQUIRED = frozenset(field.name for field in fields(RoutingDecision) if field.default is MISSING)
-"""What a mapping must hold to be one of ours: the fields a `RoutingDecision` has no default
-for. `"routing"` is a plain key on `response_metadata`, so a provider is free to put its own
-meaning there, and reading one of those must give a caller `None` rather than a `TypeError`."""
+_REQUIRED_TEXT = tuple(field.name for field in fields(RoutingDecision) if field.default is MISSING)
+"""What a mapping must hold to be one of ours, and hold as text: `route` and `reason`, the two
+fields a `RoutingDecision` has no default for.
+
+`"routing"` is a plain key on `response_metadata`, so another library is free to give it its own
+meaning. Reading one of those gives the caller `None`, rather than a `TypeError` from inside
+this package or a record whose `route` is someone else's integer. The fields with defaults are
+taken as they come: past those two, what is under this key is a record we wrote."""
 
 
 def routing_decision(message: BaseMessage) -> RoutingDecision | None:
     """Read the decision record back off a response, or `None` if it carries none (R2)."""
     record = message.response_metadata.get(ROUTING_KEY)
-    if not isinstance(record, Mapping) or not record.keys() >= _REQUIRED:
+    if not isinstance(record, Mapping):
+        return None
+    if not all(isinstance(record.get(key), str) for key in _REQUIRED_TEXT):
         return None
     return RoutingDecision.from_dict(record)
 
@@ -82,9 +93,12 @@ class _Published(NamedTuple):
     inherited: int
     """The `order` of the record this call found in its context when it published, or 0.
 
-    How a call that ran *inside* another's context is told from one that ran beside it: a
-    sequence step runs in a copy of the caller's context and so inherits the caller's record,
-    while a concurrent sibling inherits only what they both started from."""
+    What lets a call that ran *inside* a context supersede the record already there: a sequence
+    step runs in a copy of the caller's context and inherits that record, while a call that
+    started before it did inherits something older. It is not proof of nesting — a task started
+    from this context after my call inherits exactly my record, and an async sequence step *is*
+    such a task, so the two cannot be told apart. `last_routing_decision` says which way that
+    goes."""
 
     decision: RoutingDecision | None
     """`None` withdraws the record: a routed call that failed has none, and nothing older
@@ -148,25 +162,37 @@ def last_routing_decision() -> RoutingDecision | None:
     object has nowhere to carry a record. It answers for:
 
     - a routed call made in this context — `router.invoke(…)`, `await router.ainvoke(…)`, or a
-      stream whose first chunk has arrived (the route is chosen before it, D8). Concurrent
-      calls each have their own context, so each reads its own;
+      stream whose first chunk has arrived (the route is chosen before it, D8). Two calls
+      started side by side, as `asyncio.gather` starts them, each have a context of their own
+      and each read their own;
     - a routed call one or more LangChain steps deep, whose record reached only this thread:
-      the parsed-only structured-output path, `router.with_structured_output(S).invoke(…)`.
-      A call made inside this context supersedes the record this context already had, which is
+      the parsed-only structured-output path, `router.with_structured_output(S).invoke(…)`. A
+      call made *from* this context supersedes the record this context already had, which is
       what `_Published.inherited` is for.
 
-    What it cannot do is tell *those* calls apart when they overlap, because a record that
-    survives a copied context can be no finer-grained than the thread it ran on:
+    That last rule is what it cannot do precisely. A routed call started from this context
+    while mine is in flight, or after it, inherits my record exactly as a nested step does, and
+    will answer in its place — an `asyncio.gather` issued *after* my own call, a background
+    task, a callback. There is no local way to tell those from the sequence step this exists
+    for, and the sequence step has to win.
 
-    - two parsed-only calls overlapping on one thread overwrite each other, and the last to
-      return answers for both;
-    - `batch` over more than one input runs each input in a worker thread, and so does a step
+    Nor is it per call: the record outlives the call that made it, in the context *and* on the
+    thread. So a task that runs later on a pooled thread, or the next request on a server's
+    worker thread, reads back a neighbour's decision when it has made no routed call of its
+    own. And when calls share one thread:
+
+    - two parsed-only calls overlapping there overwrite each other, and the last to return
+      answers for both;
+    - `batch` over more than one input runs each input in a worker thread, as does a step
       LangChain evaluates in parallel — `RunnableMap(raw=llm)`, which is how `include_raw=True`
-      calls the model (`chat_models.py:2564`). Those records stay on their own threads, and the
-      caller reads back the last call it made itself, which may be an older one.
+      calls the model (`chat_models.py:2564`). Those records stay on their own threads, so the
+      caller reads back the last call it made itself, which may be an older one;
+    - `abatch` instead runs its inputs as tasks on the caller's own thread, so the caller reads
+      back one of the batch's records — whichever returned last — and not its own earlier call.
 
     Read the record off the response with `routing_decision`, or ask for `include_raw=True` and
-    read it off the raw message, whenever calls like those can overlap.
+    read it off the raw message, whenever calls can overlap like that. This is for one call at
+    a time, and it is exact there.
     """
     own = _in_context.get()
     on_thread: _Published | None = getattr(_on_thread, "published", None)

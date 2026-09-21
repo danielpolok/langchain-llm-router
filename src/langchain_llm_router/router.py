@@ -17,7 +17,8 @@ Every entry point runs the same pipeline, in D9's order:
 4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
    and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
    record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
-   and withdraws the record: a call that failed has no decision to report.
+   and withdraws the record: a call that failed has no decision to report. A caller that
+   abandons a stream is not a failure, and keeps its record.
 """
 
 from __future__ import annotations
@@ -230,6 +231,13 @@ class ChatRouter(BaseChatModel):
                 else:
                     output += chunk
                 yield chunk
+        except GeneratorExit as error:
+            # A caller that stops consuming — a `break`, or the generator being finalized —
+            # is not a failed call: the chunks it did take carry the record, and the record
+            # stays readable. Finalization can also run on another thread or context (D3),
+            # where a tombstone would erase a record that is not this call's at all.
+            run_manager.on_chain_error(error)
+            raise
         except BaseException as error:
             discard_decision()  # this call has no decision to report (C6, D3)
             run_manager.on_chain_error(error)
@@ -262,6 +270,10 @@ class ChatRouter(BaseChatModel):
                 else:
                     output += chunk
                 yield chunk
+        except GeneratorExit as error:
+            # Not a failed call — see `stream`.
+            await run_manager.on_chain_error(error)
+            raise
         except BaseException as error:
             discard_decision()  # this call has no decision to report (C6, D3)
             await run_manager.on_chain_error(error)

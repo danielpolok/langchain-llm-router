@@ -18,12 +18,13 @@ raise today.
 from __future__ import annotations
 
 import asyncio
+import gc
 import warnings
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableConfig, RunnableMap
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
@@ -45,7 +46,7 @@ from tests.conventions import CONVENTIONS, Convention, respond
 from tests.fakes import FakeChatModel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncGenerator, Iterator
 
     from langchain_core.callbacks import CallbackManagerForLLMRun
     from langchain_core.outputs import ChatGenerationChunk, ChatResult
@@ -405,12 +406,13 @@ def test_a_record_published_on_a_worker_thread_does_not_reach_the_caller() -> No
 
 
 async def test_concurrent_calls_each_read_their_own_decision() -> None:
-    """REQ-R2-4, D3: two routed calls running at once each have a context of their own, so a
-    call running *beside* mine never answers for it — not even when it published later.
+    """REQ-R2-4, D3: two routed calls started side by side each have a context of their own, so
+    neither answers for the other — not even the one that published later.
 
     Both calls here finish before either reads, so the newest record on the thread is the
-    sibling's; what tells them apart is that a sibling inherits the same context the reader
-    started from, where a call made *inside* that context inherits the reader's own record.
+    sibling's; what tells them apart is that the two inherit the same context they were both
+    started from, where a call made *from* one of them would inherit that call's own record.
+    The next test pins where that stops working.
     """
     router = router_with(by_name)
     first, second = asyncio.Event(), asyncio.Event()
@@ -429,6 +431,27 @@ async def test_concurrent_calls_each_read_their_own_decision() -> None:
 
     assert [read for _, read in results] == [carried for carried, _ in results]
     assert [carried.route for carried, _ in results] == ["cheap", "frontier"]
+
+
+async def test_a_call_started_after_mine_can_answer_in_its_place() -> None:
+    """D3's documented limit, pinned here so the docstring and the behaviour cannot drift: a
+    routed call started *from* this context after mine inherits my record exactly as a nested
+    step does, and answers in its place.
+
+    Nothing local tells the two apart — an async sequence step is a task started from this
+    context too (`runnables/base.py:3496`) — and the nested step has to win, because that is
+    the parsed-only path `last_routing_decision()` exists for. The record on the response is
+    what stays right; this is only ever the convenience for one call at a time.
+    """
+    router = router_with(by_name)
+
+    mine = await router.ainvoke("cheap")
+    await asyncio.gather(router.ainvoke("frontier"))  # started from here, beside mine, later
+
+    assert record_of(mine).route == "cheap"
+    assert last_routing_decision() == RoutingDecision(
+        route="frontier", reason="by_name chose 'frontier'", strategy="by_name"
+    )
 
 
 async def test_overlapping_parsed_only_calls_cannot_be_told_apart() -> None:
@@ -528,6 +551,59 @@ async def test_a_stream_that_fails_after_publishing_takes_the_record_back(
     assert last_routing_decision() is None
 
 
+def test_a_stream_the_caller_stops_consuming_keeps_its_record() -> None:
+    """C6, D3: stopping early is not a failure. A `break` throws `GeneratorExit` into the
+    stream's frame, and the caller is holding chunks that a decision produced — that decision
+    stays readable, so only a route that actually failed withdraws its record."""
+    router = router_with(by_name)
+
+    for chunk in router.stream("frontier"):
+        assert record_of(chunk).route == "frontier"
+        break
+    gc.collect()  # the generator the loop dropped is finalized here at the latest
+
+    assert last_routing_decision() == RoutingDecision(
+        route="frontier", reason="by_name chose 'frontier'", strategy="by_name"
+    )
+
+
+async def test_an_abandoned_stream_being_finalized_leaves_a_later_record_alone() -> None:
+    """C6, D3: `GeneratorExit` arrives whenever the abandoned stream is *finalized*, which can
+    be long after the caller moved on — an event loop's async-generator hooks do it, and a
+    thread's finalizer does it on that thread. Withdrawing a record there would erase one that
+    belongs to a different call entirely, so an abandoned stream withdraws nothing."""
+    router = router_with(by_name)
+    # `astream` is declared as an `AsyncIterator`; what it returns is the generator that
+    # `aclose()` finalizes, which is the point of this test.
+    chunks = cast("AsyncGenerator[AIMessageChunk, None]", router.astream("frontier"))
+    await chunks.__anext__()  # the stream has published its own record by now
+    mine = await router.ainvoke("cheap")
+
+    await chunks.aclose()  # finalized here, in the context that made the later call
+
+    assert last_routing_decision() == record_of(mine)
+
+
+def test_a_router_inside_a_router_reports_the_outermost_decision() -> None:
+    """D3: a route may be a `ChatRouter` of its own. The inner router records its decision on
+    its answer and the outer replaces it with its own, so the message and
+    `last_routing_decision()` both report the decision the *caller* made. Nothing is lost —
+    the inner router's chain run still carries its own record on the trace, where D9 put it."""
+    inner = ChatRouter(routes=two_routes(), default_route="cheap", strategy=by_name)
+    outer = ChatRouter(routes={"inner": inner}, default_route="inner")
+    collector = RunCollectorCallbackHandler()
+
+    message = outer.invoke("frontier", config={"callbacks": [collector]})
+
+    assert record_of(message) == RoutingDecision(route="inner", reason="no strategy configured")
+    assert last_routing_decision() == record_of(message)
+    (outer_run,) = collector.traced_runs
+    (inner_run,) = outer_run.child_runs
+    assert (inner_run.outputs or {})[ROUTING_KEY] == RoutingDecision(
+        route="frontier", reason="by_name chose 'frontier'", strategy="by_name"
+    ).as_dict()
+
+
 # --- Reading a record back off a message (R2) ---
 
 
@@ -538,8 +614,24 @@ def test_a_message_that_carries_no_record_reads_back_as_nothing() -> None:
 
 @pytest.mark.parametrize(
     "foreign",
-    ["frontier", ["frontier"], 7, None, {"destination": "eu-west"}, {"route": 1}],
-    ids=["a string", "a list", "a number", "null", "another mapping", "half a record"],
+    [
+        "frontier",
+        ["frontier"],
+        7,
+        None,
+        {"destination": "eu-west"},
+        {"route": "cheap"},
+        {"route": 1, "reason": 2},
+    ],
+    ids=[
+        "a string",
+        "a list",
+        "a number",
+        "null",
+        "another mapping",
+        "half a record",
+        "a record's keys holding someone else's values",
+    ],
 )
 def test_a_foreign_routing_value_is_not_read_as_a_record(foreign: object) -> None:
     """R2: `"routing"` is a plain metadata key, so a provider may already be using it. Only a
