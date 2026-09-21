@@ -529,8 +529,8 @@ async def test_the_strategy_is_not_run_again_and_the_trace_shows_both_decisions(
 
 
 async def test_a_request_with_nothing_bound_is_never_diverted() -> None:
-    """R10 applies to tools and structured output, and only when they are bound: the same
-    router, called plainly, sends a request to the route the strategy chose."""
+    """REQ-R10-3: R10 applies to tools and structured output, and only when they are bound: the
+    same router, called plainly, sends a request to the route the strategy chose."""
     router, routes = mixed()
 
     with warnings.catch_warnings(record=True) as caught:
@@ -546,9 +546,10 @@ async def test_a_request_with_nothing_bound_is_never_diverted() -> None:
 
 
 async def test_a_fallback_onto_a_default_that_cannot_use_tools_is_diverted_too() -> None:
-    """R9, R10: the default route is where a strategy that can't decide sends the request, and
-    it may itself be a route that can't use the tools. The request is diverted like any other,
-    and the record keeps both facts — it fell back, and it was diverted — with a warning each."""
+    """REQ-R10-3, REQ-R9-2: the default route is where a strategy that can't decide sends the
+    request, and it may itself be a route that can't use the tools. The request is diverted
+    like any other, and the record keeps both facts — it fell back, and it was diverted — with
+    a warning each."""
     router, _ = router_of({"cheap": False, "first": True}, default="cheap", strategy=Abstains())
     bound = bind(TOOLS, router)
 
@@ -568,7 +569,7 @@ async def test_a_fallback_onto_a_default_that_cannot_use_tools_is_diverted_too()
 
 
 async def test_with_no_strategy_a_default_that_cannot_use_tools_is_diverted() -> None:
-    """R10, D1: no strategy means the default route, and the rule is the same — the request
+    """REQ-R10-3, D1: no strategy means the default route, and the rule is the same — the request
     goes to the first route that can use the tools, and no strategy run is opened for it."""
     router, _ = router_of({"cheap": False, "first": True}, default="cheap")
     bound = bind(TOOLS, router)
@@ -590,10 +591,10 @@ async def test_with_no_strategy_a_default_that_cannot_use_tools_is_diverted() ->
 
 
 async def test_tools_bound_past_the_bind_time_check_still_cannot_reach_an_incapable_route() -> None:
-    """R10: `bind_tools` refuses to bind when no route can use tools, but `bind(tools=...)` puts
-    them in the call kwargs directly and never asks. The request is then the last chance, and
-    it fails as a `NoToolCapableRouteError` — with the router's run closed as an error — rather
-    than as the route's own `NotImplementedError`."""
+    """REQ-R10-2, REQ-R10-3: `bind_tools` refuses to bind when no route can use tools, but
+    `bind(tools=...)` puts them in the call kwargs directly and never asks. The request is then
+    the last chance, and it fails as a `NoToolCapableRouteError` — with the router's run closed
+    as an error — rather than as the route's own `NotImplementedError`."""
     router, routes = router_of({"a": False, "b": False}, default="a", strategy=ByText())
     bound = router.bind(tools=[convert_to_openai_tool(get_weather)])
     collector = RunCollectorCallbackHandler()
@@ -629,7 +630,7 @@ async def test_a_strategy_is_told_whether_tools_or_structured_output_are_bound(
     expected: bool,
     convention: AskConvention,
 ) -> None:
-    """R10, D6: `RoutingRequest.tools_bound` is true whenever tools *or structured output* are
+    """REQ-R10-4, D6: `RoutingRequest.tools_bound` is true whenever tools *or structured output* are
     bound — the latter leaves nothing in the call kwargs to read, so the router has to know —
     and false otherwise. The strategy's run in the trace records the same."""
     seen: list[bool] = []
@@ -852,9 +853,10 @@ def test_a_dict_schema_answers_a_dict() -> None:
 
 
 async def test_structured_output_answers_once_when_streamed() -> None:
-    """The limit `StructuredRouter` documents: `stream` and `astream` yield the finished object
-    as their single item. Progressive partial parses would mean streaming through the router,
-    whose chunks are merged with `+`, which a parsed object doesn't support."""
+    """REQ-C3-3, and the limit `StructuredRouter` documents: `stream` and `astream` yield the
+    finished object as their single item. Progressive partial parses would mean streaming
+    through the router, whose chunks are merged with `+`, which a parsed object doesn't
+    support."""
     router, _ = router_of({"a": True}, default="a")
     structured = router.with_structured_output(Answer)
 
@@ -936,9 +938,9 @@ async def test_the_last_decision_survives_a_structured_call_made_as_a_sequence_s
 
 @pytest.mark.parametrize("binder", BINDERS)
 async def test_a_bound_call_is_one_router_run_over_one_model_run(binder: Binder) -> None:
-    """R3, C5, R2 (D9): tools or structured output, the router's own run is the root and carries
-    the record, and the route's call is the only model run below it — the strategy's run
-    opens none — so cost is counted once."""
+    """REQ-C5-1, REQ-R2-2 (D9): tools or structured output, the router's own run is the root and
+    carries the record, and the route's call is the only model run below it — the strategy's
+    run opens none — so cost is counted once."""
     router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
     collector = RunCollectorCallbackHandler()
 
@@ -956,7 +958,7 @@ async def test_a_bound_call_is_one_router_run_over_one_model_run(binder: Binder)
 
 
 def test_binding_twice_keeps_the_last_binding_as_on_any_chat_model() -> None:
-    """A binding over a binding reaches the model's own `bind_tools` again
+    """REQ-C3-1: a binding over a binding reaches the model's own `bind_tools` again
     (`RunnableBinding.__getattr__`), so the second call replaces the first rather than adding
     to it. The router does what a plain tool-capable chat model does, and the check is
     against one: what the route's last binder saw, and what its call got, are identical.
@@ -976,9 +978,10 @@ def test_binding_twice_keeps_the_last_binding_as_on_any_chat_model() -> None:
 
 
 def test_structured_output_after_tools_replaces_them_as_on_any_chat_model() -> None:
-    """The same rule across the two kinds of binding: `with_structured_output` on a runnable
-    already bound with tools is the model's own `with_structured_output`, and the tools the
-    first binding held are not part of it — on a plain chat model and through the router."""
+    """REQ-C3-3: the same rule across the two kinds of binding: `with_structured_output` on a
+    runnable already bound with tools is the model's own `with_structured_output`, and the
+    tools the first binding held are not part of it — on a plain chat model and through the
+    router."""
     plain, routed_route = capable("a"), capable("a")
     router = ChatRouter(routes={"a": routed_route}, default_route="a")
 
