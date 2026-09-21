@@ -80,10 +80,7 @@ are `_fallback` ← `_conclude` or `_plan` ← `_decide` / `_adecide` ← the en
 
 It counts *this* path, not every warning the router raises: a warning raised at another depth
 (T-115's `ToolSupportWarning`, T-116's `ForcedRouteWarning`) needs its own count, and a test
-that asserts where the warning points. Under `generate` and `agenerate`, which call `invoke` and
-`ainvoke`, the caller of the entry point is this module, so the warning names it: one frame
-short of the application, and the same for `abatch`, whose `ainvoke`s are tasks with no
-application frame above them."""
+that asserts where the warning points."""
 
 _V3_UNSUPPORTED = (
     "ChatRouter does not support the v3 streaming protocol "
@@ -418,6 +415,11 @@ class ChatRouter(BaseChatModel):
         LangChain itself tells callers not to rely on `llm_output` and to read the message
         (`outputs/llm_result.py:40`), so it is `{}` here, as it is for any chat model that does
         not combine its outputs.
+
+        Nor does a `FallbackWarning` point at the caller, as it does under `invoke`: `_CALLER`
+        counts the frames of an entry point that runs the pipeline itself, and this one reaches
+        it through `invoke`, so the warning names this module. (`agenerate`, whose prompts are
+        tasks, has no caller frame above them either, and neither has `abatch`.)
         """
         run_ids = _run_ids(len(messages), run_id)
         answers = [

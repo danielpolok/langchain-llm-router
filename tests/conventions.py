@@ -29,7 +29,7 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.runnables import RunnableConfig
 
 Convention: TypeAlias = Literal["invoke", "ainvoke", "stream", "astream"]
-"""An entry point the router overrides itself (D9)."""
+"""An entry point the router overrides itself that takes a `RunnableConfig` whole (D9)."""
 
 AnyConvention: TypeAlias = Literal[
     "invoke", "ainvoke", "stream", "astream", "batch", "abatch", "events", "generate", "agenerate"
@@ -105,11 +105,11 @@ def prompts(*texts: str) -> list[list[BaseMessage]]:
 async def generated(
     model: BaseChatModel,
     convention: Literal["generate", "agenerate"],
-    prompts: list[list[BaseMessage]],
+    batch: list[list[BaseMessage]],
     config: RunnableConfig | None = None,
     **kwargs: Any,
 ) -> LLMResult:
-    """`generate` or `agenerate` over `prompts`, with the parts of `config` they take.
+    """`generate` or `agenerate` over the prompts in `batch`, with the parts of `config` they take.
 
     `BaseChatModel.invoke` takes a config apart into these arguments (`chat_models.py:488`);
     this does the same, so a test can hand every convention the same config.
@@ -121,8 +121,8 @@ async def generated(
         raise ValueError(msg)
     parts: dict[str, Any] = dict(config)
     if convention == "generate":
-        return model.generate(prompts, **parts, **kwargs)
-    return await model.agenerate(prompts, **parts, **kwargs)
+        return model.generate(batch, **parts, **kwargs)
+    return await model.agenerate(batch, **parts, **kwargs)
 
 
 async def streamed_chunks(

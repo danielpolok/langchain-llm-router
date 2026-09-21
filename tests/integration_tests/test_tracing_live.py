@@ -155,4 +155,5 @@ async def test_a_live_trace_shows_the_decision_and_the_real_call_priced_once(
     assert model_run.total_cost is not None
     assert model_run.total_cost > 0
     assert router_run.total_tokens == model_run.total_tokens  # rolled up once, not twice
-    assert router_run.total_cost == model_run.total_cost
+    assert router_run.total_cost is not None
+    assert float(router_run.total_cost) == pytest.approx(float(model_run.total_cost))

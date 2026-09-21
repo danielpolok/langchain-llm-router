@@ -11,8 +11,8 @@ record" (REQ-R2-3) is T-113's.
 Two of REQ-R2-1's paths cannot be reached yet, and are gaps rather than omissions: a request
 diverted off a tool-incapable route (R10) needs `bind_tools`, which is T-115's, and a forced
 route (R11) needs the configurable key, which is T-116's — each owns the record's
-`diverted_from` / `forced` field on its own path. `generate()` / `agenerate()` are T-117's and
-raise today.
+`diverted_from` / `forced` field on its own path. `generate()` / `agenerate()` are T-117's, and
+`test_generate.py` covers the record on them.
 """
 
 from __future__ import annotations
