@@ -64,6 +64,16 @@ async def respond(
     request and assertions about a call's runs, warnings and record read the same for all.
     """
     if convention in ("generate", "agenerate"):
+        if not isinstance(model, BaseChatModel):
+            # A binding (`bind_tools(...)`, `bind(...)`) reaches `generate` only through
+            # `__getattr__`, which forwards to the bound model *without* the bound arguments —
+            # on any chat model, not only the router. Testing generate on one would silently test
+            # an unbound call, so refuse (pass tools to `generated(...)` as a call argument).
+            msg = (
+                f"{convention}() on a {type(model).__name__}: a binding's arguments do not reach "
+                f"generate(); call it on the chat model, with the arguments passed directly"
+            )
+            raise TypeError(msg)
         result = await generated(model, convention, [messages_of(input_)], config)
         generation = result.generations[0][0]
         assert isinstance(generation, ChatGeneration)

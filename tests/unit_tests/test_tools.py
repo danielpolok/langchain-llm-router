@@ -22,7 +22,8 @@ from typing import Any, Literal, NamedTuple, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
-from langchain_core.messages import AIMessage, ToolCall
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall
+from langchain_core.outputs import ChatGeneration
 from langchain_core.runnables import Runnable, RunnableBinding, RunnableLambda
 from langchain_core.tools import tool
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
@@ -45,7 +46,7 @@ from langchain_llm_router import (
 )
 from langchain_llm_router._tools import supports_tools
 from langchain_llm_router.decision import ROUTING_KEY
-from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, Convention, respond
+from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, Convention, generated, respond
 from tests.fakes import (
     FakeChatModel,
     NativeStructuredFakeChatModel,
@@ -465,7 +466,12 @@ async def test_when_the_default_cannot_use_tools_a_diverted_request_goes_to_the_
     assert [len(call_log(routes[name])) for name in ("first", "second")] == [1, 0]
 
 
-@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
+BOUND_CONVENTIONS = tuple(c for c in ALL_CONVENTIONS if c not in ("generate", "agenerate"))
+"""The conventions a *bound* router answers: `generate` reaches a binding only through
+`__getattr__`, which drops the bound arguments on any chat model (see `respond`)."""
+
+
+@pytest.mark.parametrize("convention", BOUND_CONVENTIONS)
 async def test_every_calling_convention_diverts_and_records_it(convention: Convention) -> None:
     """REQ-R10-3, REQ-R2-1: a diverted request carries the record with `diverted_from` however
     it was called — including `batch` and event streams — and warns exactly once."""
@@ -478,6 +484,28 @@ async def test_every_calling_convention_diverts_and_records_it(convention: Conve
 
     assert message.content == "frontier answer"
     assert routing_decision(message) == diverted("cheap", to="frontier")
+    assert [w.category for w in routing_warnings(caught)] == [ToolSupportWarning]
+    assert [len(call_log(routes[name])) for name in ("first", "cheap", "frontier")] == [0, 0, 1]
+
+
+@pytest.mark.parametrize("convention", ["generate", "agenerate"])
+async def test_generate_diverts_when_the_tools_are_passed_as_a_call_argument(
+    convention: Literal["generate", "agenerate"],
+) -> None:
+    """REQ-R10-3, REQ-R2-1, REQ-C2-2: `generate` takes its tools as a call argument, as on any
+    chat model, and diverts a request off a route that can't use them — the diversion recorded,
+    one warning, and no second model run."""
+    router, routes = mixed()
+    raw = [convert_to_openai_tool(get_weather)]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = await generated(router, convention, [[HumanMessage("cheap")]], tools=raw)
+
+    (generation,) = result.generations[0]
+    assert isinstance(generation, ChatGeneration)
+    assert generation.message.content == "frontier answer"
+    assert routing_decision(generation.message) == diverted("cheap", to="frontier")
     assert [w.category for w in routing_warnings(caught)] == [ToolSupportWarning]
     assert [len(call_log(routes[name])) for name in ("first", "cheap", "frontier")] == [0, 0, 1]
 
