@@ -24,12 +24,16 @@ Every entry point runs the same pipeline, in D9's order:
    abandons a stream is not a failure, and keeps its record.
 
 `batch`, `abatch` and `astream_events` need nothing of their own: `Runnable` builds them on the
-four entry points above. The one door that does not lead through them is the v3 streaming
-protocol, which is refused — `_V3_UNSUPPORTED` says why.
+four entry points above. `generate` and `agenerate` — and `generate_prompt` and
+`agenerate_prompt`, which call them — are built on `invoke` and `ainvoke`, one prompt at a time
+(REQ-C2-2). The one door that does not lead through them is the v3 streaming protocol, which is
+refused — `_V3_UNSUPPORTED` says why.
 """
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 import warnings
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -41,10 +45,11 @@ from langchain_core.callbacks import (
     CallbackManager,
     CallbackManagerForChainRun,
     CallbackManagerForLLMRun,
+    Callbacks,
 )
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
-from langchain_core.outputs import ChatResult
+from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult, RunInfo
 from langchain_core.runnables import Runnable, RunnableConfig, ensure_config, patch_config
 from langchain_core.runnables.config import set_config_context
 from langchain_core.runnables.schema import StreamEvent
@@ -412,6 +417,101 @@ class ChatRouter(BaseChatModel):
             raise NotImplementedError(_V3_UNSUPPORTED)
         return super().astream_events(input, config, version=version, **kwargs)
 
+    def generate(
+        self,
+        messages: list[list[BaseMessage]],
+        stop: list[str] | None = None,
+        callbacks: Callbacks = None,
+        *,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        run_name: str | None = None,
+        run_id: uuid.UUID | None = None,
+        **kwargs: Any,
+    ) -> LLMResult:
+        """Route every prompt as `invoke` does, and answer in an `LLMResult` (C2, REQ-C2-2).
+
+        The base `generate` opens a model run per prompt and calls `_generate` inside it
+        (`chat_models.py:1668`), so left alone it would put a model run of the router's own
+        beside the route's and bill the same tokens twice (R3, spike caveat 1). This runs
+        `invoke` once per prompt instead, so each prompt gets what an `invoke` gets: a router
+        chain run of its own, its own decision — prompts are decided one by one (R4), not
+        once for the batch — and the route's call as the only model run.
+
+        What carries over from the base `generate`:
+
+        - `callbacks`, `tags`, `metadata` and `run_name` apply to every prompt's run, and
+          `run_id` names the first prompt's (`manager.py:1452`); the others get one of their own.
+          `BaseChatModel.invoke` takes a config apart into these arguments (`:488`), and
+          `_generate_config` puts them back together.
+        - `stop` and `kwargs` reach the route, as they reach it from `invoke`.
+        - `LLMResult.run` lists the run each prompt got: the router's chain run, which is the
+          top-level run the caller called.
+        - Prompts run in order, and the first failure stops the call.
+
+        What does not is the shape of the route's own `LLMResult`. A prompt is answered by the
+        route's message, with its record — `usage_metadata`, `response_metadata`, `id` and all —
+        so a route's extra candidates, `generation_info` and `llm_output` stay on the route's own
+        run, where its callbacks see them: a cost callback reads `on_llm_end`, not this result.
+        LangChain itself tells callers not to rely on `llm_output` and to read the message
+        (`outputs/llm_result.py:40`), so it is `{}` here, as it is for any chat model that does
+        not combine its outputs.
+
+        Nor does a `FallbackWarning` point at the caller, as it does under `invoke`: `_CALLER`
+        counts the frames of an entry point that runs the pipeline itself, and this one reaches
+        it through `invoke`, so the warning names this module. (`agenerate`, whose prompts are
+        tasks, has no caller frame above them either, and neither has `abatch`.)
+        """
+        run_ids = _run_ids(len(messages), run_id)
+        answers = [
+            self.invoke(
+                prompt,
+                _generate_config(callbacks, tags, metadata, run_name, prompt_run_id),
+                stop=stop,
+                **kwargs,
+            )
+            for prompt, prompt_run_id in zip(messages, run_ids, strict=True)
+        ]
+        return _llm_result(answers, run_ids)
+
+    async def agenerate(
+        self,
+        messages: list[list[BaseMessage]],
+        stop: list[str] | None = None,
+        callbacks: Callbacks = None,
+        *,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        run_name: str | None = None,
+        run_id: uuid.UUID | None = None,
+        **kwargs: Any,
+    ) -> LLMResult:
+        """Async `generate`: the prompts overlap, as the base `agenerate` overlaps them (C2).
+
+        Every prompt runs to the end before a failure is raised — the first, in prompt order —
+        because the others' route calls are already in flight and have been paid for
+        (`chat_models.py:1808`); each closes its own router run either way.
+        """
+        run_ids = _run_ids(len(messages), run_id)
+        outcomes = await asyncio.gather(
+            *(
+                self.ainvoke(
+                    prompt,
+                    _generate_config(callbacks, tags, metadata, run_name, prompt_run_id),
+                    stop=stop,
+                    **kwargs,
+                )
+                for prompt, prompt_run_id in zip(messages, run_ids, strict=True)
+            ),
+            return_exceptions=True,
+        )
+        answers: list[AIMessage] = []
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+            answers.append(outcome)
+        return _llm_result(answers, run_ids)
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -419,15 +519,21 @@ class ChatRouter(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """Not routed: the base `generate` path would open a model run of the router's own.
+        """Refuses: the router has no model call of its own, and a call that reaches this went
+        around the routed entry points.
 
-        That run and the route's would bill the same tokens twice, silently (R3, spike
-        surprise 3), so this refuses rather than miscount. Routing `generate()` and
-        `agenerate()` the way `invoke` does is REQ-C2-2.
+        `invoke`, `ainvoke`, `stream`, `astream`, `generate` and `agenerate` all hand the request
+        to a route, and nothing reachable through them comes here. What could is a door left
+        open — the v3 streaming protocol before it was refused, or a new base-class path in a
+        later `langchain-core` — and the base class would run this inside a model run of the
+        router's own, beside the route's, billing the same tokens twice without an error (R3,
+        spike surprise 3). Refusing turns that silent miscount into a failure someone sees. It
+        is also what stops `_agenerate`, which the base class builds on this, from working.
         """
         msg = (
-            "ChatRouter routes invoke, ainvoke, stream, astream and batch; "
-            "generate() and agenerate() are not supported yet"
+            "ChatRouter has no model call of its own: invoke, ainvoke, stream, astream, "
+            "generate and agenerate hand each request to a route, and this call reached the "
+            "router another way"
         )
         raise NotImplementedError(msg)
 
@@ -854,6 +960,53 @@ def _no_tool_capable_route(routes: Iterable[str]) -> str:
     return (
         f"no route can use tools: {_names(routes)}; binding tools or structured output needs "
         "at least one tool-capable route — tool_support_overrides can name one"
+    )
+
+
+def _run_ids(count: int, first: uuid.UUID | None) -> list[uuid.UUID]:
+    """One router run id per prompt of a `generate`: the caller's for the first, if it gave one.
+
+    The base `generate` names only the first prompt's run after `run_id` (`manager.py:1452`),
+    and reports every run's id in `LLMResult.run`. `invoke` opens its own run, so the ids are
+    chosen here and handed to it, which is what lets the result report them.
+    """
+    ids = [uuid.uuid4() for _ in range(count)]
+    if first is not None and ids:
+        ids[0] = first
+    return ids
+
+
+def _generate_config(
+    callbacks: Callbacks,
+    tags: list[str] | None,
+    metadata: dict[str, Any] | None,
+    run_name: str | None,
+    run_id: uuid.UUID,
+) -> RunnableConfig:
+    """The config a `generate` call's arguments amount to, for one prompt's `invoke`.
+
+    `generate` has no `configurable`, `max_concurrency` or `recursion_limit` to give: a chat
+    model's `generate` never took them, and `invoke` finds any that are set on the calling
+    context through `ensure_config`.
+    """
+    config = RunnableConfig(run_id=run_id)
+    if callbacks is not None:
+        config["callbacks"] = callbacks
+    if tags is not None:
+        config["tags"] = tags
+    if metadata is not None:
+        config["metadata"] = metadata
+    if run_name is not None:
+        config["run_name"] = run_name
+    return config
+
+
+def _llm_result(answers: list[AIMessage], run_ids: list[uuid.UUID]) -> LLMResult:
+    """One generation per prompt, in order; `run` is left unset for no prompts, as the base's is."""
+    return LLMResult(
+        generations=[[ChatGeneration(message=answer)] for answer in answers],
+        llm_output={},
+        run=[RunInfo(run_id=run_id) for run_id in run_ids] or None,
     )
 
 
