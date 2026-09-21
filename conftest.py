@@ -15,6 +15,16 @@ from dotenv import load_dotenv
 # never overrides a variable the environment already sets.
 load_dotenv()
 
+# `.env` switches LangSmith tracing on for interactive use. Under pytest that would upload a trace
+# of every fake-model call to the developer's account, and count against its quota, as soon as the
+# key is valid — so tracing is off for the suite. The live tests hand a `LangChainTracer` to each
+# call explicitly and need neither setting; `LLM_ROUTER_TRACE_TESTS=1` turns it back on for
+# everything.
+if not os.environ.get("LLM_ROUTER_TRACE_TESTS"):
+    os.environ["LANGSMITH_TRACING"] = "false"
+    for _legacy in ("LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING", "LANGSMITH_TRACING_V2"):
+        os.environ.pop(_legacy, None)
+
 _OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 
 
@@ -43,7 +53,12 @@ def _langsmith_unusable() -> str | None:
 
         list(Client(timeout_ms=(3_000, 10_000)).list_projects(limit=1))
     except Exception as error:  # any failure, not only auth: a test that can't reach it skips
-        return f"LangSmith did not accept the credentials: {type(error).__name__}"
+        endpoint = os.environ.get("LANGSMITH_ENDPOINT") or "the SDK's default endpoint"
+        return (
+            f"LangSmith did not accept the credentials: {type(error).__name__} at {endpoint}. "
+            "A key from the other region (US vs EU) is refused with a 403: "
+            "check LANGSMITH_ENDPOINT."
+        )
     return None
 
 
