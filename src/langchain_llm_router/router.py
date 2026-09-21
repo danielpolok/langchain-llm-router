@@ -19,6 +19,10 @@ Every entry point runs the same pipeline, in D9's order:
    record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
    and withdraws the record: a call that failed has no decision to report. A caller that
    abandons a stream is not a failure, and keeps its record.
+
+`batch`, `abatch` and `astream_events` need nothing of their own: `Runnable` builds them on the
+four entry points above. The one door that does not lead through them is the v3 streaming
+protocol, which is refused — `_V3_UNSUPPORTED` says why.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig, ensure_config, patch_config
 from langchain_core.runnables.config import set_config_context
+from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import coro_with_context
 from pydantic import Field, field_validator, model_validator
 
@@ -71,6 +76,24 @@ are `_fallback` ← `_conclude` or `_plan` ← `_decide` / `_adecide` ← the en
 It counts *this* path, not every warning the router raises: a warning raised at another depth
 (T-115's `ToolSupportWarning`, T-116's `ForcedRouteWarning`) needs its own count, and a test
 that asserts where the warning points."""
+
+_V3_UNSUPPORTED = (
+    "ChatRouter does not support the v3 streaming protocol "
+    "(stream_events / astream_events with version='v3'): it drives the model through "
+    "_stream / _generate directly, which would bypass routing, the decision record and the "
+    "run shape entirely. Use stream(), astream(), or version='v2' events."
+)
+"""Why v3 is refused rather than delegated (C2, D8, D9).
+
+`_chat_model_stream_v3` (`language_models/chat_models.py:995` in `langchain-core` 1.6.3; new in
+1.4, and still beta) calls `self._stream` — the one hook a *delegating* router deliberately
+does not implement, so none of the pipeline runs. Delegating to the selected route's own v3
+stream would need the router to own the returned `ChatModelStream`: that type lives in a module
+`langchain_core` doesn't export, it has no completion hook to close the router's run with, and
+it assembles its `response_metadata` only from protocol events, so the record (D8) could only
+be put there by forging one. None of it exists in `langchain-core` 1.1, the minimum supported.
+Refusing at the two public doors keeps the failure honest and, unlike the base class's bare
+`NotImplementedError`, stops a chat-model run being opened for the router itself (C5)."""
 
 
 class ChatRouter(BaseChatModel):
@@ -310,6 +333,43 @@ class ChatRouter(BaseChatModel):
             await run_manager.on_chain_error(error)
             raise
         await run_manager.on_chain_end(_run_outputs(output, decision))
+
+    def stream_events(  # type: ignore[override]
+        self,
+        input: LanguageModelInput,
+        config: RunnableConfig | None = None,
+        *,
+        version: Literal["v1", "v2", "v3"] = "v2",
+        **kwargs: Any,
+    ) -> Iterator[StreamEvent]:
+        """v1 and v2 events, which are produced from `stream` and so are routed (C2).
+
+        The narrower return type than the base class's is the point: v3 is refused, so a
+        router only ever hands back `StreamEvent`s.
+        """
+        if version == "v3":
+            raise NotImplementedError(_V3_UNSUPPORTED)
+        # `Runnable` grew a synchronous `stream_events` in `langchain-core` 1.4, alongside v3.
+        # Below that, `super()` has none and this raises the `AttributeError` a bare chat model
+        # raises there too — and `version="v3"` is unreachable, so the guard above never fires.
+        return super().stream_events(input, config, version=version, **kwargs)
+
+    def astream_events(  # type: ignore[override]
+        self,
+        input: LanguageModelInput,
+        config: RunnableConfig | None = None,
+        *,
+        version: Literal["v1", "v2", "v3"] = "v2",
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamEvent]:
+        """Async `stream_events`: v1 and v2 events, produced from `astream` (C2).
+
+        Not an `async def`, as the base class's isn't: it hands back the iterator rather than
+        being one, so a v3 caller — who would `await` this — is refused at the call itself.
+        """
+        if version == "v3":
+            raise NotImplementedError(_V3_UNSUPPORTED)
+        return super().astream_events(input, config, version=version, **kwargs)
 
     def _generate(
         self,

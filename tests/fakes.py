@@ -23,8 +23,12 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class FakeChatModel(BaseChatModel):
-    """A route that answers with fixed content and reports usage like a real provider.
+class GenerateOnlyFakeChatModel(BaseChatModel):
+    """A route with no streaming API of its own: it implements `_generate` and nothing else.
+
+    Providers without a streaming endpoint look like this, and LangChain covers for them —
+    `BaseChatModel.stream` falls back to `invoke` and yields the whole message as the single
+    chunk. The router has to preserve that (REQ-C2-4), so tests need a route that has it.
 
     Cannot use tools: it keeps `BaseChatModel`'s `bind_tools`, which raises at call time (R10).
     """
@@ -75,6 +79,13 @@ class FakeChatModel(BaseChatModel):
     ) -> ChatResult:
         self.calls.append(dict(kwargs))
         return ChatResult(generations=[ChatGeneration(message=self._message())])
+
+
+class FakeChatModel(GenerateOnlyFakeChatModel):
+    """A route that answers with fixed content and reports usage like a real provider.
+
+    Streams its reply token by token, as a provider with a streaming API does.
+    """
 
     def _stream(
         self,
@@ -153,4 +164,4 @@ def call_log(route: BaseChatModel) -> list[dict[str, Any]]:
     `ChatRouter.routes` is typed to LangChain's base class, and `dict` is invariant, so tests
     hold their routes as `dict[str, BaseChatModel]` and come back here for the fake's own record.
     """
-    return cast("FakeChatModel", route).calls
+    return cast("GenerateOnlyFakeChatModel", route).calls
