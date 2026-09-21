@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
@@ -120,7 +120,19 @@ class FakeChatModel(GenerateOnlyFakeChatModel):
 
 
 class ToolCallingFakeChatModel(FakeChatModel):
-    """A route that can use tools: `bind_tools` converts them and binds them as kwargs."""
+    """A route that can use tools: `bind_tools` converts them and binds them as kwargs.
+
+    Behaves as the providers do where it matters to the router: `strict=` is consumed at bind
+    time, changing how the schema is built (`convert_to_openai_tool(..., strict=...)`), and so
+    never becomes a call kwarg; `tool_choice` and any other binding kwarg do.
+    """
+
+    tool_format: Literal["openai", "anthropic"] = "openai"
+    """The shape this provider wants a converted tool in: OpenAI's function spec, or Anthropic's
+    `name` / `description` / `input_schema` — so two routes can convert the same tool apart."""
+
+    bind_calls: list[dict[str, Any]] = Field(default_factory=list)
+    """Every `bind_tools` call this route took, as given — before any conversion."""
 
     def bind_tools(
         self,
@@ -129,10 +141,23 @@ class ToolCallingFakeChatModel(FakeChatModel):
         tool_choice: str | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        converted = [convert_to_openai_tool(tool) for tool in tools]
+        self.bind_calls.append({"tools": list(tools), "tool_choice": tool_choice, **kwargs})
+        strict = kwargs.pop("strict", None)
+        converted = [self._convert(tool, strict) for tool in tools]
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
         return self.bind(tools=converted, **kwargs)
+
+    def _convert(self, tool: Any, strict: bool | None) -> dict[str, Any]:
+        spec = convert_to_openai_tool(tool, strict=strict)
+        if self.tool_format == "openai":
+            return spec
+        function = spec["function"]
+        return {
+            "name": function["name"],
+            "description": function.get("description", ""),
+            "input_schema": function["parameters"],
+        }
 
 
 class NativeStructuredFakeChatModel(ToolCallingFakeChatModel):

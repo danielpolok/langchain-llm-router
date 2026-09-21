@@ -50,19 +50,18 @@ from langchain_core.runnables.config import set_config_context
 from langchain_core.runnables.schema import StreamEvent
 from langchain_core.runnables.utils import coro_with_context
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from langchain_llm_router._extraction import build_request
 from langchain_llm_router._tools import (
-    STRUCTURED_OUTPUT_KEY,
-    TOOL_BINDING_KEY,
+    BINDING_KEY,
     StructuredOutput,
     StructuredOutputBinding,
     StructuredRouter,
     ToolBinding,
     bound_route,
     supports_tools,
-    tools_bound,
+    tools_are_bound,
 )
 from langchain_llm_router.decision import (
     ROUTING_KEY,
@@ -459,7 +458,7 @@ class ChatRouter(BaseChatModel):
         """
         self._check_tool_support()
         binding = ToolBinding(tools=tuple(tools), tool_choice=tool_choice, kwargs=dict(kwargs))
-        return self.bind(**{TOOL_BINDING_KEY: binding, "tools": list(tools)})
+        return self.bind(**{BINDING_KEY: binding, "tools": list(tools)})
 
     def with_structured_output(
         self,
@@ -553,7 +552,7 @@ class ChatRouter(BaseChatModel):
         request = build_request(
             messages,
             routes=tuple(self.routes),
-            tools_bound=tools_bound(kwargs),
+            tools_bound=tools_are_bound(kwargs),
             wants_full_context=strategy.wants_full_context,
             # Replaced by the strategy run's child config once that run is open (D9).
             config=config,
@@ -703,8 +702,8 @@ class ChatRouter(BaseChatModel):
         if target is None:
             raise NoToolCapableRouteError(_no_tool_capable_route(self.routes))
         warnings.warn(
-            f"these routes can't use tools, so requests routed to them go to {target!r} "
-            f"instead: {_names(incapable)}",
+            f"routes that can't use tools: {_names(incapable)}; a request routed to one of "
+            f"them goes to {target!r} instead",
             ToolSupportWarning,
             stacklevel=_BINDING_CALLER,
         )
@@ -721,10 +720,13 @@ class ChatRouter(BaseChatModel):
         asked for, and it happens per request, so it is per request that the application
         hears about it. `diverted_from` keeps the route it came from (R2).
 
-        A *forced* route (R11) is never swapped silently and so is not this method's to
-        divert; T-116 settles it before the request gets here.
+        Runs after the strategy's run has closed (D9), so that run's output stays what the
+        strategy chose; the router run's outputs, the route run's metadata and the response
+        carry the record as diverted. A forced route that can't use the bound tools is R11's
+        to refuse before a request gets here (REQ-R11-2, T-116); whatever it falls back to is
+        diverted like any other decision.
         """
-        if not tools_bound(kwargs) or self._supports_tools(decision.route):
+        if not tools_are_bound(kwargs) or self._supports_tools(decision.route):
             return decision
         target = self._tool_capable_route()
         if target is None:
