@@ -146,10 +146,20 @@ failures raise the `RoutingError` subclass directly. Tests assert accordingly.
 
 | ID | Requirement | Check | Task |
 | --- | --- | --- | --- |
-| REQ-C2-1 | `invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and `astream_events` all work, with no router-specific call form. | Each convention returns the selected route's output; merged stream chunks equal the `invoke` output for a deterministic fake route. | T-113 |
+| REQ-C2-1 | `invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and `astream_events` (v1/v2) all work, with no router-specific call form. The beta v3 streaming protocol is out of scope for v1 and is refused before the router's run opens. | Each convention returns the selected route's output; merged stream chunks equal the `invoke` output for a deterministic fake route; `stream_events(version="v3")` raises `NotImplementedError` naming the alternatives, and opens no run. | T-113 |
 | REQ-C2-2 | `generate()` / `agenerate()` route, record and cost exactly as `invoke` does. | Usage totals and decision record match `invoke`; no second LLM run. *(Spike caveat: these still take the base path and would double count.)* | T-117 |
 | REQ-C2-3 | Async paths await both the strategy and the route; neither blocks the event loop. | A strategy whose `adecide` sleeps does not block a concurrently running task; `abatch` of N requests overlaps. | T-113 |
 | REQ-C2-4 | A route without native streaming still streams through the router. | Streaming a fake route that implements only `_generate` yields one chunk equal to the full message. | T-113 |
+
+*Amended 2026-09-21 (T-113).* `langchain-core` 1.4 added a beta v3 streaming protocol
+(`stream_events(version="v3")`). It reaches `_stream` directly, so a router that delegates from
+the public entry points cannot serve it, and today it fires `on_chat_model_start` **for the
+router itself** before failing — breaking the one-model-run invariant C5 rests on. Serving it
+honestly would need three private `langchain_core` names, including forging a protocol event to
+deliver the decision record. It is therefore refused before the router's run opens, and v1/v2
+pass through untouched. The protocol is unreachable on the minimum supported `langchain-core`
+1.1, where the guard is inert. Worth revisiting if v3 leaves beta and `ChatModelStream` is
+exported.
 
 ### C3 · Tools and structured output
 
