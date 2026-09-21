@@ -14,9 +14,11 @@ Every entry point runs the same pipeline, in D9's order:
    did into a `RoutingDecision`, falling back to the default route when it can't (R9).
 3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata.
-4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8),
-   and the router's run closes with the record in its outputs. A route's error closes it as an
-   error and propagates unchanged (C6).
+4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
+   and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
+   record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
+   and withdraws the record: a call that failed has no decision to report. A caller that
+   abandons a stream is not a failure, and keeps its record.
 """
 
 from __future__ import annotations
@@ -42,7 +44,12 @@ from langchain_core.runnables.utils import coro_with_context
 from pydantic import Field, field_validator, model_validator
 
 from langchain_llm_router._extraction import build_request
-from langchain_llm_router.decision import ROUTING_KEY, RoutingDecision
+from langchain_llm_router.decision import (
+    ROUTING_KEY,
+    RoutingDecision,
+    discard_decision,
+    record_decision,
+)
 from langchain_llm_router.errors import FallbackWarning, RoutingError
 from langchain_llm_router.strategy import (
     RoutingCallable,
@@ -169,6 +176,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = call.route.invoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -192,6 +200,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = await call.route.ainvoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             await run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -222,7 +231,15 @@ class ChatRouter(BaseChatModel):
                 else:
                     output += chunk
                 yield chunk
+        except GeneratorExit as error:
+            # A caller that stops consuming — a `break`, or the generator being finalized —
+            # is not a failed call: the chunks it did take carry the record, and the record
+            # stays readable. Finalization can also run on another thread or context (D3),
+            # where a tombstone would erase a record that is not this call's at all.
+            run_manager.on_chain_error(error)
+            raise
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             run_manager.on_chain_error(error)
             raise
         run_manager.on_chain_end(_run_outputs(output, decision))
@@ -253,7 +270,12 @@ class ChatRouter(BaseChatModel):
                 else:
                     output += chunk
                 yield chunk
+        except GeneratorExit as error:
+            # Not a failed call — see `stream`.
+            await run_manager.on_chain_error(error)
+            raise
         except BaseException as error:
+            discard_decision()  # this call has no decision to report (C6, D3)
             await run_manager.on_chain_error(error)
             raise
         await run_manager.on_chain_end(_run_outputs(output, decision))
@@ -517,7 +539,12 @@ def _with_record(message: MessageT, decision: RoutingDecision) -> MessageT:
 
     A copy, not an edit in place: the route may keep the object it returned — its response
     cache does — and must not find one call's record on another call's answer (C10).
+
+    Also publishes the decision for `last_routing_decision()` (D3). Every entry point passes
+    through here, and so does anything built on them — including the structured-output path
+    whose parsed object has nowhere to carry a record, which is what D3 exists for.
     """
+    record_decision(decision)
     return message.model_copy(
         update={"response_metadata": {**message.response_metadata, ROUTING_KEY: decision.as_dict()}}
     )
