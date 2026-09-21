@@ -182,8 +182,18 @@ failures raise the `RoutingError` subclass directly. Tests assert accordingly.
 | ID | Requirement | Check | Task |
 | --- | --- | --- | --- |
 | REQ-C6-1 | A route's exception reaches the caller as the same exception, with no router-level retry or model fallback. | `pytest.raises(RouteSpecificError)` with identical type and args; the route was called once. | T-118 |
-| REQ-C6-2 | `with_retry` and `with_fallbacks` behave on the router as on a model, and routes may themselves be wrapped. | `router.with_retry()` retries; `router.with_fallbacks([other])` falls over; a route wrapped in `with_retry` retries inside the router. | T-118 |
+| REQ-C6-2 | `with_retry` and `with_fallbacks` behave on the router as on a model. A route is a chat model: retries belong on the router or inside the provider's client, and a wrapped route is rejected at construction rather than half-working. | `router.with_retry()` retries and gives up with the route's own exception; `router.with_fallbacks([other])` falls over; `ChatRouter(routes={"a": model.with_retry()})` raises, naming both alternatives. | T-118 |
 | REQ-C6-3 | A route failure closes the router's chain run as an error. | The tracer records `on_chain_error` on the router's run, and no dangling open run. | T-118 |
+
+*Amended 2026-09-21 (T-118).* REQ-C6-2 first said "routes may themselves be wrapped". It is
+unbuildable against the pinned `routes: dict[str, BaseChatModel]`, and worse than unbuildable if
+the field were widened: `RunnableBindingBase.stream` yields straight from `self.bound.stream(...)`,
+bypassing `RunnableRetry.invoke`, so a route wrapped in `with_retry` retries on `invoke` and
+`ainvoke` and **silently does not** when streamed — measured on a model that fails twice then
+succeeds. A feature whose behaviour depends on the calling convention is what C2 exists to
+forbid, and widening the field would also move tool capability (D5), the profile intersection
+(REQ-C3-4) and cache ownership (D4) onto an unwrap-or-degrade path. Widening later stays
+compatible; narrowing would not.
 
 ### C7 · Messages as LangChain defines them
 
