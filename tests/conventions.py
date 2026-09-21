@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Literal, TypeAlias, cast
 
-from langchain_core.language_models import BaseChatModel, LanguageModelInput
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import Runnable, RunnableConfig
 
 Convention: TypeAlias = Literal["invoke", "ainvoke", "stream", "astream"]
 """An entry point the router overrides itself (D9)."""
@@ -30,7 +30,7 @@ ALL_CONVENTIONS: tuple[AnyConvention, ...] = (*CONVENTIONS, "batch", "abatch", "
 
 
 async def respond(
-    model: BaseChatModel,
+    model: Runnable[LanguageModelInput, AIMessage],
     convention: AnyConvention,
     input_: LanguageModelInput,
     config: RunnableConfig | None = None,
@@ -48,10 +48,12 @@ async def respond(
         return model.batch([input_], config)[0]
     if convention == "abatch":
         return (await model.abatch([input_], config))[0]
+    # A bare `Runnable` types its stream as its output, an `AIMessage`; a chat model streams
+    # `AIMessageChunk`s, which is what gets merged below.
     if convention == "stream":
-        chunks = list(model.stream(input_, config))
+        chunks = [cast("AIMessageChunk", chunk) for chunk in model.stream(input_, config)]
     elif convention == "astream":
-        chunks = [chunk async for chunk in model.astream(input_, config)]
+        chunks = [cast("AIMessageChunk", chunk) async for chunk in model.astream(input_, config)]
     else:
         chunks = [chunk async for chunk in streamed_chunks(model, input_, config)]
     merged = chunks[0]
@@ -61,7 +63,7 @@ async def respond(
 
 
 async def streamed_chunks(
-    model: BaseChatModel,
+    model: Runnable[LanguageModelInput, AIMessage],
     input_: LanguageModelInput,
     config: RunnableConfig | None = None,
 ) -> AsyncIterator[AIMessageChunk]:
