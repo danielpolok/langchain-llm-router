@@ -103,12 +103,16 @@ _BINDING_CALLER = 3
 
 _BOUND_CALLER = 4
 """`stacklevel` that points a per-request `ToolSupportWarning` (R10) at the code that called
-the *bound* router: `_divert` ← the entry point ← the binding ← the caller.
+what `bind_tools` or `with_structured_output` returned: `_divert` ← the entry point ← the
+binding (`RunnableBinding`, or `StructuredRouter`) ← the caller. One frame deeper than
+`_CALLER`'s path, because the caller holds a binding and not the router.
 
-One frame deeper than `_CALLER`'s path, and reliably so: a request is only ever diverted when
-something is bound, and what the caller then holds is never the router itself but a binding
-over it — `RunnableBinding.invoke` / `.stream`, which delegate in a single frame, or
-`StructuredRouter`, which does the same."""
+Tests pin it for `invoke`, `ainvoke`, `stream` and `astream` on `bind_tools`, and for `invoke`
+and `ainvoke` on `with_structured_output`. Whatever adds or removes a frame between the caller
+and the router — `batch` and event streams, which `Runnable` builds on the entry points;
+`Runnable.stream`'s default, which is structured output's `stream`; a call with `tools=` passed
+straight to the router, which has no binding at all — moves where the warning points and
+nothing else: it is still raised once, for the one request."""
 
 _V3_UNSUPPORTED = (
     "ChatRouter does not support the v3 streaming protocol "
@@ -453,6 +457,10 @@ class ChatRouter(BaseChatModel):
         Binding is also when the application learns which routes can't use tools
         (`_check_tool_support`), rather than on the first request that picks one.
 
+        Binding again replaces the binding, as on any chat model: a binding over a binding
+        hands `bind_tools` back to the model (`RunnableBinding.__getattr__`), so what the
+        first held is not part of the second.
+
         `tool_choice` is typed wider than `BaseChatModel.bind_tools` types it: providers take
         dicts and booleans too, and whatever a route accepts has to reach it unchanged (C1).
         """
@@ -480,7 +488,9 @@ class ChatRouter(BaseChatModel):
 
         What comes back routes through the router's pipeline, so the decision reaches the
         trace and `last_routing_decision()`; with `include_raw=True` the raw message carries
-        it too (D3, REQ-R2-4).
+        it too (D3, REQ-R2-4). It answers once when streamed — the finished object, as its
+        only item — because the route's partial parses would have to pass through the router's
+        chunk merging, which a parsed object doesn't support.
         """
         self._check_tool_support()
         binding = StructuredOutputBinding(
@@ -840,7 +850,7 @@ def _run_outputs(answer: object, decision: RoutingDecision) -> dict[str, Any]:
 
 
 def _no_tool_capable_route(routes: Iterable[str]) -> str:
-    """What binding tools to a router no route of which can use them means (REQ-R10-2)."""
+    """The message for a router none of whose routes can use tools (REQ-R10-2)."""
     return (
         f"no route can use tools: {_names(routes)}; binding tools or structured output needs "
         "at least one tool-capable route — tool_support_overrides can name one"

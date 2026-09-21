@@ -694,29 +694,42 @@ async def test_each_route_receives_the_tools_in_its_own_form(convention: Convent
     assert [spec["name"] for spec in anthropic_call["tools"]] == ["get_weather", "Answer"]
 
 
+BINDING_KWARGS = [
+    pytest.param(
+        {"tool_choice": "any", "strict": True, "parallel_tool_calls": False},
+        id="tool_choice and provider kwargs",
+    ),
+    pytest.param({"strict": True}, id="a provider kwarg alone"),
+    pytest.param({"tool_choice": "get_weather"}, id="tool_choice alone"),
+]
+
+
+@pytest.mark.parametrize("kwargs", BINDING_KWARGS)
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_binding_kwargs_reach_the_route_s_binder_and_not_its_call(
-    convention: Convention,
+    convention: Convention, kwargs: dict[str, Any]
 ) -> None:
     """REQ-C3-1: `tool_choice` and binding kwargs such as `strict=` are replayed on the route's
-    own `bind_tools` — the same call, with the same arguments, as binding the route directly.
+    own `bind_tools` — the same call, with the same arguments, as binding the route directly,
+    whether or not a `tool_choice` comes with them.
 
     `strict=` is the one that matters: it changes how the schema is *built*, so passed as a call
-    kwarg it would be too late and never read. Here it has done its work at bind time
-    (`function.strict`) and is not in the call."""
-    kwargs: dict[str, Any] = {"tool_choice": "any", "strict": True, "parallel_tool_calls": False}
+    kwarg it would be too late and never read. It has done its work at bind time
+    (`function.strict`) and is not in the call; the other kwargs are the route's own to bind."""
     through_router, direct = capable("a"), capable("a")
     router = ChatRouter(routes={"a": through_router}, default_route="a")
 
     await respond(router.bind_tools([get_weather], **kwargs), convention, "hello")
     await respond(direct.bind_tools([get_weather], **kwargs), convention, "hello")
 
-    assert through_router.bind_calls == direct.bind_calls == [{"tools": [get_weather], **kwargs}]
+    expected = {"tools": [get_weather], "tool_choice": None, **kwargs}
+    assert through_router.bind_calls == direct.bind_calls == [expected]
     assert through_router.calls == direct.calls
     (call,) = through_router.calls
     assert "strict" not in call
-    assert call["tools"][0]["function"]["strict"] is True
-    assert (call["tool_choice"], call["parallel_tool_calls"]) == ("any", False)
+    assert call["tools"][0]["function"].get("strict") is kwargs.get("strict")
+    bound_by_the_route = {key: value for key, value in call.items() if key != "tools"}
+    assert bound_by_the_route == {k: v for k, v in kwargs.items() if k != "strict"}
 
 
 def test_the_raw_tools_are_bound_in_their_usual_place() -> None:
@@ -847,6 +860,21 @@ async def test_structured_output_answers_once_when_streamed() -> None:
 
     assert list(structured.stream("hello")) == [Answer(answer="42")]
     assert [item async for item in structured.astream("hello")] == [Answer(answer="42")]
+
+
+async def test_structured_output_batches_each_request_to_its_own_route() -> None:
+    """C2, REQ-R2-4: `batch` and `abatch` are `Runnable`'s, built on the calling convention
+    the structured output has — each input is routed on its own, and each raw message carries
+    its own record."""
+    router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
+    structured = router.with_structured_output(Answer, include_raw=True)
+
+    batched = cast("list[dict[str, Any]]", structured.batch(["a", "b"]))
+    abatched = cast("list[dict[str, Any]]", await structured.abatch(["b", "a"]))
+
+    assert [record_of(result["raw"]).route for result in batched] == ["a", "b"]
+    assert [record_of(result["raw"]).route for result in abatched] == ["b", "a"]
+    assert [result["parsed"] for result in (*batched, *abatched)] == [Answer(answer="42")] * 4
 
 
 # --- REQ-R2-4: structured output has an answer for R2 ---
