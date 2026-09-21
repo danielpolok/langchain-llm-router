@@ -5,7 +5,9 @@ the same object, with its type and args intact, raised after exactly one attempt
 `FallbackWarning` — R9's fallback absorbs a *strategy's* failure and nothing else (REQ-R9-3).
 What a caller wants instead is what LangChain already gives every runnable:
 `router.with_retry(...)` and `router.with_fallbacks([...])` wrap the router as they wrap a
-model (REQ-C6-2).
+model (REQ-C6-2). A *route* is not wrapped that way — it is a chat model, and a runnable
+wrapped around one is refused at construction, because retrying a wrapped route would work on
+`invoke` and silently not when streamed (REQ-C6-2, amended 2026-09-21).
 
 However a call fails, the router's chain run closes through `on_chain_error` and no run is left
 open (REQ-C6-3) — including on the paths that are not ordinary exceptions, where absorbing the
@@ -19,7 +21,7 @@ import asyncio
 import gc
 import warnings
 from collections.abc import Iterator
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import pytest
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
@@ -29,12 +31,14 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langchain_core.tracers.schemas import Run
+from pydantic import ValidationError
 
 from langchain_llm_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,
     RoutingDecision,
+    RoutingError,
     RoutingRequest,
     RoutingStrategy,
     RoutingWarning,
@@ -583,3 +587,92 @@ def test_the_router_has_nothing_of_its_own_to_retry_or_fall_back_with() -> None:
     assert not {"retry", "retries", "max_retries", "fallbacks", "fallback_model"} & set(
         ChatRouter.model_fields
     )
+
+
+# --- REQ-C6-2: a route is a chat model, and a wrapped one is refused ---
+
+
+def wrapped_routes() -> dict[str, Runnable[LanguageModelInput, AIMessage]]:
+    """The wrappers someone would reach for, and the class each arrives as.
+
+    `with_retry` is the one REQ-C6-2's amendment is about; `bind` is the same shape and the
+    likelier accident, since `model.bind(...)` reads like configuration rather than a wrapper.
+    """
+    model = FakeChatModel()
+    return {
+        "RunnableRetry": model.with_retry(stop_after_attempt=2),
+        "_ChatModelBinding": model.bind(temperature=0),
+    }
+
+
+def refusal_of(route: Runnable[LanguageModelInput, AIMessage]) -> tuple[tuple[Any, ...], Any]:
+    """Where constructing a router on `route` failed, and the error the validator raised.
+
+    The same shape `test_routes.py` uses: a construction-time `RoutingError` is raised inside
+    a validator, so pydantic wraps it as a `ValidationError` and keeps the original under
+    `ctx["error"]` — which is what the `RoutingError(ValueError)` rule is for.
+
+    The cast is the point of the test, not a workaround: `routes: dict[str, BaseChatModel]`
+    already makes mypy reject a wrapped route, so this asserts what the *runtime* says to
+    someone who got there without a type checker — from `init_chat_model`, a config file or a
+    notebook.
+    """
+    with pytest.raises(ValidationError) as caught:
+        ChatRouter(routes={"flaky": cast("BaseChatModel", route)}, default_route="flaky")
+    [error] = caught.value.errors()
+    return error["loc"], error.get("ctx", {}).get("error", error["type"])
+
+
+@pytest.mark.parametrize("expected_type", list(wrapped_routes()))
+def test_a_wrapped_route_is_refused_with_both_alternatives_named(expected_type: str) -> None:
+    """REQ-C6-2: a route is a chat model. A runnable wrapped around one is rejected at
+    construction, by a `RoutingError` naming the route, what it actually is, and *both* ways
+    to get retries — rather than by pydantic's `model_type` complaint, which names the type it
+    wanted and nothing to do about it."""
+    loc, error = refusal_of(wrapped_routes()[expected_type])
+
+    assert loc == ("routes",)
+    assert isinstance(error, RoutingError)
+    assert str(error) == (
+        f"route 'flaky' is a {expected_type}, not a chat model: a route is used as given, "
+        f"and a wrapper hides what the router must ask it (bind_tools, profile, cache). "
+        f"To retry, wrap the router — router.with_retry(...) — or set the provider client's "
+        f"own max_retries."
+    )
+
+
+def test_the_refusal_replaces_pydantic_s_type_complaint_rather_than_following_it() -> None:
+    """REQ-C6-2: the check runs `mode="before"`, so the wrapped route never reaches the field's
+    own type check. A caller sees one error — the one that says what to do — not two, and not
+    a bare `model_type`."""
+    wrapped = cast("BaseChatModel", FakeChatModel().with_retry(stop_after_attempt=2))
+
+    with pytest.raises(ValidationError) as caught:
+        ChatRouter(routes={"flaky": wrapped}, default_route="flaky")
+
+    assert [error["type"] for error in caught.value.errors()] == ["value_error"]
+
+
+def test_an_unusual_chat_model_is_still_a_route() -> None:
+    """REQ-C6-2's limit: the check rejects *wrappers*, not chat models that look unusual. A
+    `BaseChatModel` subclass is a route however odd it is — including one that overrides
+    `invoke` itself, which is what a wrapper is really doing."""
+
+    class OpinionatedChatModel(FakeChatModel):
+        """A chat model with its own `invoke`, as a provider package may well ship."""
+
+        def invoke(
+            self,
+            input: LanguageModelInput,
+            config: RunnableConfig | None = None,
+            *,
+            stop: list[str] | None = None,
+            **kwargs: Any,
+        ) -> AIMessage:
+            return super().invoke(input, config, stop=stop, **kwargs)
+
+    router = ChatRouter(
+        routes={"odd": OpinionatedChatModel(reply="odd answer")}, default_route="odd"
+    )
+
+    assert router.invoke("hello").content == "odd answer"

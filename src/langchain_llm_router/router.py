@@ -24,7 +24,7 @@ Every entry point runs the same pipeline, in D9's order:
 from __future__ import annotations
 
 import warnings
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Literal, NamedTuple, TypeVar, cast
 
@@ -90,7 +90,12 @@ class ChatRouter(BaseChatModel):
     """Named routes, any number of them; declaration order is significant (D1).
 
     Each is an ordinary chat model, used as given — the router never reconfigures or mutates
-    one (REQ-R5-1). The names are the mapping's keys, so they are unique."""
+    one (REQ-R5-1). The names are the mapping's keys, so they are unique.
+
+    A route is a chat model and not a runnable wrapped around one, because the router has to
+    ask it what it can do — `bind_tools` and `profile` for tool capability (D5), its `cache`
+    for D4 — and a wrapper answers none of those. Retries go on the router or in the provider's
+    client; `_reject_wrapped_routes` says so (REQ-C6-2)."""
 
     default_route: str
     """Mandatory (R9). Must name one of `routes`."""
@@ -105,6 +110,32 @@ class ChatRouter(BaseChatModel):
 
     tool_support_overrides: dict[str, bool] = Field(default_factory=dict)
     """Per-route override of capability detection (D5); always wins."""
+
+    @field_validator("routes", mode="before")
+    @classmethod
+    def _reject_wrapped_routes(cls, routes: object) -> object:
+        """A runnable that wraps a chat model is not a route, and says why (REQ-C6-2).
+
+        `model.with_retry()` and `model.bind(...)` return a `RunnableBinding`, and
+        `init_chat_model(configurable_fields=...)` a `_ConfigurableModel` — none of them a
+        `BaseChatModel`, so pydantic would reject them anyway, with a message that names the
+        expected type and not the thing to do instead. Retrying a single route is the reason
+        people reach for this, and it would not work: `RunnableBindingBase.stream` yields
+        straight from `self.bound.stream(...)`, so a wrapped route retries on `invoke` and not
+        when streamed (REQ-C6-2's amendment, 2026-09-21).
+        """
+        if not isinstance(routes, Mapping):
+            return routes
+        for name, route in routes.items():
+            if isinstance(route, Runnable) and not isinstance(route, BaseChatModel):
+                msg = (
+                    f"route {name!r} is a {type(route).__name__}, not a chat model: a route "
+                    f"is used as given, and a wrapper hides what the router must ask it "
+                    f"(bind_tools, profile, cache). To retry, wrap the router — "
+                    f"router.with_retry(...) — or set the provider client's own max_retries."
+                )
+                raise RoutingError(msg)
+        return routes
 
     @field_validator("routes")
     @classmethod
