@@ -4,11 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-v1, starting. The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered
-requirements v1 builds to), `tasks/` (tracking rules and closed tasks — open work is in GitHub
-Issues), a still-empty package
-`src/langchain_llm_router/` (v1 code goes here) and `spike/` (throwaway spike code and its tests —
-never import it from `src/`).
+v1 is being built on the integration branch `v1`, one reviewed task at a time; `v1` merges into
+`main` as a single pull request once the tasks are done, so `main` still holds only the spike and
+the requirements. Status is on the [v1 Project board](https://github.com/users/danielpolok/projects/2),
+not here.
+
+The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered requirements v1
+builds to), `tasks/` (tracking rules and closed tasks — open work is in GitHub Issues),
+`src/langchain_llm_router/` (the package) and `spike/` (throwaway spike code and its tests —
+never import it from `src/` or `tests/`).
+
+The package:
+
+| Module | Holds |
+| --- | --- |
+| `router.py` | `ChatRouter` — the pipeline, and every calling convention |
+| `strategy.py` | the strategy interface (`RoutingStrategy`, `RoutingRequest`, `RoutingChoice`) and its stability promise |
+| `_extraction.py` | current-request extraction (R4, C7) |
+| `decision.py` | the decision record, and `last_routing_decision()` |
+| `errors.py` | the warning and error hierarchy |
+| `strategies/` | the built-in strategies: `keyword`, `heuristic`, `configurable` |
+
+Tests mirror it: `tests/unit_tests` (offline, fake routes from `tests/fakes.py`; `tests/tracing.py`
+walks collected runs and prices them the way LangSmith would; `tests/conventions.py` parametrises
+over the calling conventions), `tests/integration_tests` (real providers) and
+`spike/tests`.
+
+Decisions made while building are recorded where they belong, in the repo: D3 (how the decision
+reaches a caller who only holds a parsed object), REQ-C6-2 (a wrapped route is refused) and
+REQ-C2-1 (the beta v3 streaming protocol is out of scope) were each amended after a task measured
+what the original wording would have done. Check `docs/v1-requirements.md` before assuming a
+requirement reads as it did in an older issue.
 
 ## Commands
 
@@ -16,13 +42,14 @@ uv manages the environment (Python 3.12 for development; the package supports �
 
 - Install: `uv sync` (dev + provider dependency groups)
 - Test: `uv run pytest`
-- Single test: `uv run pytest tests/unit_tests/test_package.py::test_package_imports`
+- Single test: `uv run pytest tests/unit_tests/test_package.py::test_package_exports_the_pinned_api`
 - Lint: `uv run ruff check . && uv run ruff format --check .`
 - Type-check: `uv run mypy`
 
 Tests that call real providers are marked `@pytest.mark.requires_env("GEMINI_API_KEY", ...)` or
 `@pytest.mark.requires_ollama`, and skip when a named variable is unset or the local Ollama
-server is unreachable (hooks in the root `conftest.py`, which also loads `.env`). Real providers
+server is unreachable (hooks in the root `conftest.py`, which also loads `.env`). Set
+`LANGSMITH_TRACING=false` for offline runs, or every test tries to trace. Real providers
 are Gemini (cloud, `google_genai:gemini-3-flash-preview`) and Ollama (local, `ollama:qwen3:8b`)
 — set via `LLM_ROUTER_GEMINI_MODEL` / `LLM_ROUTER_OLLAMA_MODEL` to override. Offline tests use
 fake models (`GenericFakeChatModel`). Layout: `tests/unit_tests`, `tests/integration_tests`,
@@ -45,7 +72,7 @@ that answers each. Don't re-debate settled decisions in PRD §11.
 have both run. **T-101 is done too:** `docs/v1-requirements.md` holds the public API, the decision
 record schema, and all 21 principles as numbered `REQ-` requirements with a testable check each.
 Read it before any v1 code — it, not the spike, is what T-110 onward build. The nine rules it
-settled are D1–D9 in PRD §11; don't re-decide them. The next task is T-110.
+settled are D1–D9 in PRD §11; don't re-decide them.
 
 ## What is being built
 
