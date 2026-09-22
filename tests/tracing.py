@@ -13,11 +13,11 @@ charges without an API key. The live check against LangSmith still needs one.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.tracers.langchain import _get_usage_metadata_from_generations
+from langchain_core.messages.ai import add_usage
 
 from langchain_llm_router import RoutingChoice, RoutingRequest, RoutingStrategy
 
@@ -51,10 +51,13 @@ def model_runs(runs: Iterable[Run]) -> list[Run]:
 
 def usage_of(run: Run) -> UsageMetadata | None:
     """The usage LangSmith would read off this run, by the tracer's own rule."""
-    outputs = run.outputs or {}
-    if "generations" not in outputs:
-        return None
-    return _get_usage_metadata_from_generations(outputs["generations"])
+    usage: UsageMetadata | None = None
+    for candidates in (run.outputs or {}).get("generations", []):
+        for generation in candidates:
+            found = ((generation.get("message") or {}).get("kwargs") or {}).get("usage_metadata")
+            if isinstance(found, dict):
+                usage = add_usage(usage, cast("UsageMetadata", found))
+    return usage
 
 
 def model_name_of(run: Run) -> str | None:
