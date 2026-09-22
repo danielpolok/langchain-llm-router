@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Literal, cast
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -48,6 +48,20 @@ class GenerateOnlyFakeChatModel(BaseChatModel):
     @property
     def _llm_type(self) -> str:
         return "fake"
+
+    @property
+    def _identifying_params(self) -> Mapping[str, Any]:
+        """What a cache lookup's `_get_llm_string` folds in (T-119, REQ-C10-1).
+
+        `BaseChatModel._identifying_params` defaults to `{}` (`language_models/base.py:430`),
+        so two fakes with different names would otherwise be indistinguishable to a cache that
+        isn't `is_lc_serializable` (none of these are, matching the base fake's own default) —
+        the fakes would collide where two real routes never would, since a real provider's
+        `model` (or similar) field rides along either through its own `_identifying_params` or
+        through `is_lc_serializable`'s full `dumpd(self)`. Naming the model here is what keeps
+        a test's routes as distinguishable to the cache as two real ones would be.
+        """
+        return {"model_name": self.model_name}
 
     def _usage(self) -> UsageMetadata:
         return UsageMetadata(
