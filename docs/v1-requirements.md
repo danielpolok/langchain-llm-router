@@ -126,7 +126,7 @@ failures raise the `RoutingError` subclass directly. Tests assert accordingly.
 | **D2** | A forced route **skips the strategy entirely** (R11). | Running a strategy whose answer is discarded costs money and trace space under T-133/T-134, and R11 exists because a forced route is not a suggestion. |
 | **D3** | The decision always reaches the **trace** (placement per D9); on messages it reaches `response_metadata`, and under `with_structured_output` only when `include_raw=True`. The parsed-object path carries no in-band record — `last_routing_decision()` is the escape hatch: every call publishes a stamped record to both its context and its thread, and the reader prefers its own context's unless the thread's was published by a call that inherited it. | A parsed Pydantic object has nowhere to put it (T-003 caveat 2). The trace is the one placement that is always available. A context variable **alone** cannot do this job: LangChain runs a sequence's steps in a *copy* of the caller's context (`RunnableSequence.invoke` → `set_config_context` → `context.run(step.invoke, …)`), which is exactly the `llm \| parser` shape `with_structured_output` builds, so a record set inside the router is discarded before the caller reads it. Measured in T-114 (2026-09-21), which also pins the limit the pair cannot cover: a routed call started from the reader's context, concurrently or after, can answer for it. |
 | **D4** | **The route owns response caching.** The router delegates from `invoke`/`stream`, so its own `_generate_with_cache` never runs; the selected route's cache applies, keyed on that route's identity. The router's own `cache=` is rejected at construction rather than silently ignored. | `_generate_with_cache` (`chat_models.py:1892`) looks up *before* `_generate`, keyed by `_get_llm_string` (`:1578`) — the model's serialized repr plus call kwargs. Because the key is the route's, C10's "never reused for a different route" holds structurally instead of by arithmetic we maintain. |
-| **D5** | Tool capability is `profile["tool_calling"]` when the route reports a profile; otherwise whether the route's class overrides `BaseChatModel.bind_tools`; `tool_support_overrides` always wins. | `BaseChatModel.bind_tools` raises `NotImplementedError` (`chat_models.py:2383`) at *call* time only — the late failure R10 exists to pre-empt. `profile` is beta and may be absent, so it can't be the only signal. |
+| **D5** | Tool capability is `profile["tool_calling"]` when the route's profile reports it; otherwise whether the route's class overrides `BaseChatModel.bind_tools`; `tool_support_overrides` always wins. | `BaseChatModel.bind_tools` raises `NotImplementedError` (`chat_models.py:2383`) at *call* time only — the late failure R10 exists to pre-empt. `profile` is beta and may be absent, so it can't be the only signal — and a profile that says nothing about tools (`None` on `ChatOllama`, `{}` for a Gemini model the profile doesn't know) defers to the class signal rather than counting as "no". The override is per route, not per feature, so a route that can do structured output but not `bind_tools` cannot express that; document it, don't split D5. |
 | **D6** | One strategy interface: `decide` / `adecide` over a `RoutingRequest`, returning a `RoutingChoice` or `None` for "can't decide". Wider context only when the strategy sets `wants_full_context`. The request also carries the run config its calls must use (D9). | R6's three levels must be one interface (ready-made, configured and custom alike), and R4's default must be the *current request*, with more context an opt-in the strategy declares. |
 | **D7** | Forced routes travel under the configurable key **`"route"`**, declared through `config_specs`. | Makes `with_config`, `config={"configurable": …}` and config-schema introspection all work through the standard mechanism (C4); `ConfigurableFieldSpec`, `runnables/utils.py:655`. It is what `README.md` already advertises. |
 | **D8** | The decision record is the six-field schema above, and exactly **one** streamed chunk carries it. Where it sits in the trace is D9's. | `merge_dicts` concatenates strings that repeat across chunks, so a record on every chunk aggregates to `"frontierfrontier…"` (spike surprise 6). |
@@ -147,7 +147,7 @@ failures raise the `RoutingError` subclass directly. Tests assert accordingly.
 | ID | Requirement | Check | Task |
 | --- | --- | --- | --- |
 | REQ-C2-1 | `invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and `astream_events` (v1/v2) all work, with no router-specific call form. The beta v3 streaming protocol is out of scope for v1 and is refused before the router's run opens. | Each convention returns the selected route's output; merged stream chunks equal the `invoke` output for a deterministic fake route; `stream_events(version="v3")` raises `NotImplementedError` naming the alternatives, and opens no run. | T-113 |
-| REQ-C2-2 | `generate()` / `agenerate()` route, record and cost exactly as `invoke` does. | Usage totals and decision record match `invoke`; no second LLM run. *(Spike caveat: these still take the base path and would double count.)* | T-117 |
+| REQ-C2-2 | `generate()` / `agenerate()` route, record and cost exactly as `invoke` does, at message level: one candidate per prompt, no `llm_output`. | Usage totals and decision record match `invoke`; no second LLM run. *(Spike caveat: these still take the base path and would double count.)* | T-117 |
 | REQ-C2-3 | Async paths await both the strategy and the route; neither blocks the event loop. | A strategy whose `adecide` sleeps does not block a concurrently running task; `abatch` of N requests overlaps. | T-113 |
 | REQ-C2-4 | A route without native streaming still streams through the router. | Streaming a fake route that implements only `_generate` yields one chunk equal to the full message. | T-113 |
 
@@ -161,14 +161,42 @@ pass through untouched. The protocol is unreachable on the minimum supported `la
 1.1, where the guard is inert. Worth revisiting if v3 leaves beta and `ChatModelStream` is
 exported.
 
+*Amended 2026-09-22 (T-117).* REQ-C2-2 first read as full parity with `generate()`'s own
+contract: every candidate a route returns, plus `generation_info` and `llm_output`. It is built
+on `invoke()`, which itself reduces to `generations[0][0].message` and exposes no `llm_output`
+(`chat_models.py:475-497`) — so the router's `generate()`/`agenerate()` return exactly one
+candidate per prompt with empty `llm_output`, the same loss a caller already takes looping
+`invoke()` by hand, but worse than calling a route's own `generate()` directly, and short of two
+of the three reasons `generate()`'s own docstring gives for preferring it over `invoke()`.
+LangChain tells callers not to rely on `llm_output` (`outputs/llm_result.py:40`), which supports
+dropping it, but says nothing that excuses dropping extra candidates, and no downstream consumer
+in `langchain`/`langgraph`/`langchain_core` was found reading either off a chat model — so nothing
+installed breaks silently today, but `router.generate(prompts, n=3)` against a route that would
+return 3 candidates gets 1, with no warning. Scoped to message-level parity rather than fixed: a
+fix needs the router to call each route's own `_generate` per prompt directly, bypassing
+`invoke`'s public path — a larger change than this finding warrants, for a case (`n>1` sampling)
+most routes don't hit by default. Revisit if a route that returns multiple candidates by default
+becomes common.
+
 ### C3 · Tools and structured output
 
 | ID | Requirement | Check | Task |
 | --- | --- | --- | --- |
 | REQ-C3-1 | `bind_tools` keeps tools unconverted until a route is chosen; the *route's* `bind_tools` converts at call time. `tool_choice` and binding kwargs (`strict=`) are replayed on the route's binder, not passed as call kwargs. | Two fake routes with different conversions each receive the tools in their own form; `strict=` reaches the route's `bind_tools`, not its call kwargs. | T-115 |
-| REQ-C3-2 | The raw `tools` list is also bound in its usual place, so LangChain's own checks behave as on any chat model. | `disable_streaming="tool_calling"` on a route behaves identically bound through the router. | T-115 |
+| REQ-C3-2 | What LangChain reads off a bound model behaves as on a plain chat model: the router binds no `tools` kwarg of its own for a consumer to misread, so a pre-bound router works in `create_react_agent` and `create_agent`, and a later bare `bind(tools=…)` is honoured. | `create_react_agent(router.bind_tools([tool]), [tool])` builds and answers; `disable_streaming="tool_calling"` on a route behaves identically bound through the router. | T-115 |
 | REQ-C3-3 | `with_structured_output` overrides the base default and forwards per request to the selected route's own implementation. | `method=` and `strict=` reach the route (the base default drops them, `chat_models.py:2530`); `include_raw=True` returns the usual `{"raw", "parsed", "parsing_error"}`. | T-115 |
 | REQ-C3-4 | The router reports a `profile` that is the intersection of its routes' profiles. | Booleans AND-ed, ints minimised, equal values kept, differing values dropped, `None` when any route reports none; `create_agent(response_format=…)` picks a strategy every route can serve. | T-121 |
+
+*Amended 2026-09-21 (T-115).* REQ-C3-2 first asked for the raw `tools` list "in its usual place".
+A plain chat model binds *converted* dicts there, and LangChain's consumers read them that way:
+`create_react_agent` reads `model.kwargs["tools"]` and calls `.get("type")` on each entry, so a
+raw `StructuredTool` in the slot crashed agent construction with an `AttributeError`. Converting
+instead — the obvious fix — fails on provider-native entries: `{"google_search": {}}` makes
+`convert_to_openai_tool` raise, though the same call works on `ChatGoogleGenerativeAI`. The slot
+never reached a route, a cache key or a trace (the route's own binder sets its `tools` when the
+binding is replayed), and REQ-C3-2's `disable_streaming` check passes without it, so the router
+binds none. Measured on the review branch: omitting it also makes a later bare `bind(tools=…)`
+behave as on a plain model, where the raw slot silently discarded it.
 
 ### C4 · Runtime configuration
 
