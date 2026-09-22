@@ -6,7 +6,8 @@ small-LLM classifier) take the model or embeddings they use from the application
 """
 
 from langchain_llm_router.strategies.configurable import ConfigurableStrategy
+from langchain_llm_router.strategies.embedding import EmbeddingStrategy
 from langchain_llm_router.strategies.heuristic import HeuristicStrategy
 from langchain_llm_router.strategies.keyword import KeywordStrategy
 
-__all__ = ["ConfigurableStrategy", "HeuristicStrategy", "KeywordStrategy"]
+__all__ = ["ConfigurableStrategy", "EmbeddingStrategy", "HeuristicStrategy", "KeywordStrategy"]

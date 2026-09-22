@@ -17,6 +17,7 @@ from langchain_llm_router.errors import (
 from langchain_llm_router.router import ChatRouter
 from langchain_llm_router.strategies import (
     ConfigurableStrategy,
+    EmbeddingStrategy,
     HeuristicStrategy,
     KeywordStrategy,
 )
@@ -30,6 +31,7 @@ from langchain_llm_router.strategy import (
 __all__ = [
     "ChatRouter",
     "ConfigurableStrategy",
+    "EmbeddingStrategy",
     "FallbackWarning",
     "ForcedRouteError",
     "ForcedRouteWarning",
