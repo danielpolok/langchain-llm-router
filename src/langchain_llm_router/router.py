@@ -7,17 +7,18 @@ the strategy run — cost is counted once (R3) and the real call stays in the tr
 Every entry point runs the same pipeline, in D9's order:
 
 1. `_start_run` opens the router's chain run.
-2. `_decide` / `_adecide` settle the route. `_plan` says whether there is anything to run —
-   no strategy means the default route, with no strategy run — and otherwise the strategy
-   runs in a child chain run of its own, with that run's child config as
+2. `_decide` / `_adecide` settle the route, diversion included. `_plan` says whether there is
+   anything to run — no strategy means the default route, with no strategy run — and otherwise
+   the strategy runs in a child chain run of its own, with that run's child config as
    `RoutingRequest.config` and set as the context config. `_conclude` turns what the strategy
-   did into a `RoutingDecision`, falling back to the default route when it can't (R9).
-3. `_divert` applies R10 to what was settled: a request whose route can't use the tools bound
-   to it goes to D1's target instead, recorded as a diversion.
-4. `_route_call` prepares the selected route's call: nested under the router's run, with the
+   did into a `RoutingDecision`, falling back to the default route when it can't (R9); `_divert`
+   then applies R10 to that: a request whose route can't use the tools bound to it goes to D1's
+   target instead, recorded as a diversion — before the strategy run closes, so its output is
+   the same record the router run and the route run end up with (D9).
+3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata, and the caller's tool or structured-output binding replayed on
    the route itself (C3).
-5. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
+4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
    and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
    record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
    and withdraws the record: a call that failed has no decision to report. A caller that
@@ -33,6 +34,8 @@ refused — `_V3_UNSUPPORTED` says why.
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
@@ -94,30 +97,48 @@ __all__ = ["ChatRouter"]
 AnswerT = TypeVar("AnswerT")
 """What a routed call answers with: a message, or a structured-output payload (REQ-C3-3)."""
 
-_CALLER = 5
-"""`stacklevel` that points a `FallbackWarning` at the code that called the router: the frames
-are `_fallback` ← `_conclude` or `_plan` ← `_decide` / `_adecide` ← the entry point ← caller.
+_LIBRARY_MODULES = ("langchain_llm_router", "langchain_core", "langchain", "langgraph")
+"""Module-name prefixes `_stacklevel` walks past to find the application's own frame.
 
-It counts *this* path, not every warning the router raises: a warning raised at another depth
-(T-115's `ToolSupportWarning`, T-116's `ForcedRouteWarning`) needs its own count, and a test
-that asserts where the warning points."""
+Matched on the dot (`name == prefix or name.startswith(prefix + ".")`), so `langchain_myapp` —
+someone's own package that merely starts with the same letters as `langchain` — is never
+mistaken for the library's."""
 
-_BINDING_CALLER = 3
-"""`stacklevel` that points a bind-time `ToolSupportWarning` (R10) at the code that bound:
-`_check_tool_support` ← `bind_tools` or `with_structured_output` ← the caller."""
 
-_BOUND_CALLER = 4
-"""`stacklevel` that points a per-request `ToolSupportWarning` (R10) at the code that called
-what `bind_tools` or `with_structured_output` returned: `_divert` ← the entry point ← the
-binding (`RunnableBinding`, or `StructuredRouter`) ← the caller. One frame deeper than
-`_CALLER`'s path, because the caller holds a binding and not the router.
+def _is_library_frame(frame: types.FrameType) -> bool:
+    """Whether `frame` belongs to this package or to LangChain (`_LIBRARY_MODULES`)."""
+    name = frame.f_globals.get("__name__", "")
+    return any(name == prefix or name.startswith(f"{prefix}.") for prefix in _LIBRARY_MODULES)
 
-Tests pin it for `invoke`, `ainvoke`, `stream` and `astream` on `bind_tools`, and for `invoke`
-and `ainvoke` on `with_structured_output`. Whatever adds or removes a frame between the caller
-and the router — `batch` and event streams, which `Runnable` builds on the entry points;
-`Runnable.stream`'s default, which is structured output's `stream`; a call with `tools=` passed
-straight to the router, which has no binding at all — moves where the warning points and
-nothing else: it is still raised once, for the one request."""
+
+def _stacklevel() -> int:
+    """The `stacklevel` for a `warnings.warn` call made from the router's own caller's frame,
+    pointing at the first frame outside the library — the application's own code (R2, R9, R10).
+
+    A hand-counted constant breaks whenever a frame is added or removed between the router and
+    its caller: bound through `bind_tools` versus called bare, `StructuredRouter.stream`
+    delegating to `ChatRouter.stream`, `create_agent` wrapping the router in its own runnables,
+    a later `langchain-core` release adding a frame of its own. Walking the stack instead finds
+    the boundary itself, at the cost of a stdlib-private call: `sys._getframe` is what the
+    stdlib `warnings` module uses internally (`warnings.py`, `_filters_mutated`'s callers) to
+    find *its* caller, and is documented as CPython-implementation-specific rather than
+    guaranteed portable — confirmed to behave the same, for this walk, on 3.10, 3.12 and 3.13.
+
+    Frame 1 (`sys._getframe(1)`) is the function that calls `warnings.warn` — `stacklevel=1`'s
+    frame, by `warnings`' own definition — which is always this package's own code and so
+    always skipped; the walk starts there and moves outward until a frame's module is not one
+    of `_LIBRARY_MODULES`, or there are no more frames. A call with genuinely no application
+    frame above it — a `batch` worker thread, `agenerate`'s gathered tasks, an `astream_events`
+    generator driven by `anyio` — runs out of stack first and lands on the outermost frame
+    reached, which is documented, not a bug: there is no caller line to point at.
+    """
+    level = 1
+    frame: types.FrameType | None = sys._getframe(1)  # private API: see the docstring above
+    while frame is not None and _is_library_frame(frame):
+        frame = frame.f_back
+        level += 1
+    return level if frame is not None else level - 1
+
 
 _V3_UNSUPPORTED = (
     "ChatRouter does not support the v3 streaming protocol "
@@ -268,7 +289,7 @@ class ChatRouter(BaseChatModel):
         messages = self._convert_input(input).to_messages()
         run_manager = self._start_run(config, messages)
         try:
-            decision = self._divert(self._decide(messages, config, run_manager, kwargs), kwargs)
+            decision = self._decide(messages, config, run_manager, kwargs)
             call = self._route_call(decision, config, run_manager, kwargs)
             message = call.route.invoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
@@ -292,9 +313,7 @@ class ChatRouter(BaseChatModel):
         messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = await self._astart_run(config, messages)
         try:
-            decision = self._divert(
-                await self._adecide(messages, config, run_manager, kwargs), kwargs
-            )
+            decision = await self._adecide(messages, config, run_manager, kwargs)
             call = self._route_call(decision, config, run_manager, kwargs)
             message = await call.route.ainvoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
@@ -313,22 +332,38 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> Iterator[AIMessageChunk]:
-        """The route's chunks, passed through unchanged bar the record on one of them (D8)."""
+        """The route's items, passed through unchanged bar the record on one of them (D8).
+
+        "Items" and not "chunks": what `call.route.stream` yields is `AIMessageChunk`s for a
+        plain or tool-bound call, but the route's own progressive partials — Pydantic objects,
+        dicts, or `include_raw=True`'s `{"raw", "parsed", "parsing_error"}` — when a
+        `StructuredOutputBinding` was replayed onto it (C1, C2; only `StructuredRouter.stream`
+        asks for that, and reads the result so). The annotation is the chat-model contract this
+        method keeps for its ordinary callers.
+
+        `stop` reaches the route only when the caller gave one: `include_raw=True` builds
+        `RunnableMap(raw=llm) | ...` (`chat_models.py:2564`), whose `_transform` — the hook
+        `.stream()` runs on — takes no `**kwargs` at all, so even `stop=None` explicitly passed
+        raises `TypeError`. `.invoke()` tolerates it (`RunnableParallel.invoke` accepts and
+        drops stray kwargs), which is why this only bites streaming, and only once a route
+        answers with more than the one item `StructuredRouter.stream` used to stop at.
+        """
         config = ensure_config(config)
         messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = self._start_run(config, messages)
-        output: AIMessageChunk | None = None
+        output: Any = None
         try:
-            decision = self._divert(self._decide(messages, config, run_manager, kwargs), kwargs)
+            decision = self._decide(messages, config, run_manager, kwargs)
             call = self._route_call(decision, config, run_manager, kwargs)
-            for message in call.route.stream(messages, call.config, stop=stop, **call.kwargs):
-                chunk = cast("AIMessageChunk", message)
+            stream_kwargs = call.kwargs if stop is None else {**call.kwargs, "stop": stop}
+            for item in call.route.stream(messages, call.config, **stream_kwargs):
                 if output is None:
-                    # Decided before the first chunk; only that chunk carries the record (D8).
-                    chunk = output = _with_record(chunk, decision)
+                    # Decided before the first item; only it carries the record (D8) —
+                    # wherever `_recorded_on` finds somewhere to put one.
+                    item = output = _with_record(item, decision)
                 else:
-                    output += chunk
-                yield chunk
+                    output = _merge(output, item)
+                yield cast("AIMessageChunk", item)
         except GeneratorExit as error:
             # A caller that stops consuming — a `break`, or the generator being finalized —
             # is not a failed call: the chunks it did take carry the record, and the record
@@ -350,26 +385,23 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AIMessageChunk]:
-        """Async `stream`."""
+        """Async `stream`. `stop` is omitted when unset, for the reason `stream` documents."""
         config = ensure_config(config)
         messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = await self._astart_run(config, messages)
-        output: AIMessageChunk | None = None
+        output: Any = None
         try:
-            decision = self._divert(
-                await self._adecide(messages, config, run_manager, kwargs), kwargs
-            )
+            decision = await self._adecide(messages, config, run_manager, kwargs)
             call = self._route_call(decision, config, run_manager, kwargs)
-            async for message in call.route.astream(
-                messages, call.config, stop=stop, **call.kwargs
-            ):
-                chunk = cast("AIMessageChunk", message)
+            stream_kwargs = call.kwargs if stop is None else {**call.kwargs, "stop": stop}
+            async for item in call.route.astream(messages, call.config, **stream_kwargs):
                 if output is None:
-                    # Decided before the first chunk; only that chunk carries the record (D8).
-                    chunk = output = _with_record(chunk, decision)
+                    # Decided before the first item; only it carries the record (D8) —
+                    # wherever `_recorded_on` finds somewhere to put one.
+                    item = output = _with_record(item, decision)
                 else:
-                    output += chunk
-                yield chunk
+                    output = _merge(output, item)
+                yield cast("AIMessageChunk", item)
         except GeneratorExit as error:
             # Not a failed call — see `stream`.
             await run_manager.on_chain_error(error)
@@ -457,10 +489,12 @@ class ChatRouter(BaseChatModel):
         (`outputs/llm_result.py:40`), so it is `{}` here, as it is for any chat model that does
         not combine its outputs.
 
-        Nor does a `FallbackWarning` point at the caller, as it does under `invoke`: `_CALLER`
-        counts the frames of an entry point that runs the pipeline itself, and this one reaches
-        it through `invoke`, so the warning names this module. (`agenerate`, whose prompts are
-        tasks, has no caller frame above them either, and neither has `abatch`.)
+        A `FallbackWarning` from a prompt run here points at the caller exactly as it does
+        under `invoke`: `_stacklevel` (T-115) walks past every frame that is this package's or
+        LangChain's own, not a fixed count, so the extra frame `generate` adds before reaching
+        `invoke` costs it nothing. (`agenerate`, whose prompts run as tasks, has no caller
+        frame above them either, and neither has `abatch`'s worker threads — both still land
+        on the outermost frame the walk can reach.)
         """
         run_ids = _run_ids(len(messages), run_id)
         answers = [
@@ -554,14 +588,27 @@ class ChatRouter(BaseChatModel):
         arguments go with it rather than becoming call kwargs: `strict=` and its kind change
         how the route *builds* the schema, which only its binder can do.
 
-        `tools` is also bound in its usual place (REQ-C3-2), so LangChain's own checks that
-        look for it there — `disable_streaming="tool_calling"` among them — behave as on any
-        chat model, and the tools appear in the router's invocation params. `bound_route`
-        drops that copy again when it replays the binding: the route's binder puts its own
-        converted form in that place.
+        That private binding is all that is bound: the router sets no `tools` kwarg of its own
+        (REQ-C3-2). A plain chat model binds *converted* tool dicts there, and LangChain reads
+        them that way — `create_react_agent` calls `.get("type")` on each entry, so a raw
+        `StructuredTool` in the slot crashed it, and converting to fill it would reject a
+        provider-native entry such as `{"google_search": {}}`, which `convert_to_openai_tool`
+        can't read. Nothing needs the slot filled: the route's own binder sets its `tools` when
+        the binding is replayed, which is where `disable_streaming="tool_calling"` looks, and
+        a later bare `bind(tools=...)` reaches the route as a call kwarg, as it does on a
+        plain chat model.
 
         Binding is also when the application learns which routes can't use tools
-        (`_check_tool_support`), rather than on the first request that picks one.
+        (`_check_tool_support`), rather than on the first request that picks one. That is
+        the whole of what is checked here, and two things it cannot see are left to the first
+        request that reaches them:
+
+        - An invalid binding kwarg. Conversion is deferred to the route (REQ-C3-1), so a
+          `strict=` its binder rejects fails on the first request routed to that route, as the
+          route's own error, and not on this call.
+        - A route that is itself a `ChatRouter`. It passes the check whatever *its* routes can
+          do, because it overrides `bind_tools`; if none of them can use tools, the request
+          fails with `NoToolCapableRouteError` once it gets there (T-121's to close).
 
         Binding again replaces the binding, as on any chat model: a binding over a binding
         hands `bind_tools` back to the model (`RunnableBinding.__getattr__`), so what the
@@ -572,7 +619,7 @@ class ChatRouter(BaseChatModel):
         """
         self._check_tool_support()
         binding = ToolBinding(tools=tuple(tools), tool_choice=tool_choice, kwargs=dict(kwargs))
-        return self.bind(**{BINDING_KEY: binding, "tools": list(tools)})
+        return self.bind(**{BINDING_KEY: binding})
 
     def with_structured_output(
         self,
@@ -590,13 +637,16 @@ class ChatRouter(BaseChatModel):
 
         LangChain builds structured output on tool binding, so R10 applies as it does to
         `bind_tools`: the same bind-time check here, and the same per-request diversion off a
-        route that can't use tools (REQ-R10-4).
+        route that can't use tools (REQ-R10-4). As there, an invalid kwarg — `method=` a route
+        doesn't support, say — fails on the first request routed to that route rather than
+        here (REQ-C3-1's deferral to call time), and a route that is itself a `ChatRouter`
+        passes this check whatever its own routes can do, failing mid-request with
+        `NoToolCapableRouteError` if none of them can use tools (T-121's to close).
 
         What comes back routes through the router's pipeline, so the decision reaches the
         trace and `last_routing_decision()`; with `include_raw=True` the raw message carries
-        it too (D3, REQ-R2-4). It answers once when streamed — the finished object, as its
-        only item — because the route's partial parses would have to pass through the router's
-        chunk merging, which a parsed object doesn't support.
+        it too (D3, REQ-R2-4). Streamed progressively — the route's own parser runs — as it is
+        on a plain chat model (C1, C2): `stream` and `astream` delegate to the router's own.
         """
         self._check_tool_support()
         binding = StructuredOutputBinding(
@@ -684,14 +734,23 @@ class ChatRouter(BaseChatModel):
         run_manager: CallbackManagerForChainRun,
         kwargs: dict[str, Any],
     ) -> RoutingDecision:
-        """Settle the route; the strategy runs in a child run of the router's run (D9).
+        """Settle the route, diversion included; the strategy runs in a child run (D9).
 
         Any call the strategy makes with `request.config` — or without it, through the context
         config — nests under the strategy's run, so it is traced and costed there (R3).
+
+        `_divert` (R10) is applied at every return path, before the strategy run closes: D9
+        says the decision is one record in three places — the strategy run's output, the
+        router run's output, the route run's metadata — and a diversion is part of settling
+        the decision, not something layered on afterwards. The strategy run still ends a
+        success: diverting is not a failure of the strategy, which chose correctly given what
+        it knew, so `on_chain_end` runs even though the outputs it gets are the diverted
+        record, not the strategy's raw choice — T-110's precedent for a fallback, whose
+        strategy run likewise holds the final record.
         """
         pending = self._plan(messages, config, kwargs)
         if isinstance(pending, RoutingDecision):
-            return pending
+            return self._divert(pending, kwargs)
         strategy_run = run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
@@ -705,12 +764,12 @@ class ChatRouter(BaseChatModel):
             strategy_run.on_chain_error(error)
             if not isinstance(error, Exception):
                 raise
-            return self._conclude(pending, error)
+            return self._divert(self._conclude(pending, error), kwargs)
         try:
-            decision = self._conclude(pending, choice)
+            decision = self._divert(self._conclude(pending, choice), kwargs)
         except BaseException as error:
-            # `_conclude` warns, and an application may have escalated that warning to an
-            # error; the strategy's run has to close either way.
+            # `_conclude` or `_divert` warns, and an application may have escalated that
+            # warning to an error; the strategy's run has to close either way.
             strategy_run.on_chain_error(error)
             raise
         strategy_run.on_chain_end(decision.as_dict())
@@ -726,7 +785,7 @@ class ChatRouter(BaseChatModel):
         """Async `_decide`: awaits `adecide`, so the strategy never blocks the loop (C2)."""
         pending = self._plan(messages, config, kwargs)
         if isinstance(pending, RoutingDecision):
-            return pending
+            return self._divert(pending, kwargs)
         strategy_run = await run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
@@ -740,9 +799,9 @@ class ChatRouter(BaseChatModel):
             await strategy_run.on_chain_error(error)
             if not isinstance(error, Exception):
                 raise
-            return self._conclude(pending, error)
+            return self._divert(self._conclude(pending, error), kwargs)
         try:
-            decision = self._conclude(pending, choice)
+            decision = self._divert(self._conclude(pending, choice), kwargs)
         except BaseException as error:
             # As in `_decide`: a warning escalated to an error must still close the run.
             await strategy_run.on_chain_error(error)
@@ -776,7 +835,7 @@ class ChatRouter(BaseChatModel):
         warnings.warn(
             f"{cause}; falling back to the default route {self.default_route!r}",
             FallbackWarning,
-            stacklevel=_CALLER,
+            stacklevel=_stacklevel(),
         )
         return RoutingDecision(
             route=self.default_route,
@@ -821,7 +880,7 @@ class ChatRouter(BaseChatModel):
             f"routes that can't use tools: {_names(incapable)}; a request routed to one of "
             f"them goes to {target!r} instead",
             ToolSupportWarning,
-            stacklevel=_BINDING_CALLER,
+            stacklevel=_stacklevel(),
         )
 
     def _divert(self, decision: RoutingDecision, kwargs: dict[str, Any]) -> RoutingDecision:
@@ -836,11 +895,13 @@ class ChatRouter(BaseChatModel):
         asked for, and it happens per request, so it is per request that the application
         hears about it. `diverted_from` keeps the route it came from (R2).
 
-        Runs after the strategy's run has closed (D9), so that run's output stays what the
-        strategy chose; the router run's outputs, the route run's metadata and the response
-        carry the record as diverted. A forced route that can't use the bound tools is R11's
-        to refuse before a request gets here (REQ-R11-2, T-116); whatever it falls back to is
-        diverted like any other decision.
+        Called from `_decide` / `_adecide`, before the strategy's run closes (D9): the decision
+        is one record in three places, so the strategy run's output is the *diverted* record
+        too, the same as the router run's outputs and the route run's metadata — not what the
+        strategy chose before D1 stepped in. There is no `forced` guard yet: a forced route
+        that can't use the bound tools is R11's to refuse before a request gets here
+        (REQ-R11-2, T-116, which must run in `_plan` ahead of this); whatever a forced route's
+        refusal falls back to is diverted like any other decision.
         """
         if not tools_are_bound(kwargs) or self._supports_tools(decision.route):
             return decision
@@ -851,7 +912,7 @@ class ChatRouter(BaseChatModel):
             raise NoToolCapableRouteError(_no_tool_capable_route(self.routes))
         cause = f"{decision.route!r} can't use the bound tools"
         warnings.warn(
-            f"{cause}; diverted to {target!r}", ToolSupportWarning, stacklevel=_BOUND_CALLER
+            f"{cause}; diverted to {target!r}", ToolSupportWarning, stacklevel=_stacklevel()
         )
         return replace(
             decision,
@@ -931,13 +992,33 @@ def _with_record(answer: AnswerT, decision: RoutingDecision) -> AnswerT:
     return cast("AnswerT", _recorded_on(answer, decision))
 
 
+def _merge(output: Any, item: Any) -> Any:
+    """Fold `item` into the running `output` the router keeps for its own run's outputs (D9) —
+    not what the caller sees, which is `item` itself, unchanged (C1, C2).
+
+    `AIMessageChunk`s merge with `+`, and so do `include_raw=True`'s `AddableDict` deltas. A
+    structured parser's own partial — a Pydantic object, or a plain dict from a JSON-schema or
+    JSON-mode parse — is cumulative already, not a delta: no route's parser gives it a `+`, so
+    the attempt raises `TypeError`, and the newest item replaces the running total instead of
+    adding to it, since it already *is* the full state so far.
+    """
+    try:
+        return output + item
+    except TypeError:
+        return item
+
+
 def _recorded_on(answer: object, decision: RoutingDecision) -> object:
-    """The record put wherever this answer can hold one (R2, D3).
+    """The record put wherever this answer can hold one (R2, D3) — the same rule for a whole
+    answer and for the one streamed item that carries it (D8).
 
     A message holds it in `response_metadata`. `with_structured_output(include_raw=True)`
     answers with `{"raw", "parsed", "parsing_error"}`, and the raw message holds it there
-    (REQ-R2-4). A parsed object holds nothing and is handed back untouched: reaching it means
-    `last_routing_decision()`, which `_with_record` has just published to.
+    (REQ-R2-4) — including the first streamed item, an `AddableDict` delta that reliably has a
+    `"raw"` key before any `"parsed"` key can (the parser needs raw content to parse). A parsed
+    object, or a bare dict from a JSON-schema or JSON-mode parse, holds nothing and is handed
+    back untouched: reaching it means `last_routing_decision()`, which `_with_record` has just
+    published to — true of the whole answer and of a parsed stream's first partial alike.
     """
     if isinstance(answer, BaseMessage):
         return answer.model_copy(

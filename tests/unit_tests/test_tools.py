@@ -15,16 +15,18 @@ that can't use the bound tools (REQ-R11-2) is T-116's.
 
 from __future__ import annotations
 
+import gc
 import inspect
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, Literal, NamedTuple, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall
 from langchain_core.outputs import ChatGeneration
-from langchain_core.runnables import Runnable, RunnableBinding, RunnableLambda
+from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig, RunnableLambda
+from langchain_core.runnables.utils import ConfigurableFieldSpec
 from langchain_core.tools import tool
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langchain_core.tracers.schemas import Run
@@ -44,12 +46,13 @@ from langchain_llm_router import (
     last_routing_decision,
     routing_decision,
 )
-from langchain_llm_router._tools import supports_tools
+from langchain_llm_router._tools import BINDING_KEY, supports_tools
 from langchain_llm_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, Convention, generated, respond
 from tests.fakes import (
     FakeChatModel,
     NativeStructuredFakeChatModel,
+    StreamingStructuredFakeChatModel,
     ToolCallingFakeChatModel,
     call_log,
 )
@@ -530,30 +533,137 @@ async def test_one_warning_is_raised_for_each_diverted_request() -> None:
     ] * 2
 
 
-async def test_the_strategy_is_not_run_again_and_the_trace_shows_both_decisions() -> None:
-    """REQ-R10-3, D1, D9: the strategy ran once and its run's output is what *it* chose; the
-    diversion happens after that run has closed, so the router run's outputs and the route
-    run's metadata carry the record as diverted — and the response and both agree."""
+class _DiversionCase(NamedTuple):
+    """One way a request ends up diverted, and what the trace should show for it (D9)."""
+
+    build: Callable[[], ChatRouter]
+    text: str
+    record: RoutingDecision
+    has_strategy_run: bool
+    """Whether a strategy ran at all — no strategy means no strategy run (D9), so there are
+    only two placements to compare, not three."""
+
+
+def _with_a_strategy() -> ChatRouter:
+    router, _ = mixed(ByText())
+    return router
+
+
+def _with_no_strategy() -> ChatRouter:
+    router, _ = router_of({"cheap": False, "first": True}, default="cheap")
+    return router
+
+
+def _falling_back_onto_an_incapable_default() -> ChatRouter:
+    router, _ = router_of({"cheap": False, "first": True}, default="cheap", strategy=Abstains())
+    return router
+
+
+DIVERSION_CASES = [
+    pytest.param(
+        _DiversionCase(
+            _with_a_strategy,
+            "cheap",
+            diverted("cheap", to="frontier"),
+            has_strategy_run=True,
+        ),
+        id="with a strategy",
+    ),
+    pytest.param(
+        _DiversionCase(
+            _with_no_strategy,
+            "hello",
+            RoutingDecision(
+                route="first",
+                reason="no strategy configured; 'cheap' can't use the bound tools, so it "
+                "was diverted to 'first'",
+                diverted_from="cheap",
+            ),
+            has_strategy_run=False,
+        ),
+        id="no strategy",
+    ),
+    pytest.param(
+        _DiversionCase(
+            _falling_back_onto_an_incapable_default,
+            "hello",
+            RoutingDecision(
+                route="first",
+                reason="Abstains could not decide; fell back to the default route; 'cheap' "
+                "can't use the bound tools, so it was diverted to 'first'",
+                strategy="Abstains",
+                fallback=True,
+                diverted_from="cheap",
+            ),
+            has_strategy_run=True,
+        ),
+        id="fallback onto an incapable default",
+    ),
+]
+
+
+@pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
+@pytest.mark.parametrize("case", DIVERSION_CASES)
+async def test_the_diverted_record_is_the_same_in_all_of_d9_s_places(
+    case: _DiversionCase, convention: AskConvention
+) -> None:
+    """REQ-R10-3, D1, D9: a diversion is settled inside the decision step (`_decide`), before
+    the strategy run closes — so the strategy run's output, the router run's outputs, the route
+    run's metadata and the response all carry the *same* diverted record, not the strategy's
+    undiverted choice. The strategy still ran once (D1: no second consultation) and its run is
+    still a success — diverting is not a failure of the strategy."""
+    router = case.build()
+    bound = bind(TOOLS, router)
+    collector = RunCollectorCallbackHandler()
+    config: RunnableConfig = {"callbacks": [collector]}
+
+    async def call() -> Any:
+        if convention == "invoke":
+            return bound.invoke(case.text, config)
+        return await bound.ainvoke(case.text, config)
+
+    with pytest.warns(ToolSupportWarning):
+        message = await call()
+
+    (router_run,) = collector.traced_runs
+    if case.has_strategy_run:
+        strategy_run, route_run = router_run.child_runs
+        assert strategy_run.run_type == "chain"
+        assert strategy_run.error is None  # diverting is not a strategy failure
+        assert strategy_run.outputs == case.record.as_dict()
+    else:
+        (route_run,) = router_run.child_runs
+    assert route_run.run_type == "llm"
+    assert routing_decision(message) == case.record
+    assert (router_run.outputs or {})[ROUTING_KEY] == case.record.as_dict()
+    assert metadata_of(route_run)[ROUTING_KEY] == case.record.as_dict()
+    # Exactly one child run of each kind proves the strategy was not consulted a second time
+    # for the diversion (D1) — a re-run would show as a second chain run among the children.
+    assert [run.run_type for run in router_run.child_runs].count("chain") == (
+        1 if case.has_strategy_run else 0
+    )
+
+
+async def test_an_escalated_diversion_warning_closes_both_runs() -> None:
+    """REQ-R10-3, D9: `_divert`'s warning can be escalated to an error like any other; the
+    `try`/`except` in `_decide` that already closes the strategy run when `_conclude` raises
+    covers `_divert` too (it runs inside the same block), so the strategy run closes as an
+    error and the router run closes as an error behind it — neither is left open."""
     strategy = ByText()
     router, _ = mixed(strategy)
     bound = bind(TOOLS, router)
     collector = RunCollectorCallbackHandler()
 
-    with pytest.warns(ToolSupportWarning):
-        message = bound.invoke("cheap", {"callbacks": [collector]})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ToolSupportWarning)
+        with pytest.raises(ToolSupportWarning):
+            bound.invoke("cheap", {"callbacks": [collector]})
 
     (router_run,) = collector.traced_runs
-    strategy_run, route_run = router_run.child_runs
-    record = diverted("cheap", to="frontier")
-    assert routing_decision(message) == record
-    assert (strategy_run.run_type, route_run.run_type) == ("chain", "llm")
-    assert (
-        strategy_run.outputs
-        == RoutingDecision(route="cheap", reason="asked for 'cheap'", strategy="ByText").as_dict()
-    )
-    assert (router_run.outputs or {})[ROUTING_KEY] == record.as_dict()
-    assert metadata_of(route_run)[ROUTING_KEY] == record.as_dict()
-    assert strategy.asked == 1
+    strategy_run, *rest = router_run.child_runs
+    assert router_run.error is not None
+    assert strategy_run.error is not None
+    assert all(run.end_time is not None for run in (router_run, strategy_run, *rest))
 
 
 async def test_a_request_with_nothing_bound_is_never_diverted() -> None:
@@ -761,17 +871,94 @@ async def test_binding_kwargs_reach_the_route_s_binder_and_not_its_call(
     assert bound_by_the_route == {k: v for k, v in kwargs.items() if k != "strict"}
 
 
-def test_the_raw_tools_are_bound_in_their_usual_place() -> None:
-    """REQ-C3-2: the caller's tools sit in `kwargs["tools"]` of what `bind_tools` returns —
-    unconverted, where LangChain looks for them — alongside the router's own binding."""
+def test_bind_tools_puts_nothing_but_the_private_binding_in_the_kwargs() -> None:
+    """REQ-C3-2 (amended): the router binds no `tools` kwarg of its own — a consumer that reads
+    one off a chat model's binding would misread the raw, unconverted objects as the converted
+    form a plain model puts there. Only the private binding key rides along."""
     router, _ = router_of({"a": True}, default="a")
 
     bound = router.bind_tools([get_weather, Answer], tool_choice="any")
 
     assert isinstance(bound, RunnableBinding)
-    assert bound.kwargs["tools"] == [get_weather, Answer]
-    assert bound.kwargs["tools"][0] is get_weather
+    assert list(bound.kwargs) == [BINDING_KEY]
+    assert "tools" not in bound.kwargs
     assert "tool_choice" not in bound.kwargs  # a binding kwarg, not a call kwarg
+
+
+def _agent_script() -> list[AIMessage]:
+    """A tool call, then a final answer — what a `create_react_agent` / `create_agent` loop
+    needs from the route it eventually reaches."""
+    return [
+        AIMessage(
+            content="",
+            tool_calls=[
+                ToolCall(name="get_weather", args={"city": "Paris"}, id="c1", type="tool_call")
+            ],
+        ),
+        AIMessage(content="It is sunny in Paris"),
+    ]
+
+
+def test_create_react_agent_builds_and_answers_with_a_pre_bound_router() -> None:
+    """REQ-C3-2: `create_react_agent` reads a bound model's own `bind_tools` output to decide
+    whether to bind tools again (`_should_bind_tools`, `langgraph/prebuilt/chat_agent_executor.py`)
+    — before the fix this read the raw `tools` slot and crashed with `AttributeError:
+    'StructuredTool' object has no attribute 'get'`. With no slot to misread, the agent builds
+    and completes its tool loop through the router exactly as it would through a plain model."""
+    from langgraph.prebuilt import create_react_agent
+
+    route = ToolCallingFakeChatModel(model_name="a", script=_agent_script())
+    router = ChatRouter(routes={"a": route}, default_route="a")
+
+    agent = create_react_agent(router.bind_tools([get_weather]), [get_weather])
+    out = agent.invoke({"messages": [{"role": "user", "content": "weather in Paris?"}]})
+
+    assert out["messages"][-1].content == "It is sunny in Paris"
+    # Two turns of the loop, each a request through the router: the binding is replayed on the
+    # route at call time (REQ-C3-1), so it is replayed once per turn, not once for the agent.
+    assert route.bind_calls == [{"tools": [get_weather], "tool_choice": None}] * 2
+
+
+def test_create_agent_builds_and_answers_with_a_pre_bound_router() -> None:
+    """REQ-C3-2: `langchain.agents.create_agent` is the other consumer the reviewer named; the
+    same pre-bound router builds and answers through it."""
+    from langchain.agents import create_agent
+
+    route = ToolCallingFakeChatModel(model_name="a", script=_agent_script())
+    router = ChatRouter(routes={"a": route}, default_route="a")
+    # `create_agent` types `model` as `str | BaseChatModel`; a bound model is a `Runnable`, not
+    # a `BaseChatModel`, on the router as on any chat model (REQ-C3-2's whole point — LangChain
+    # accepts it at runtime; the annotation just doesn't say so).
+    bound = cast("BaseChatModel", router.bind_tools([get_weather]))
+
+    agent = create_agent(model=bound, tools=[get_weather])
+    out = agent.invoke({"messages": [{"role": "user", "content": "weather in Paris?"}]})
+
+    assert out["messages"][-1].content == "It is sunny in Paris"
+
+
+def test_a_later_bare_bind_tools_is_honoured() -> None:
+    """REQ-C3-2: with no slot for `bound_route` to discard, a bare `bind(tools=...)` layered on
+    top of `bind_tools` reaches the route as a call kwarg — exactly as it does on a plain chat
+    model, where the later binding wins over the earlier one's converted slot."""
+    explicit = [
+        {
+            "type": "function",
+            "function": {
+                "name": "explicit",
+                "description": "d",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    plain, routed_route = capable("a"), capable("a")
+    router = ChatRouter(routes={"a": routed_route}, default_route="a")
+
+    plain.bind_tools([get_weather]).bind(tools=explicit).invoke("hi")
+    router.bind_tools([get_weather]).bind(tools=explicit).invoke("hi")
+
+    assert routed_route.calls == plain.calls
+    assert [spec["function"]["name"] for spec in routed_route.calls[-1]["tools"]] == ["explicit"]
 
 
 async def chunks_of(
@@ -880,16 +1067,190 @@ def test_a_dict_schema_answers_a_dict() -> None:
     assert result == {"answer": "42"}
 
 
-async def test_structured_output_answers_once_when_streamed() -> None:
-    """REQ-C3-3, and the limit `StructuredRouter` documents: `stream` and `astream` yield the
-    finished object as their single item. Progressive partial parses would mean streaming
-    through the router, whose chunks are merged with `+`, which a parsed object doesn't
-    support."""
+async def test_structured_output_streams_whatever_the_route_itself_gives() -> None:
+    """REQ-C3-3: `capable()`'s fake hands its tool call over in one final chunk (as some real
+    routes do too), so `stream`/`astream` answer with the one item that produces — not because
+    the router holds a stream back to one item, which `test_structured_streaming_*` next to
+    this disproves for a route that streams progressively."""
     router, _ = router_of({"a": True}, default="a")
     structured = router.with_structured_output(Answer)
 
     assert list(structured.stream("hello")) == [Answer(answer="42")]
     assert [item async for item in structured.astream("hello")] == [Answer(answer="42")]
+
+
+# --- Progressive structured streaming: the router matches a plain route exactly (C1, C2) ---
+
+StreamConvention = Literal["stream", "astream"]
+
+
+class Person(BaseModel):
+    """A person mentioned in the text."""
+
+    name: str
+    age: int
+    city: str
+
+
+PERSON_CALL = ToolCall(
+    name="Person", args={"name": "Ada", "age": 36, "city": "London"}, id="call_1", type="tool_call"
+)
+
+
+def streaming_route(**fields: Any) -> StreamingStructuredFakeChatModel:
+    """A route whose tool call streams in several pieces, as a real provider's does."""
+    return StreamingStructuredFakeChatModel(model_name="p", tool_calls=[PERSON_CALL], **fields)
+
+
+async def stream_all(
+    model: Runnable[LanguageModelInput, Any], convention: StreamConvention, text: str = "hello"
+) -> list[Any]:
+    if convention == "stream":
+        return list(model.stream(text))
+    return [item async for item in model.astream(text)]
+
+
+def reduced(items: list[Any]) -> Any:
+    """`items` folded together the way `ChatRouter.stream` folds them for its own run output
+    (D9): `+` for a delta, replaced by the newest when that raises — a parsed partial is
+    cumulative, not a delta. What a caller gets is each `item` on its own, unfolded; this is
+    only for asserting on the *final* state the whole sequence adds up to."""
+    total = items[0]
+    for item in items[1:]:
+        try:
+            total = total + item
+        except TypeError:
+            total = item
+    return total
+
+
+PERSON_DICT: dict[str, Any] = {"name": "Ada", "age": 36, "city": "London"}
+PERSON = Person(name="Ada", age=36, city="London")
+
+STRUCTURED_SCHEMAS = [
+    pytest.param({"schema": Person}, PERSON, id="pydantic"),
+    pytest.param({"schema": Person.model_json_schema()}, PERSON_DICT, id="dict schema"),
+    pytest.param({"schema": Person, "method": "json_mode"}, PERSON_DICT, id="json_mode"),
+]
+
+
+@pytest.mark.parametrize("include_raw", [False, True], ids=["", "include_raw"])
+@pytest.mark.parametrize("convention", ["stream", "astream"])
+@pytest.mark.parametrize(("case", "final"), STRUCTURED_SCHEMAS)
+async def test_structured_streaming_matches_the_plain_route_exactly(
+    case: dict[str, Any], final: object, convention: StreamConvention, include_raw: bool
+) -> None:
+    """REQ-C3-3, C1, C2: the reviewer's measurement, pinned — a route that streams progressive
+    tool-call or JSON-mode chunks answers `with_structured_output(...).stream()`/`.astream()`
+    through the router exactly as it does when called directly: the same number of items
+    (genuinely more than one, the whole point of the fix), the same `parsed` values — up to
+    ordering, which is `RunnablePassthrough.assign`'s own race between its `parsed` and
+    `parsing_error` steps (`runnables/passthrough.py`), true of the plain route too and not
+    anything routing adds — and the same final state. `StructuredRouter.stream`/`astream`
+    delegate to the router's own, which passes each of the route's own items through unchanged
+    bar the record — which is why `raw` is not compared here: it is the one item that legitimately
+    differs, by carrying it.
+    """
+    direct = streaming_route().with_structured_output(include_raw=include_raw, **case)
+    through_router = ChatRouter(routes={"a": streaming_route()}, default_route="a")
+    routed = through_router.with_structured_output(include_raw=include_raw, **case)
+
+    direct_items = await stream_all(direct, convention)
+    routed_items = await stream_all(routed, convention)
+
+    assert len(routed_items) == len(direct_items)
+    assert len(routed_items) > 1  # genuinely progressive, not the finished object once
+    if include_raw:
+        parsed = [cast("dict[str, Any]", item).get("parsed") for item in routed_items]
+        direct_parsed = [cast("dict[str, Any]", item).get("parsed") for item in direct_items]
+        assert sorted(map(repr, parsed)) == sorted(map(repr, direct_parsed))
+        assert reduced(routed_items)["parsed"] == final
+    else:
+        assert routed_items == direct_items
+        assert reduced(routed_items) == final
+
+
+@pytest.mark.parametrize("convention", ["stream", "astream"])
+async def test_exactly_one_structured_item_carries_the_record(convention: StreamConvention) -> None:
+    """D8, REQ-R2-4: with `include_raw=True`, exactly one item's `raw` message carries the
+    routing record — the first, which the reviewer's measurement shows always has a `"raw"`
+    key before any `"parsed"` key can (the parser needs raw content first)."""
+    router = ChatRouter(routes={"a": streaming_route()}, default_route="a")
+    structured = router.with_structured_output(Person, include_raw=True)
+
+    items = cast("list[dict[str, Any]]", await stream_all(structured, convention))
+
+    carriers = [
+        index
+        for index, item in enumerate(items)
+        if isinstance(item.get("raw"), AIMessage) and routing_decision(item["raw"]) is not None
+    ]
+    assert carriers == [0]
+    assert routing_decision(items[0]["raw"]) == RoutingDecision(
+        route="a", reason="no strategy configured"
+    )
+
+
+@pytest.mark.parametrize("convention", ["stream", "astream"])
+async def test_a_parsed_only_structured_stream_still_sets_the_last_decision(
+    convention: StreamConvention,
+) -> None:
+    """D3: nothing in a parsed-only progressive stream can carry the record (no item is a
+    message, or a mapping with one under `"raw"`), so `last_routing_decision()` is what a
+    caller reads — set as soon as the first partial arrives, same as for a whole answer."""
+    router = ChatRouter(
+        routes={"a": streaming_route(), "b": streaming_route()},
+        default_route="a",
+        strategy=ByText(),
+    )
+    structured = router.with_structured_output(Person)
+
+    items = await stream_all(structured, convention, "a")
+
+    assert len(items) > 1
+    assert items[-1] == Person(name="Ada", age=36, city="London")
+    assert last_routing_decision() == RoutingDecision(
+        route="a", reason="asked for 'a'", strategy="ByText"
+    )
+
+
+def test_an_abandoned_structured_stream_keeps_its_record() -> None:
+    """C6, D3: T-114's `GeneratorExit` handling covers a structured stream too — stopping early
+    is not a failure, and the record the first item published stays readable."""
+    router = ChatRouter(routes={"a": streaming_route()}, default_route="a")
+    structured = router.with_structured_output(Person)
+
+    for _item in structured.stream("hello"):
+        break
+    gc.collect()  # the generator the loop dropped is finalized here at the latest
+
+    assert last_routing_decision() == RoutingDecision(route="a", reason="no strategy configured")
+
+
+def test_a_structured_stream_that_fails_withdraws_the_record() -> None:
+    """C6, D3: a route that raises partway through a structured stream closes the router's run
+    as an error and withdraws the record, exactly as a plain message stream does."""
+
+    class FailsPartway(StreamingStructuredFakeChatModel):
+        def _stream(
+            self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+        ) -> Iterator[Any]:
+            iterator = super()._stream(messages, stop, run_manager, **kwargs)
+            yield next(iterator)
+            msg = "the provider is down"
+            raise RuntimeError(msg)
+
+    route = FailsPartway(model_name="p", tool_calls=[PERSON_CALL])
+    router = ChatRouter(routes={"a": route}, default_route="a")
+    structured = router.with_structured_output(Person)
+    collector = RunCollectorCallbackHandler()
+
+    with pytest.raises(RuntimeError, match="the provider is down"):
+        list(structured.stream("hello", {"callbacks": [collector]}))
+
+    assert last_routing_decision() is None
+    (router_run,) = collector.traced_runs
+    assert "the provider is down" in (router_run.error or "")
 
 
 async def test_structured_output_batches_each_request_to_its_own_route() -> None:
@@ -905,6 +1266,25 @@ async def test_structured_output_batches_each_request_to_its_own_route() -> None
     assert [record_of(result["raw"]).route for result in batched] == ["a", "b"]
     assert [record_of(result["raw"]).route for result in abatched] == ["b", "a"]
     assert [result["parsed"] for result in (*batched, *abatched)] == [Answer(answer="42")] * 4
+
+
+def test_structured_output_forwards_the_router_s_config_specs() -> None:
+    """D7: `StructuredRouter.config_specs` is the router's own, not `Runnable`'s default `[]`
+    — so a spec the router declares (T-116's `"route"` key, once merged) is visible through
+    `with_structured_output(...)` too, for `with_config`, `config={"configurable": …}` and
+    config-schema introspection run on the structured runnable rather than the router itself.
+    T-116 is not merged yet, so a throwaway spec is added through a subclass here."""
+    spec = ConfigurableFieldSpec(id="probe", annotation=str, default="x")
+
+    class WithASpec(ChatRouter):
+        @property
+        def config_specs(self) -> list[ConfigurableFieldSpec]:
+            return [spec]
+
+    router = WithASpec(routes={"a": capable("a")}, default_route="a")
+
+    assert router.config_specs == [spec]
+    assert router.with_structured_output(Answer).config_specs == [spec]
 
 
 # --- REQ-R2-4: structured output has an answer for R2 ---
@@ -980,6 +1360,40 @@ async def test_a_bound_call_is_one_router_run_over_one_model_run(binder: Binder)
     assert (router_run.outputs or {})[ROUTING_KEY] == record.as_dict()
     (model_run,) = model_runs([router_run])
     assert metadata_of(model_run)[ROUTING_KEY] == record.as_dict()
+
+
+class DecideFailsAdecideWorks(RoutingStrategy):
+    """`decide` (sync) always raises; `adecide` overrides with its own working implementation.
+
+    Tells apart `StructuredRouter.ainvoke` calling `router.ainvoke` from calling the *sync*
+    `router.invoke` by mistake (mutation M25, previously uncaught): the wrong call would reach
+    `decide`, not `adecide`, and surface as `Raises raised AssertionError` absorbed into a
+    fallback (R9) instead of the strategy's own choice.
+    """
+
+    def decide(self, request: RoutingRequest) -> RoutingChoice:
+        msg = "decide must not run on the async path"
+        raise AssertionError(msg)
+
+    async def adecide(self, request: RoutingRequest) -> RoutingChoice:
+        return RoutingChoice(route=request.text, reason="adecide chose it")
+
+
+async def test_structured_ainvoke_awaits_the_router_s_own_ainvoke() -> None:
+    """Mutation M25: `StructuredRouter.ainvoke` has to await `router.ainvoke`, and not fall back
+    to calling the sync `router.invoke` — a strategy whose sync half fails and whose async half
+    works is the one case that tells the two apart, since anything symmetric between them
+    can't."""
+    router = ChatRouter(
+        routes={"a": capable("a")}, default_route="a", strategy=DecideFailsAdecideWorks()
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = await router.with_structured_output(Answer).ainvoke("a")
+
+    assert result == Answer(answer="42")
+    assert routing_warnings(caught) == []
 
 
 # --- A route bound more than once ---
@@ -1078,7 +1492,7 @@ CALLED_THROUGH = [
     *(pytest.param(TOOLS, convention, id=f"bind_tools-{convention}") for convention in CONVENTIONS),
     *(
         pytest.param(STRUCTURED, convention, id=f"with_structured-{convention}")
-        for convention in ("invoke", "ainvoke")
+        for convention in CONVENTIONS
     ),
 ]
 
@@ -1087,12 +1501,12 @@ CALLED_THROUGH = [
 async def test_the_per_request_warning_points_at_the_line_that_called(
     binder: Binder, convention: Convention
 ) -> None:
-    """REQ-R10-3: a diversion is raised from inside the router's pipeline, one frame deeper than
-    the fallback warning is — and always through a binding, which is one more. It names the
-    line that called the bound runnable, on each calling convention.
-
-    Structured output is pinned for `invoke` and `ainvoke`; its `stream` goes through
-    `Runnable.stream`'s default, a frame further, so the warning there names that frame."""
+    """REQ-R10-3: a diversion is raised from inside the router's pipeline, at whatever depth
+    the calling convention and the binding put it — a fixed constant would have to be pinned
+    per combination, as `bind_tools` needed one and `with_structured_output` (T-115's
+    `StructuredRouter.stream`/`astream`, now delegating to the router's own rather than
+    `Runnable`'s default) needed another; `_stacklevel` (T-115) walks to the boundary instead,
+    so every combination here names the same thing: the line that called the bound runnable."""
     router, _ = mixed()
     bound = bind(binder, router)
 
@@ -1102,3 +1516,27 @@ async def test_the_per_request_warning_points_at_the_line_that_called(
 
     (warning,) = routing_warnings(caught)
     assert (warning.filename, warning.lineno) == (__file__, line)
+
+
+def test_the_walker_does_not_treat_a_module_that_merely_starts_with_langchain_as_library_code() -> (
+    None
+):
+    """`_stacklevel` (`router.py`) matches `_LIBRARY_MODULES` on the dot: a module whose name
+    starts with the same letters as `langchain` — someone's own `langchain_myapp` — is the
+    application's, not the library's, and the walker must stop there rather than mistake it
+    for library code and keep walking past it."""
+    router, _ = router_of({"a": True}, default="a", strategy=Abstains())
+    namespace: dict[str, Any] = {"__name__": "langchain_myapp", "router": router}
+    # Building a frame whose module name is exactly "langchain_myapp" — a real one, since the
+    # walker reads `frame.f_globals["__name__"]`, which only `exec` into a chosen namespace sets.
+    exec(
+        "def call_from_a_lookalike_module():\n    router.invoke('hello')\n",
+        namespace,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        namespace["call_from_a_lookalike_module"]()
+
+    (warning,) = routing_warnings(caught)
+    assert warning.filename == "<string>"  # `exec`'s own compile unit, not this test file
