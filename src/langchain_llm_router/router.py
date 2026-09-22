@@ -8,13 +8,16 @@ Every entry point runs the same pipeline, in D9's order:
 
 1. `_start_run` opens the router's chain run.
 2. `_decide` / `_adecide` settle the route, diversion included. `_plan` says whether there is
-   anything to run — no strategy means the default route, with no strategy run — and otherwise
-   the strategy runs in a child chain run of its own, with that run's child config as
+   anything to run: a route forced via runtime config (`configurable["route"]`, D7) or no
+   strategy at all each settle the decision outright, with no strategy run (D2) — and
+   otherwise the strategy runs in a child chain run of its own, with that run's child config as
    `RoutingRequest.config` and set as the context config. `_conclude` turns what the strategy
-   did into a `RoutingDecision`, falling back to the default route when it can't (R9); `_divert`
-   then applies R10 to that: a request whose route can't use the tools bound to it goes to D1's
-   target instead, recorded as a diversion — before the strategy run closes, so its output is
-   the same record the router run and the route run end up with (D9).
+   did into a `RoutingDecision`, falling back to the default route when it can't (R9);
+   `_forced_decision` does the same for a forced route that can't be used, with
+   `ForcedRouteError` or `ForcedRouteWarning` standing in for R9's own (R11). `_divert` then
+   applies R10 to whatever settled the decision: a request whose route can't use the tools
+   bound to it goes to D1's target instead, recorded as a diversion — before the strategy run
+   closes, so its output is the same record the router run and the route run end up with (D9).
 3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata, and the caller's tool or structured-output binding replayed on
    the route itself (C3).
@@ -56,7 +59,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult, RunInf
 from langchain_core.runnables import Runnable, RunnableConfig, ensure_config, patch_config
 from langchain_core.runnables.config import set_config_context
 from langchain_core.runnables.schema import StreamEvent
-from langchain_core.runnables.utils import coro_with_context
+from langchain_core.runnables.utils import ConfigurableFieldSpec, coro_with_context
 from langchain_core.tools import BaseTool
 from pydantic import Field, field_validator, model_validator
 
@@ -79,6 +82,8 @@ from langchain_llm_router.decision import (
 )
 from langchain_llm_router.errors import (
     FallbackWarning,
+    ForcedRouteError,
+    ForcedRouteWarning,
     NoToolCapableRouteError,
     RoutingError,
     ToolSupportWarning,
@@ -268,6 +273,33 @@ class ChatRouter(BaseChatModel):
     @property
     def _llm_type(self) -> str:
         return "chat_router"
+
+    @property
+    def config_specs(self) -> list[ConfigurableFieldSpec]:
+        """The `"route"` key (D7, REQ-C4-1): what forces a route for one call.
+
+        `Runnable`'s own default is `[]`, which would hide the key from `with_config`,
+        `config={"configurable": {"route": ...}}` and config-schema introspection —
+        `ConfigurableFieldSpec` (`runnables/utils.py:655`) is the mechanism LangChain gives
+        every `Runnable` for exactly this. `default=None` matches what leaving the key unset
+        means: no force, the strategy decides (D2). `StructuredRouter.config_specs` forwards
+        this (`_tools.py`), so a router bound through `with_structured_output` exposes it too,
+        and a `RunnableBinding` — what `bind_tools` and `with_config` return — forwards a
+        wrapped `Runnable`'s `config_specs` on its own (`RunnableBindingBase.config_specs`),
+        so no extra forwarding is needed for those.
+        """
+        return [
+            ConfigurableFieldSpec(
+                id="route",
+                annotation=str | None,
+                name="Route",
+                description=(
+                    "Force one of the routes for this call, skipping the strategy entirely "
+                    f"(D2, R11): {_names(self.routes)}."
+                ),
+                default=None,
+            )
+        ]
 
     # --- Entry points: each runs the pipeline in the module docstring (D9). ---
 
@@ -707,10 +739,15 @@ class ChatRouter(BaseChatModel):
     ) -> RoutingDecision | _StrategyCall:
         """What deciding this request takes: a decision already settled, or a strategy to run.
 
-        No strategy means the default route and no strategy run (D9). A request with no user
-        message gives a strategy nothing to decide on, so it is not consulted and the default
-        route answers (R9, REQ-R4-4).
+        A route forced through runtime config (`configurable["route"]`, D7) settles it outright
+        via `_forced_decision` — and so does having no strategy at all — either way with no
+        strategy run (D2, REQ-R11-1). A request with no user message gives a strategy nothing
+        to decide on, so it is not consulted either, and the default route answers (R9,
+        REQ-R4-4).
         """
+        forced = config.get("configurable", {}).get("route")
+        if forced is not None:
+            return self._forced_decision(cast("str", forced), kwargs)
         # `_coerce_strategy` has wrapped any plain callable (REQ-R6-2).
         strategy = cast("RoutingStrategy | None", self.strategy)
         if strategy is None:
@@ -726,6 +763,40 @@ class ChatRouter(BaseChatModel):
         if request is None:
             return self._fallback("the request has no user message to route on", strategy=None)
         return _StrategyCall(strategy, strategy_name(strategy), request)
+
+    def _forced_decision(self, route: str, kwargs: dict[str, Any]) -> RoutingDecision:
+        """What a forced route resolves to (R11): itself, when it can serve this call, or
+        whatever `on_unavailable_forced_route` says to do when it can't (REQ-R11-2).
+
+        Never runs the strategy (D2, REQ-R11-1) — this is `_plan`'s other way of settling the
+        decision outright, taken before a `_StrategyCall` would even be built. Whatever comes
+        back still goes through `_divert` afterwards, exactly like every other decision (D9,
+        `_divert`'s own docstring) — this only rules out the one case R11 makes the router's
+        own to refuse first: the forced route itself being unusable.
+        """
+        problem = self._forced_route_problem(route, kwargs)
+        if problem is None:
+            return RoutingDecision(route=route, reason="forced via runtime config", forced=True)
+        if self.on_unavailable_forced_route == "error":
+            raise ForcedRouteError(
+                f"{problem}; set on_unavailable_forced_route='fallback' to fall back to the "
+                "default route instead"
+            )
+        return self._forced_fallback(problem)
+
+    def _forced_route_problem(self, route: str, kwargs: dict[str, Any]) -> str | None:
+        """Why a forced route can't be used, or `None` when it can (REQ-R11-2).
+
+        Existence first. Tool capability only when something is bound — tools, or a schema,
+        which LangChain builds on tool binding — using the same signal `_divert` uses for every
+        other route (D5, R10): with nothing bound, a forced route is always available on that
+        count, and only its existence is ever in question.
+        """
+        if route not in self.routes:
+            return f"forced route {route!r} is not one of the routes: {_names(self.routes)}"
+        if tools_are_bound(kwargs) and not self._supports_tools(route):
+            return f"forced route {route!r} can't use the bound tools"
+        return None
 
     def _decide(
         self,
@@ -844,6 +915,31 @@ class ChatRouter(BaseChatModel):
             fallback=True,
         )
 
+    def _forced_fallback(self, cause: str) -> RoutingDecision:
+        """R11's own fallback: the default route stands in for a forced route that can't be
+        used, with one `ForcedRouteWarning` — not `FallbackWarning`, which is R9's, for a
+        strategy that failed rather than a forced route that was refused — and both
+        `forced=True` and `fallback=True` recorded (REQ-R11-3). `strategy` stays unset: no
+        strategy ran (D2), so there is none to name.
+
+        A dedicated method rather than a parameter on `_fallback`: that method's own callers (a
+        strategy that couldn't decide, and a request with no user message) are R9's cases, and
+        `_fallback` always uses `FallbackWarning` and never sets `forced=True` — widening its
+        signature to cover R11's different warning class would let this case leak into theirs
+        through a missed keyword, for two call sites that are otherwise unrelated.
+        """
+        warnings.warn(
+            f"{cause}; falling back to the default route {self.default_route!r}",
+            ForcedRouteWarning,
+            stacklevel=_stacklevel(),
+        )
+        return RoutingDecision(
+            route=self.default_route,
+            reason=f"{cause}; fell back to the default route",
+            forced=True,
+            fallback=True,
+        )
+
     # --- 3. Tool capability (R10) ---
 
     def _supports_tools(self, route: str) -> bool:
@@ -898,10 +994,12 @@ class ChatRouter(BaseChatModel):
         Called from `_decide` / `_adecide`, before the strategy's run closes (D9): the decision
         is one record in three places, so the strategy run's output is the *diverted* record
         too, the same as the router run's outputs and the route run's metadata — not what the
-        strategy chose before D1 stepped in. There is no `forced` guard yet: a forced route
-        that can't use the bound tools is R11's to refuse before a request gets here
-        (REQ-R11-2, T-116, which must run in `_plan` ahead of this); whatever a forced route's
-        refusal falls back to is diverted like any other decision.
+        strategy chose before D1 stepped in. The `forced` guard runs earlier, in `_plan`
+        (REQ-R11-2, T-116): a forced route that can't use the bound tools is refused —
+        `ForcedRouteError`, or `ForcedRouteWarning` under `on_unavailable_forced_route`'s
+        `"fallback"` setting — before a request ever gets here, so this never has to tell a
+        forced route from any other. Whatever a forced route's refusal falls back to is
+        diverted like any other decision.
         """
         if not tools_are_bound(kwargs) or self._supports_tools(decision.route):
             return decision
