@@ -8,11 +8,12 @@ Neighbours, not repeated here: the wording of each fallback reason is `test_fall
 shape of the run tree is `test_routes.py`'s, and "exactly one streamed chunk carries the
 record" (REQ-R2-3) is T-113's.
 
-Two of REQ-R2-1's paths cannot be reached yet, and are gaps rather than omissions: a request
-diverted off a tool-incapable route (R10) needs `bind_tools`, which is T-115's, and a forced
-route (R11) needs the configurable key, which is T-116's — each owns the record's
-`diverted_from` / `forced` field on its own path. `generate()` / `agenerate()` are T-117's and
-raise today.
+One of REQ-R2-1's paths cannot be reached yet, and is a gap rather than an omission: a forced
+route (R11) needs the configurable key, which is T-116's, and owns the record's `forced` field
+on its own path. A request diverted off a tool-incapable route (R10, T-115) is `DIVERTED` in
+`DECISIONS` below — its `diverted_from` field, and the detail of where the diversion happens,
+are `test_tools.py`'s; here it is one more shape of decision to find in each of D9's places.
+`generate()` / `agenerate()` are T-117's, and `test_generate.py` covers the record on them.
 """
 
 from __future__ import annotations
@@ -23,10 +24,11 @@ import warnings
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
-from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnableConfig, RunnableMap
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableMap
+from langchain_core.tools import tool
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
 from langchain_llm_router import (
@@ -37,13 +39,14 @@ from langchain_llm_router import (
     RoutingDecision,
     RoutingRequest,
     RoutingStrategy,
+    ToolSupportWarning,
     last_routing_decision,
     routing_decision,
 )
 from langchain_llm_router import decision as decision_module
 from langchain_llm_router.decision import ROUTING_KEY
 from tests.conventions import CONVENTIONS, Convention, respond
-from tests.fakes import FakeChatModel
+from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
@@ -86,29 +89,65 @@ FELL_BACK = RoutingDecision(
     fallback=True,
 )
 NO_STRATEGY = RoutingDecision(route="cheap", reason="no strategy configured")
+DIVERTED = RoutingDecision(
+    route="cheap",
+    reason="frontier is better at this; 'frontier' can't use the bound tools, so it was "
+    "diverted to 'cheap'",
+    strategy="Chooses",
+    diverted_from="frontier",
+)
+"""What `Chooses()` produces once tools are bound and `frontier` can't use them (T-115, R10):
+`_divert` (`_decide`) settles this before the strategy run closes (D9), so it is the record in
+every one of D9's three places, not the strategy's undiverted choice — `test_tools.py` owns the
+detail of that placement; this is one more shape of decision to find in each of them."""
 
 DECISIONS: list[tuple[RoutingStrategy | None, RoutingDecision]] = [
     (None, NO_STRATEGY),
     (Chooses(), DECIDED),
     (Abstains(), FELL_BACK),
+    (Chooses(), DIVERTED),
 ]
 """Every decision the router can reach today, and the record each one writes."""
 
-DECISION_IDS = ["no strategy", "chose a route", "fell back"]
+DECISION_IDS = ["no strategy", "chose a route", "fell back", "diverted"]
 
 TOOL_CALL = ToolCall(name="search", args={"q": "kettles"}, id="call-1", type="tool_call")
 
 
+@tool
+def get_weather(city: str) -> str:
+    """Look up the weather in a city."""
+    return city
+
+
 def two_routes() -> dict[str, BaseChatModel]:
-    """Two fakes, each answering with its own name; `cheap` is the default route."""
+    """Two fakes, each answering with its own name; `cheap` is the default route.
+
+    `cheap` can use tools and `frontier` can't (D5) — irrelevant to every decision here except
+    `DIVERTED`, the only one that binds any: `bind_tools` and `bind_calls` are otherwise unused,
+    and a plain, untooled call behaves exactly as it did on the `FakeChatModel` this replaces.
+    """
     return {
-        "cheap": FakeChatModel(model_name="model-cheap", reply="cheap answer"),
+        "cheap": ToolCallingFakeChatModel(model_name="model-cheap", reply="cheap answer"),
         "frontier": FakeChatModel(model_name="model-frontier", reply="frontier answer"),
     }
 
 
 def router_with(strategy: RoutingStrategy | RoutingCallable | None) -> ChatRouter:
     return ChatRouter(routes=two_routes(), default_route="cheap", strategy=strategy)
+
+
+def _as_needed(
+    router: ChatRouter, expected: RoutingDecision
+) -> Runnable[LanguageModelInput, AIMessage]:
+    """`router`, bound with a tool when `expected` is a diversion (R10) — plain otherwise, which
+    is every other member of `DECISIONS`. The bind-time `ToolSupportWarning` is not this
+    module's to assert on; `test_tools.py` does that."""
+    if expected.diverted_from is None:
+        return router
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ToolSupportWarning)
+        return router.bind_tools([get_weather])
 
 
 Path = Literal["invoke", "ainvoke", "stream", "astream", "batch", "abatch"]
@@ -118,14 +157,20 @@ PATHS: tuple[Path, ...] = (*CONVENTIONS, "batch", "abatch")
 
 
 async def answer(
-    router: ChatRouter, path: Path, text: str, config: RunnableConfig | None = None
+    router: ChatRouter,
+    path: Path,
+    text: str,
+    config: RunnableConfig | None = None,
+    *,
+    expected: RoutingDecision,
 ) -> BaseMessage:
     """The router's answer through one entry point; `batch` and `abatch` take one input."""
+    model = _as_needed(router, expected)
     if path == "batch":
-        return router.batch([text], config)[0]
+        return model.batch([text], config)[0]
     if path == "abatch":
-        return (await router.abatch([text], config))[0]
-    return await respond(router, path, text, config)
+        return (await model.abatch([text], config))[0]
+    return await respond(model, path, text, config)
 
 
 def record_of(message: BaseMessage) -> RoutingDecision:
@@ -251,14 +296,16 @@ async def test_every_entry_point_answers_with_the_record(
     path: Path, strategy: RoutingStrategy | None, expected: RoutingDecision
 ) -> None:
     """REQ-R2-1: every response carries the D8 record — through each of the six entry points
-    the router routes, and whether the strategy chose, could not decide (R9), or there was none
-    to consult."""
+    the router routes, and whether the strategy chose, could not decide (R9), diverted (R10),
+    or there was none to consult."""
     router = router_with(strategy)
 
     with warnings.catch_warnings():
-        # The R9 warning itself is `test_fallback.py`'s; here only the record is under test.
+        # The R9 and R10 warnings themselves are `test_fallback.py`'s and `test_tools.py`'s;
+        # here only the record is under test.
         warnings.simplefilter("ignore", FallbackWarning)
-        message = await answer(router, path, "hello")
+        warnings.simplefilter("ignore", ToolSupportWarning)
+        message = await answer(router, path, "hello", expected=expected)
 
     assert routing_decision(message) == expected
 
@@ -289,13 +336,17 @@ async def test_the_trace_carries_the_whole_record_in_each_of_d9_s_places(
 ) -> None:
     """REQ-R2-2, D9: the strategy run's output, the router run's outputs and the selected
     route's run metadata each hold the same record, all six fields of it — and it is on no
-    run's *start* metadata, because the router's run opens before the decision is made."""
+    run's *start* metadata, because the router's run opens before the decision is made. A
+    diverted decision (R10) is no exception: `_divert` runs inside `_decide`, before the
+    strategy run closes, so its output is the diverted record too, not the undiverted choice."""
     router = router_with(strategy)
+    model = _as_needed(router, expected)
     collector = RunCollectorCallbackHandler()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FallbackWarning)
-        message = await respond(router, convention, "hello", {"callbacks": [collector]})
+        warnings.simplefilter("ignore", ToolSupportWarning)
+        message = await respond(model, convention, "hello", {"callbacks": [collector]})
 
     record = expected.as_dict()
     assert routing_decision(message) == expected

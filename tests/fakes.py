@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
@@ -120,7 +120,19 @@ class FakeChatModel(GenerateOnlyFakeChatModel):
 
 
 class ToolCallingFakeChatModel(FakeChatModel):
-    """A route that can use tools: `bind_tools` converts them and binds them as kwargs."""
+    """A route that can use tools: `bind_tools` converts them and binds them as kwargs.
+
+    Behaves as the providers do where it matters to the router: `strict=` is consumed at bind
+    time, changing how the schema is built (`convert_to_openai_tool(..., strict=...)`), and so
+    never becomes a call kwarg; `tool_choice` and any other binding kwarg do.
+    """
+
+    tool_format: Literal["openai", "anthropic"] = "openai"
+    """The shape this provider wants a converted tool in: OpenAI's function spec, or Anthropic's
+    `name` / `description` / `input_schema` — so two routes can convert the same tool apart."""
+
+    bind_calls: list[dict[str, Any]] = Field(default_factory=list)
+    """Every `bind_tools` call this route took, as given — before any conversion."""
 
     def bind_tools(
         self,
@@ -129,10 +141,23 @@ class ToolCallingFakeChatModel(FakeChatModel):
         tool_choice: str | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        converted = [convert_to_openai_tool(tool) for tool in tools]
+        self.bind_calls.append({"tools": list(tools), "tool_choice": tool_choice, **kwargs})
+        strict = kwargs.pop("strict", None)
+        converted = [self._convert(tool, strict) for tool in tools]
         if tool_choice is not None:
             kwargs["tool_choice"] = tool_choice
         return self.bind(tools=converted, **kwargs)
+
+    def _convert(self, tool: Any, strict: bool | None) -> dict[str, Any]:
+        spec = convert_to_openai_tool(tool, strict=strict)
+        if self.tool_format == "openai":
+            return spec
+        function = spec["function"]
+        return {
+            "name": function["name"],
+            "description": function.get("description", ""),
+            "input_schema": function["parameters"],
+        }
 
 
 class NativeStructuredFakeChatModel(ToolCallingFakeChatModel):
@@ -156,6 +181,116 @@ class NativeStructuredFakeChatModel(ToolCallingFakeChatModel):
             {"method": method, "include_raw": include_raw, **kwargs}
         )
         return super().with_structured_output(schema, include_raw=include_raw, **kwargs)
+
+
+class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
+    """A route whose structured output streams progressively, as a real provider's does.
+
+    `NativeStructuredFakeChatModel._stream` (inherited from `FakeChatModel`) hands over a tool
+    call's arguments in one final chunk — enough for most tests, but not for T-115's structured
+    streaming (C1, C2), which needs a route that answers the way `ChatOllama` or `ChatOpenAI`
+    do: a growing JSON string, several chunks wide, that the route's own parser turns into
+    progressively more complete partials. `piece_size` controls how many chunks that takes.
+
+    `method="json_mode"` streams the same JSON as plain text content instead of a tool call —
+    the other native structured mode a provider offers, parsed by `JsonOutputParser` rather
+    than a tool-call parser — because that path takes a different shape through
+    `with_structured_output` (`llm | JsonOutputParser()` instead of `bind_tools(...) | parser`)
+    and T-115's tests check both.
+    """
+
+    piece_size: int = 6
+
+    def _pieces(self, message: AIMessage) -> list[str]:
+        (call,) = message.tool_calls
+        args = json.dumps(call["args"])
+        return [args[i : i + self.piece_size] for i in range(0, len(args), self.piece_size)]
+
+    def _for_json_mode(self, message: AIMessage) -> AIMessage:
+        """`message`, with its tool call's arguments as plain JSON content instead — what
+        `method="json_mode"` answers with, on this fake as on a real provider."""
+        (call,) = message.tool_calls
+        return message.model_copy(update={"content": json.dumps(call["args"]), "tool_calls": []})
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self.calls.append(dict(kwargs))
+        message = self._message()
+        if kwargs.get("json_mode", False):
+            message = self._for_json_mode(message)
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        self.calls.append(dict(kwargs))
+        message = self._message()
+        json_mode = kwargs.get("json_mode", False)
+        for index, piece in enumerate(self._pieces(message)):
+            if json_mode:
+                yield ChatGenerationChunk(message=AIMessageChunk(content=piece))
+            else:
+                (call,) = message.tool_calls
+                yield ChatGenerationChunk(
+                    message=AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            tool_call_chunk(
+                                name=call["name"] if index == 0 else None,
+                                args=piece,
+                                id=call["id"] if index == 0 else None,
+                                index=0,
+                            )
+                        ],
+                    )
+                )
+        yield ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="",
+                chunk_position="last",
+                usage_metadata=message.usage_metadata,
+                response_metadata=dict(message.response_metadata),
+            )
+        )
+
+    def with_structured_output(
+        self,
+        schema: dict[str, Any] | type,
+        *,
+        include_raw: bool = False,
+        method: str = "function_calling",
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, dict[str, Any] | BaseModel]:
+        self.structured_output_calls.append(
+            {"method": method, "include_raw": include_raw, **kwargs}
+        )
+        if method != "json_mode":
+            return BaseChatModel.with_structured_output(
+                self, schema, include_raw=include_raw, **kwargs
+            )
+        # The other native mode: the model answers with JSON text, not a tool call, so it is
+        # bound with `json_mode=True` rather than through `bind_tools` — `_generate` and
+        # `_stream` read it back off the call kwargs, exactly where a bound kwarg lands (C3).
+        from langchain_core.output_parsers import JsonOutputParser
+        from langchain_core.runnables import RunnableMap, RunnablePassthrough
+
+        llm = self.bind(json_mode=True)
+        parser = JsonOutputParser()
+        if include_raw:
+            return RunnableMap(raw=llm) | RunnablePassthrough.assign(
+                parsed=lambda output: parser.invoke(output["raw"]),
+                parsing_error=lambda _: None,
+            )
+        return llm | parser
 
 
 def call_log(route: BaseChatModel) -> list[dict[str, Any]]:
