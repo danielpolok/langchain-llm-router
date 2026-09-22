@@ -1270,10 +1270,11 @@ async def test_structured_output_batches_each_request_to_its_own_route() -> None
 
 def test_structured_output_forwards_the_router_s_config_specs() -> None:
     """D7: `StructuredRouter.config_specs` is the router's own, not `Runnable`'s default `[]`
-    — so a spec the router declares (T-116's `"route"` key, once merged) is visible through
-    `with_structured_output(...)` too, for `with_config`, `config={"configurable": …}` and
-    config-schema introspection run on the structured runnable rather than the router itself.
-    T-116 is not merged yet, so a throwaway spec is added through a subclass here."""
+    — so a spec the router declares is visible through `with_structured_output(...)` too,
+    for `with_config`, `config={"configurable": …}` and config-schema introspection run on
+    the structured runnable rather than the router itself. The router's real `"route"` key
+    (T-116) is covered end to end in `test_forced_routes.py`; this checks the forwarding
+    itself, generically, with a throwaway spec added through a subclass."""
     spec = ConfigurableFieldSpec(id="probe", annotation=str, default="x")
 
     class WithASpec(ChatRouter):
