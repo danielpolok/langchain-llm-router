@@ -242,6 +242,34 @@ class ChatRouter(BaseChatModel):
                 raise RoutingError(msg)
         return routes
 
+    @field_validator("cache", mode="before")
+    @classmethod
+    def _reject_cache(cls, cache: object) -> object:
+        """The router's own `cache=` would silently no-op otherwise (D4, REQ-C10-2).
+
+        `BaseChatModel` declares `cache` (`language_models/base.py:190`) with no validator of
+        its own, and `ChatRouter` inherits the field but never reads it: it delegates to each
+        route's `invoke` / `stream` rather than running `_generate_with_cache` itself (the
+        module docstring's pipeline), so nothing on the router would ever consult a cache set
+        here. `None`, the field's own default, is the only value that passes — it means "not
+        set", not "use the global cache", since the router never checks it either way; anything
+        else (an explicit `BaseCache`, `True` or `False`) would look like it took effect and
+        never would.
+
+        `mode="before"`, like `_reject_wrapped_routes`: pydantic only runs a validator against
+        an explicitly passed value by default (`validate_default` is off), so a `ChatRouter`
+        built without `cache=` at all never reaches this at all.
+        """
+        if cache is not None:
+            msg = (
+                "cache belongs on the route, not the router (D4): ChatRouter delegates to "
+                "each route's own invoke/stream rather than running _generate_with_cache "
+                "itself, so its own cache would never be consulted — set cache= on each "
+                "route instead."
+            )
+            raise RoutingError(msg)
+        return cache
+
     @field_validator("strategy", mode="before")
     @classmethod
     def _coerce_strategy(cls, strategy: object) -> RoutingStrategy | None:
