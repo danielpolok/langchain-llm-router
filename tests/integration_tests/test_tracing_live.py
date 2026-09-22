@@ -50,7 +50,11 @@ pytestmark = [
 ]
 
 PROJECT = "llm-router-tests"
-"""Where the traces go, so they can be looked at afterwards. LangSmith creates it on first use."""
+"""Where the traces go, so they can be looked at afterwards. LangSmith creates it on first use.
+
+Nothing here deletes what it writes -- that's the point (see above) -- so the project grows by
+9 runs (one per convention) every time this file runs. Low risk while it stays gated behind
+`requires_langsmith` with no key in CI; revisit if it's ever added to a CI secret."""
 
 RECORD = RoutingDecision(
     route="frontier", reason="the request named 'frontier'", strategy="ByText"

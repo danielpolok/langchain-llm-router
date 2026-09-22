@@ -63,6 +63,7 @@ class RouteDown(Exception):
 
 
 FAILURE = RouteDown("the provider is down", 503)
+DELAYED_FAILURE = RouteDown("the provider is slow and down", 504)
 
 _MOMENT = 0.05
 """Seconds a `Slow` route takes. Only ever a floor under how long an answer takes, so it can
@@ -85,6 +86,21 @@ class Failing(FakeChatModel):
     ) -> ChatResult:
         self.calls.append(dict(kwargs))
         raise FAILURE
+
+
+class DelayedFailure(FakeChatModel):
+    """A route whose provider is also down, but only finds out after a moment -- so a caller
+    that raced completion order instead of prompt order would surface the *other* failure."""
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        await asyncio.sleep(_MOMENT)
+        raise DELAYED_FAILURE
 
 
 class Slow(FakeChatModel):
@@ -462,6 +478,21 @@ async def test_agenerate_finishes_every_prompt_and_then_raises_the_route_s_error
     assert sorted(run.error is not None for run in collector.traced_runs) == [False, False, True]
     assert all(run.end_time is not None for run in collector.traced_runs)
     assert (len(call_log(routes["good"])), len(call_log(routes["bad"]))) == (2, 1)
+
+
+async def test_agenerate_raises_the_first_prompt_s_failure_not_the_first_to_finish() -> None:
+    """C6: "the first, in prompt order" (the docstring's own words) is not the same as "the first
+    to finish" -- two prompts fail for different reasons, the *second* prompt's route fails
+    immediately and the *first* prompt's route only after a moment, and `agenerate` still raises
+    the first prompt's own exception. `asyncio.gather` keeps `outcomes` in submission order
+    regardless of completion order, so this is what makes that true rather than incidental."""
+    routes: dict[str, BaseChatModel] = {"slow_bad": DelayedFailure(), "fast_bad": Failing()}
+    router = ChatRouter(routes=routes, default_route="slow_bad", strategy=ByText())
+
+    with pytest.raises(RouteDown) as raised:
+        await router.agenerate(prompts("slow_bad", "fast_bad"))
+
+    assert raised.value is DELAYED_FAILURE
 
 
 # --- The refusal that remains (R3) ---
