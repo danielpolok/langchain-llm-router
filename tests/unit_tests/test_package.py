@@ -26,6 +26,7 @@ PINNED_EXPORTS = {
     "HeuristicStrategy",
     "ConfigurableStrategy",
     "EmbeddingStrategy",
+    "ClassifierStrategy",
 }
 
 

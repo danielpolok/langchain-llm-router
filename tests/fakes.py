@@ -307,6 +307,28 @@ class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
         return llm | parser
 
 
+class FailingChatModel(ToolCallingFakeChatModel):
+    """A route whose every call raises — for a strategy's own call-failure tests (R9).
+
+    Extends `ToolCallingFakeChatModel`, not the plainer `GenerateOnlyFakeChatModel`, so it still
+    answers `bind_tools`/`with_structured_output` the way a real, capable provider would; only
+    the call itself — what a network error, a rate limit or a timeout looks like from the
+    caller's side — fails.
+    """
+
+    error_type: type[BaseException] = ConnectionError
+    error_message: str = "the model is unreachable"
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise self.error_type(self.error_message)
+
+
 def call_log(route: BaseChatModel) -> list[dict[str, Any]]:
     """Every call a fake route took, reached through `BaseChatModel`.
 
