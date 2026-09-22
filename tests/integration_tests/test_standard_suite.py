@@ -72,6 +72,23 @@ class _RouterIntegrationTests(ChatModelIntegrationTests):
         """
         return False
 
+    # --- v3 streaming is refused by design (REQ-C2-1's amendment) ---
+
+    @pytest.mark.xfail(
+        reason="ChatRouter refuses stream_events(version='v3') by design; see "
+        "router._V3_UNSUPPORTED — it drives the model through _stream/_generate directly, "
+        "which would bypass routing, the decision record and the run shape entirely (D8, D9)."
+    )
+    def test_stream_events_v3(self, model: BaseChatModel) -> None:
+        pytest.skip("v3 streaming is refused, not supported: router._V3_UNSUPPORTED")
+
+    @pytest.mark.xfail(
+        reason="ChatRouter refuses astream_events(version='v3') by design; see "
+        "router._V3_UNSUPPORTED — same reason as test_stream_events_v3."
+    )
+    async def test_astream_events_v3(self, model: BaseChatModel) -> None:
+        pytest.skip("v3 streaming is refused, not supported: router._V3_UNSUPPORTED")
+
 
 @pytest.mark.requires_ollama
 class TestChatRouterOllamaIntegration(_RouterIntegrationTests):
@@ -80,6 +97,34 @@ class TestChatRouterOllamaIntegration(_RouterIntegrationTests):
     @property
     def chat_model_params(self) -> dict[str, Any]:
         return {"routes": {"ollama": init_chat_model(OLLAMA_MODEL)}, "default_route": "ollama"}
+
+    @property
+    def has_tool_choice(self) -> bool:
+        """`qwen3:8b` via `ChatOllama` does not reliably honor a forced `tool_choice` — verified
+        directly against `ChatOllama` (no router involved): `bind_tools([...],
+        tool_choice="any").invoke(...)` answers with prose and no tool call. Not a routing gap
+        (C1): the router replays the binding on the route unchanged (C3), so whatever the route
+        does with it is what a bare `ChatOllama` does too. `test_tool_choice` reads this flag on
+        its own (`langchain_tests`' sanctioned opt-out); `test_unicode_tool_call_integration`
+        does not, so it is overridden below instead."""
+        return False
+
+    @pytest.mark.xfail(
+        reason="qwen3:8b via ChatOllama does not reliably honor a forced "
+        "tool_choice (see has_tool_choice above) — the same failure reproduces directly "
+        "against ChatOllama, with no router involved."
+    )
+    def test_unicode_tool_call_integration(
+        self,
+        model: BaseChatModel,
+        *,
+        tool_choice: str | None = None,  # noqa: PT028 — matches the overridden signature
+        force_tool_call: bool = True,  # noqa: PT028 — matches the overridden signature
+    ) -> None:
+        pytest.skip(
+            "qwen3:8b via ChatOllama does not reliably honor a forced tool_choice; not a "
+            "routing gap (C1) — see has_tool_choice's docstring on this class."
+        )
 
 
 @pytest.mark.requires_env("GEMINI_API_KEY")
