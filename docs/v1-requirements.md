@@ -147,7 +147,7 @@ failures raise the `RoutingError` subclass directly. Tests assert accordingly.
 | ID | Requirement | Check | Task |
 | --- | --- | --- | --- |
 | REQ-C2-1 | `invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and `astream_events` (v1/v2) all work, with no router-specific call form. The beta v3 streaming protocol is out of scope for v1 and is refused before the router's run opens. | Each convention returns the selected route's output; merged stream chunks equal the `invoke` output for a deterministic fake route; `stream_events(version="v3")` raises `NotImplementedError` naming the alternatives, and opens no run. | T-113 |
-| REQ-C2-2 | `generate()` / `agenerate()` route, record and cost exactly as `invoke` does. | Usage totals and decision record match `invoke`; no second LLM run. *(Spike caveat: these still take the base path and would double count.)* | T-117 |
+| REQ-C2-2 | `generate()` / `agenerate()` route, record and cost exactly as `invoke` does, at message level: one candidate per prompt, no `llm_output`. | Usage totals and decision record match `invoke`; no second LLM run. *(Spike caveat: these still take the base path and would double count.)* | T-117 |
 | REQ-C2-3 | Async paths await both the strategy and the route; neither blocks the event loop. | A strategy whose `adecide` sleeps does not block a concurrently running task; `abatch` of N requests overlaps. | T-113 |
 | REQ-C2-4 | A route without native streaming still streams through the router. | Streaming a fake route that implements only `_generate` yields one chunk equal to the full message. | T-113 |
 
@@ -160,6 +160,23 @@ deliver the decision record. It is therefore refused before the router's run ope
 pass through untouched. The protocol is unreachable on the minimum supported `langchain-core`
 1.1, where the guard is inert. Worth revisiting if v3 leaves beta and `ChatModelStream` is
 exported.
+
+*Amended 2026-09-22 (T-117).* REQ-C2-2 first read as full parity with `generate()`'s own
+contract: every candidate a route returns, plus `generation_info` and `llm_output`. It is built
+on `invoke()`, which itself reduces to `generations[0][0].message` and exposes no `llm_output`
+(`chat_models.py:475-497`) — so the router's `generate()`/`agenerate()` return exactly one
+candidate per prompt with empty `llm_output`, the same loss a caller already takes looping
+`invoke()` by hand, but worse than calling a route's own `generate()` directly, and short of two
+of the three reasons `generate()`'s own docstring gives for preferring it over `invoke()`.
+LangChain tells callers not to rely on `llm_output` (`outputs/llm_result.py:40`), which supports
+dropping it, but says nothing that excuses dropping extra candidates, and no downstream consumer
+in `langchain`/`langgraph`/`langchain_core` was found reading either off a chat model — so nothing
+installed breaks silently today, but `router.generate(prompts, n=3)` against a route that would
+return 3 candidates gets 1, with no warning. Scoped to message-level parity rather than fixed: a
+fix needs the router to call each route's own `_generate` per prompt directly, bypassing
+`invoke`'s public path — a larger change than this finding warrants, for a case (`n>1` sampling)
+most routes don't hit by default. Revisit if a route that returns multiple candidates by default
+becomes common.
 
 ### C3 · Tools and structured output
 
