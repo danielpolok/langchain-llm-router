@@ -50,7 +50,7 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
     Callbacks,
 )
-from langchain_core.language_models import BaseChatModel, LanguageModelInput
+from langchain_core.language_models import BaseChatModel, LanguageModelInput, ModelProfile
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult, RunInfo
 from langchain_core.runnables import Runnable, RunnableConfig, ensure_config, patch_config
@@ -61,6 +61,7 @@ from langchain_core.tools import BaseTool
 from pydantic import Field, field_validator, model_validator
 
 from langchain_llm_router._extraction import build_request
+from langchain_llm_router._profile import resolve_profile
 from langchain_llm_router._tools import (
     BINDING_KEY,
     StructuredOutput,
@@ -268,6 +269,22 @@ class ChatRouter(BaseChatModel):
     @property
     def _llm_type(self) -> str:
         return "chat_router"
+
+    def _resolve_model_profile(self) -> ModelProfile | None:
+        """What the router can promise on every route's behalf (REQ-C3-4, C3, R10).
+
+        Called by the base class's `_set_model_profile` validator (`chat_models.py:417`), and
+        only when `profile` was not supplied directly — an explicit `ChatRouter(..., profile=…)`
+        wins over this without this method being consulted at all. By the time any
+        `model_validator(mode="after")` runs — this one included — pydantic v2 has already run
+        field validation, so `self.routes` is populated and `_check_routes` has already required
+        at least one route (verified in `tests/unit_tests/test_profile.py`).
+
+        `_profile.resolve_profile` does the reduction; this is the one line `create_agent` needs
+        (`model.profile`, read by `_supports_provider_strategy`,
+        `langchain/agents/factory.py:560`).
+        """
+        return resolve_profile(self.routes)
 
     # --- Entry points: each runs the pipeline in the module docstring (D9). ---
 
