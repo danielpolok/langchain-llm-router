@@ -23,6 +23,7 @@ The package:
 | `_extraction.py` | current-request extraction (R4, C7) |
 | `decision.py` | the decision record, and `last_routing_decision()` |
 | `errors.py` | the warning and error hierarchy |
+| `_tools.py` | tool binding replay, capability detection (D5), `StructuredRouter` |
 | `strategies/` | the built-in strategies: `keyword`, `heuristic`, `configurable` |
 
 Tests mirror it: `tests/unit_tests` (offline, fake routes from `tests/fakes.py`; `tests/tracing.py`
@@ -31,10 +32,11 @@ over the calling conventions), `tests/integration_tests` (real providers) and
 `spike/tests`.
 
 Decisions made while building are recorded where they belong, in the repo: D3 (how the decision
-reaches a caller who only holds a parsed object), REQ-C6-2 (a wrapped route is refused) and
-REQ-C2-1 (the beta v3 streaming protocol is out of scope) were each amended after a task measured
-what the original wording would have done. Check `docs/v1-requirements.md` before assuming a
-requirement reads as it did in an older issue.
+reaches a caller who only holds a parsed object), REQ-C6-2 (a wrapped route is refused),
+REQ-C2-1 (the beta v3 streaming protocol is out of scope), REQ-C3-2 and D5 (what a bound router
+leaves for LangChain to read) and REQ-C2-2 (`generate()`/`agenerate()` scoped to message-level
+parity) were each amended after a task measured what the original wording would have done. Check
+`docs/v1-requirements.md` before assuming a requirement reads as it did in an older issue.
 
 ## Commands
 
