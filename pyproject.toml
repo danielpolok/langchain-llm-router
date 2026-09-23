@@ -24,8 +24,8 @@ requires-python = ">=3.10"
 dependencies = ["langchain-core>=1.1,<2"]
 
 [project.urls]
-Repository = "https://github.com/danielpolok/llm-router"
-Issues = "https://github.com/danielpolok/llm-router/issues"
+Repository = "https://github.com/danielpolok/langchain-llm-router"
+Issues = "https://github.com/danielpolok/langchain-llm-router/issues"
 
 [dependency-groups]
 dev = [
