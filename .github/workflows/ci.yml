@@ -79,18 +79,22 @@ jobs:
       # `langchain-tests` (pinned `==1.1.9` in the `dev` group) itself requires
       # `langchain-core>=1.4.0,<2.0.0` — a real conflict with the floor this job tests, not a
       # resolver quirk — so the `dev` group is left out entirely and only what running `tests/`
-      # needs is added back with `--with`; the two files that subclass `langchain_tests`
+      # needs is added back with `--with`. The two files that subclass `langchain_tests`
       # (REQ-C1-1, REQ-C1-3 — `tests/unit_tests/test_standard_suite.py` and its
-      # `integration_tests` counterpart) are excluded from this run for the same reason: there
-      # is no version of `langchain_tests` that both is installed elsewhere in this project and
-      # imports against the floor. `numpy` is `tests/unit_tests/test_embedding_strategy.py`'s
-      # own need (`langchain_core.embeddings.DeterministicFakeEmbedding`), ordinarily pulled in
-      # transitively through `langchain-tests` — explicit here since that path is gone.
+      # `integration_tests` counterpart) run here too, not excluded: `langchain-tests==1.0.2`
+      # (released before `langchain-core` 1.1.0 shipped, and requiring `langchain-core>=1.1.0`
+      # itself — confirmed on PyPI and by actually running the standard suite against it at this
+      # floor) is a real, working pin for exactly this job, distinct from the `dev` group's
+      # `==1.1.9`. `numpy` is `tests/unit_tests/test_embedding_strategy.py`'s own need
+      # (`langchain_core.embeddings.DeterministicFakeEmbedding`), ordinarily pulled in
+      # transitively through the `dev` group's `langchain-tests` — explicit here since that path
+      # is gone (`langchain-tests==1.0.2` itself doesn't pull it in transitively either).
       - name: Confirm langchain-core actually resolves to the 1.1 floor
         run: |
           uv run --isolated --no-group dev \
             --with pytest --with pytest-asyncio --with python-dotenv --with numpy \
             --with 'langchain-core==1.1.*' --with 'langchain==1.1.*' --with 'langgraph==1.0.4' \
+            --with 'langchain-tests==1.0.2' \
             --exclude-newer-package langgraph-prebuilt=2025-12-10 \
             --exclude-newer-package langgraph-checkpoint=2025-12-10 \
             --exclude-newer-package langchain-google-genai=2025-12-10 \
@@ -108,10 +112,9 @@ jobs:
           uv run --isolated --no-group dev \
             --with pytest --with pytest-asyncio --with python-dotenv --with numpy \
             --with 'langchain-core==1.1.*' --with 'langchain==1.1.*' --with 'langgraph==1.0.4' \
+            --with 'langchain-tests==1.0.2' \
             --exclude-newer-package langgraph-prebuilt=2025-12-10 \
             --exclude-newer-package langgraph-checkpoint=2025-12-10 \
             --exclude-newer-package langchain-google-genai=2025-12-10 \
             --exclude-newer-package langchain-ollama=2025-12-10 \
-            pytest tests -q \
-            --ignore=tests/unit_tests/test_standard_suite.py \
-            --ignore=tests/integration_tests/test_standard_suite.py
+            pytest tests -q
