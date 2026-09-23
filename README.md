@@ -46,6 +46,13 @@ back its response unchanged, plus a record of which route was taken and why.
 
 ## 📖 Documentation
 
+- [docs/strategies.md](docs/strategies.md) — the three strategy levels (R6) and the full strategy
+  interface reference.
+- [docs/decision-record.md](docs/decision-record.md) — the decision record, and every warning and
+  error the router raises (R2, R9–R11).
+- [docs/scope.md](docs/scope.md) — when to use agent middleware instead (C8), what the router
+  deliberately doesn't do (§5), and the prompt-caching caveat (§8).
+- [examples/](examples/) — one runnable script per use case, offline and tested in CI.
 - [PRD.md](PRD.md) — what the router is and the principles it holds to (C1–C10, R1–R11).
 - [docs/v1-requirements.md](docs/v1-requirements.md) — the public API, the decision record, and every
   principle as a numbered, testable requirement.
@@ -128,7 +135,8 @@ router = ChatRouter(
 Strategies come at three levels: ready-made heuristic strategies (keyword, heuristic) that make no
 extra model calls; a configurable component for defining your own policy; and a small interface for
 fully custom code, such as an existing classifier. Embedding- and LLM-classifier strategies, which
-do make calls, are explicit opt-ins.
+do make calls, are explicit opt-ins. See [docs/strategies.md](docs/strategies.md) for the full
+reference and the strategy interface's stability promise.
 
 ## Invocation
 
@@ -156,7 +164,8 @@ response = router.invoke(messages)
 ```
 
 The response is the selected model's own `AIMessage` — content, tool calls, usage metadata — with
-the routing decision added.
+the routing decision added. See [docs/decision-record.md](docs/decision-record.md) for the full
+record schema, the other two ways to read it back, and every warning and error the router raises.
 
 ## Chaining
 
@@ -200,16 +209,31 @@ agent.invoke({"messages": [{"role": "user", "content": "What's the weather in Wa
 
 To choose a model from agent **state** inside `create_agent`, use
 [`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware) instead —
-the two are complementary.
+the two are complementary, and can be combined; see [docs/scope.md](docs/scope.md#when-to-use-agent-middleware-instead-c8).
 
 ## Forcing a route
 
 Pin one call to a route through runtime config, e.g. to compare models on the same traffic. A forced
 route is never silently swapped: if it doesn't exist or can't serve the request, the call errors by
-default (falling back is an opt-in setting).
+default (falling back is an opt-in setting). See
+[docs/decision-record.md#forced-routes-r11](docs/decision-record.md#forced-routes-r11) for both paths.
 
 ```python
 router.invoke(messages, config={"configurable": {"route": "frontier"}})
+```
+
+## Examples
+
+One runnable script per use case, offline and tested in CI — see [examples/](examples/) for the
+full index:
+
+```bash
+uv run python examples/cost_tiering.py
+uv run python examples/domain_routing.py
+uv run python examples/agent_backbone.py
+uv run python examples/custom_strategy.py
+uv run python examples/experimentation.py
+uv run python examples/agent_middleware.py
 ```
 
 ## What it doesn't do
@@ -220,7 +244,8 @@ router.invoke(messages, config={"configurable": {"route": "frontier"}})
 - Run as a hosted service, proxy or gateway.
 
 One caveat: provider-side prompt caching is per model, so routing consecutive turns of a conversation
-to different models loses the cached prefix.
+to different models loses the cached prefix. See [docs/scope.md](docs/scope.md) for the fuller
+version of both.
 
 ## 🚧 Project status
 
