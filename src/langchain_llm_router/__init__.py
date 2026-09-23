@@ -1,7 +1,53 @@
 """In-process model routing for LangChain.
 
-v0 ships no implementation. The spike that tests the riskiest principles lives in ``spike/``
-(tasks T-002 to T-004). v1 starts from the requirements that T-101 writes, not from the spike.
+`ChatRouter` is a chat model that, per request, picks one of several named chat models and
+returns that model's response unchanged, plus a record of the routing decision.
 """
 
-__all__: list[str] = []
+from langchain_llm_router.decision import RoutingDecision, last_routing_decision, routing_decision
+from langchain_llm_router.errors import (
+    FallbackWarning,
+    ForcedRouteError,
+    ForcedRouteWarning,
+    NoToolCapableRouteError,
+    RoutingError,
+    RoutingWarning,
+    ToolSupportWarning,
+)
+from langchain_llm_router.router import ChatRouter
+from langchain_llm_router.strategies import (
+    ClassifierStrategy,
+    ConfigurableStrategy,
+    EmbeddingStrategy,
+    HeuristicStrategy,
+    KeywordStrategy,
+)
+from langchain_llm_router.strategy import (
+    RoutingCallable,
+    RoutingChoice,
+    RoutingRequest,
+    RoutingStrategy,
+)
+
+__all__ = [
+    "ChatRouter",
+    "ClassifierStrategy",
+    "ConfigurableStrategy",
+    "EmbeddingStrategy",
+    "FallbackWarning",
+    "ForcedRouteError",
+    "ForcedRouteWarning",
+    "HeuristicStrategy",
+    "KeywordStrategy",
+    "NoToolCapableRouteError",
+    "RoutingCallable",
+    "RoutingChoice",
+    "RoutingDecision",
+    "RoutingError",
+    "RoutingRequest",
+    "RoutingStrategy",
+    "RoutingWarning",
+    "ToolSupportWarning",
+    "last_routing_decision",
+    "routing_decision",
+]

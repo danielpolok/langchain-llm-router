@@ -1,0 +1,126 @@
+# Lint, type-check and test every push to main/v1 and every pull request.
+name: CI
+
+on:
+  push:
+    branches: [main, v1]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is where async callbacks only propagate through an explicit config (D9).
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --locked
+      # Real-provider tests skip without GEMINI_API_KEY or a reachable Ollama server.
+      - run: uv run pytest -q
+
+  # REQ-C9-1: the other end of the supported range (`langchain-core>=1.1,<2` in pyproject.toml).
+  # `test` above always resolves langchain-core to today's latest 1.x, via the committed
+  # `uv.lock` — that is the ceiling. One job, on 3.10 (the `test` matrix's own comment says why:
+  # it is where async callbacks only propagate through an explicit config, D9 — the Python
+  # version most likely to show a floor regression), pinned to the floor instead of a second
+  # Python axis on the matrix above: the langchain-core range and the Python range are
+  # orthogonal, and crossing them combinatorially buys little for the cost of the extra jobs.
+  test-min-langchain-core:
+    runs-on: ubuntu-latest
+    # Non-blocking for now: this job surfaces one real, pre-existing gap at the langchain-core
+    # 1.1 floor that is not fixable here — `_resolve_model_profile` (REQ-C3-4, `_profile.py`)
+    # is a hook `BaseChatModel`'s own `_set_model_profile` validator calls, and that validator
+    # does not exist below langchain-core 1.3.0 (bisected directly; see the REQ-C3-4 amendment,
+    # docs/v1-requirements.md) — `router.profile` is `None` at the floor regardless of what
+    # `_resolve_model_profile` would return. There is also one order-dependent flake,
+    # `test_strategy.py::test_adecide_carries_the_callers_context_into_decide`: it passes
+    # standalone and within `tests/unit_tests` alone at this floor, but fails as part of the
+    # full `tests` run — narrowed to an interaction with something under `tests/integration_
+    # tests/`, not yet root-caused past that. Blocking would turn every push red for reasons
+    # unrelated to most changes; this still runs and reports honestly, so both stay visible
+    # instead of silently passing. Remove once they're resolved.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          python-version: "3.10"
+      # `uv sync --locked` is deliberately not used here: the committed lock is what `test`
+      # already exercises at the ceiling, and this job needs a different resolution entirely —
+      # verified below rather than assumed, since a mistyped constraint would otherwise
+      # silently re-resolve back to the ceiling and this job would test nothing new.
+      #
+      # Today's `langchain` and `langgraph` don't import against `langchain-core==1.1.*`
+      # (`langgraph-checkpoint`'s `Reviver(allowed_objects=…)`, `langgraph-prebuilt`'s
+      # `ExecutionInfo`) — both pinned to the vintage current when langchain-core 1.1.0 shipped
+      # (2025-11-21, confirmed on PyPI), via `--exclude-newer-package` so only *those* packages
+      # are held back rather than every dependency in the resolution.
+      #
+      # `langchain-tests` (pinned `==1.1.9` in the `dev` group) itself requires
+      # `langchain-core>=1.4.0,<2.0.0` — a real conflict with the floor this job tests, not a
+      # resolver quirk — so the `dev` group is left out entirely and only what running `tests/`
+      # needs is added back with `--with`. The two files that subclass `langchain_tests`
+      # (REQ-C1-1, REQ-C1-3 — `tests/unit_tests/test_standard_suite.py` and its
+      # `integration_tests` counterpart) run here too, not excluded: `langchain-tests==1.0.2`
+      # (released before `langchain-core` 1.1.0 shipped, and requiring `langchain-core>=1.1.0`
+      # itself — confirmed on PyPI and by actually running the standard suite against it at this
+      # floor) is a real, working pin for exactly this job, distinct from the `dev` group's
+      # `==1.1.9`. `numpy` is `tests/unit_tests/test_embedding_strategy.py`'s own need
+      # (`langchain_core.embeddings.DeterministicFakeEmbedding`), ordinarily pulled in
+      # transitively through the `dev` group's `langchain-tests` — explicit here since that path
+      # is gone (`langchain-tests==1.0.2` itself doesn't pull it in transitively either).
+      - name: Confirm langchain-core actually resolves to the 1.1 floor
+        run: |
+          uv run --isolated --no-group dev \
+            --with pytest --with pytest-asyncio --with python-dotenv --with numpy \
+            --with 'langchain-core==1.1.*' --with 'langchain==1.1.*' --with 'langgraph==1.0.4' \
+            --with 'langchain-tests==1.0.2' \
+            --exclude-newer-package langgraph-prebuilt=2025-12-10 \
+            --exclude-newer-package langgraph-checkpoint=2025-12-10 \
+            --exclude-newer-package langchain-google-genai=2025-12-10 \
+            --exclude-newer-package langchain-ollama=2025-12-10 \
+            python -c "
+          import importlib.metadata as metadata
+          version = metadata.version('langchain-core')
+          assert version.startswith('1.1.'), f'expected langchain-core==1.1.*, resolved {version}'
+          print('langchain-core', version)
+          "
+      # Real-provider and LangSmith tests skip without their credentials, which this job (like
+      # `test` above) never sets.
+      - name: Run the suite against the langchain-core 1.1 floor
+        run: |
+          uv run --isolated --no-group dev \
+            --with pytest --with pytest-asyncio --with python-dotenv --with numpy \
+            --with 'langchain-core==1.1.*' --with 'langchain==1.1.*' --with 'langgraph==1.0.4' \
+            --with 'langchain-tests==1.0.2' \
+            --exclude-newer-package langgraph-prebuilt=2025-12-10 \
+            --exclude-newer-package langgraph-checkpoint=2025-12-10 \
+            --exclude-newer-package langchain-google-genai=2025-12-10 \
+            --exclude-newer-package langchain-ollama=2025-12-10 \
+            pytest tests -q
