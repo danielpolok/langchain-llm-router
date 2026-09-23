@@ -185,7 +185,7 @@ becomes common.
 | REQ-C3-1 | `bind_tools` keeps tools unconverted until a route is chosen; the *route's* `bind_tools` converts at call time. `tool_choice` and binding kwargs (`strict=`) are replayed on the route's binder, not passed as call kwargs. | Two fake routes with different conversions each receive the tools in their own form; `strict=` reaches the route's `bind_tools`, not its call kwargs. | T-115 |
 | REQ-C3-2 | What LangChain reads off a bound model behaves as on a plain chat model: the router binds no `tools` kwarg of its own for a consumer to misread, so a pre-bound router works in `create_react_agent` and `create_agent`, and a later bare `bind(tools=…)` is honoured. | `create_react_agent(router.bind_tools([tool]), [tool])` builds and answers; `disable_streaming="tool_calling"` on a route behaves identically bound through the router. | T-115 |
 | REQ-C3-3 | `with_structured_output` overrides the base default and forwards per request to the selected route's own implementation. | `method=` and `strict=` reach the route (the base default drops them, `chat_models.py:2530`); `include_raw=True` returns the usual `{"raw", "parsed", "parsing_error"}`. | T-115 |
-| REQ-C3-4 | The router reports a `profile` that is the intersection of its routes' profiles. | Booleans AND-ed, ints minimised, equal values kept, differing values dropped, `None` when any route reports none; `create_agent(response_format=…)` picks a strategy every route can serve. | T-121 |
+| REQ-C3-4 | The router reports a `profile` that is the intersection of its routes' profiles, on `langchain-core>=1.3`. | Booleans AND-ed, ints minimised, equal values kept, differing values dropped, `None` when any route reports none; `create_agent(response_format=…)` picks a strategy every route can serve. | T-121 |
 
 *Amended 2026-09-21 (T-115).* REQ-C3-2 first asked for the raw `tools` list "in its usual place".
 A plain chat model binds *converted* dicts there, and LangChain's consumers read them that way:
@@ -197,6 +197,20 @@ never reached a route, a cache key or a trace (the route's own binder sets its `
 binding is replayed), and REQ-C3-2's `disable_streaming` check passes without it, so the router
 binds none. Measured on the review branch: omitting it also makes a later bare `bind(tools=…)`
 behave as on a plain model, where the raw slot silently discarded it.
+
+*Amended 2026-09-23 (T-120).* REQ-C3-4 first named no floor of its own. `ChatRouter._resolve_
+model_profile` (T-121) is the hook `BaseChatModel`'s `_set_model_profile` validator calls to
+auto-populate `self.profile` — but that validator, and `_check_profile_keys` beside it, do not
+exist at all below `langchain-core` 1.3.0 (bisected directly: absent at 1.1.3 and 1.2.9, present
+at 1.3.0 — confirmed by reading `BaseChatModel`'s own source at each version, not inferred from
+a changelog). Below 1.3, nothing ever calls `_resolve_model_profile`, so `router.profile` stays
+`None` regardless of what it would return — confirmed directly (`router._resolve_model_profile()`
+returns the correct intersection when called by hand; `router.profile` itself is `None`).
+This is not a defect the router can route around: the field it populates and the validator that
+calls it belong to `langchain-core`, and no chat model — partner package or this one — can report
+`profile` before that mechanism exists. Scoped to `langchain-core>=1.3` rather than fixed. Found
+by T-120's langchain-core-floor CI job, which is the first thing in this project to actually run
+against the 1.1 floor with `profile` involved.
 
 ### C4 · Runtime configuration
 

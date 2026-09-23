@@ -623,18 +623,26 @@ def refusal_of(route: Runnable[LanguageModelInput, AIMessage]) -> tuple[tuple[An
     return error["loc"], error.get("ctx", {}).get("error", error["type"])
 
 
-@pytest.mark.parametrize("expected_type", list(wrapped_routes()))
-def test_a_wrapped_route_is_refused_with_both_alternatives_named(expected_type: str) -> None:
+@pytest.mark.parametrize("label", list(wrapped_routes()))
+def test_a_wrapped_route_is_refused_with_both_alternatives_named(label: str) -> None:
     """REQ-C6-2: a route is a chat model. A runnable wrapped around one is rejected at
     construction, by a `RoutingError` naming the route, what it actually is, and *both* ways
     to get retries — rather than by pydantic's `model_type` complaint, which names the type it
-    wanted and nothing to do about it."""
-    loc, error = refusal_of(wrapped_routes()[expected_type])
+    wanted and nothing to do about it.
+
+    The message's type name comes from `type(route).__name__` at assertion time, not from
+    `label` (`wrapped_routes`' dict key, kept as a stable, readable test id): what `.bind(...)`
+    actually returns is `langchain-core`'s own private wrapper class, and its exact name has
+    already changed across supported versions (`_ChatModelBinding` at 1.6.3, plain
+    `RunnableBinding` at the 1.1 floor — bisected directly, not assumed) — a name this router
+    reads off the object rather than choosing, so the test must too."""
+    route = wrapped_routes()[label]
+    loc, error = refusal_of(route)
 
     assert loc == ("routes",)
     assert isinstance(error, RoutingError)
     assert str(error) == (
-        f"route 'flaky' is a {expected_type}, not a chat model: a route is used as given, "
+        f"route 'flaky' is a {type(route).__name__}, not a chat model: a route is used as given, "
         f"and a wrapper hides what the router must ask it (bind_tools, profile, cache). "
         f"To retry, wrap the router — router.with_retry(...) — or set the provider client's "
         f"own max_retries."
