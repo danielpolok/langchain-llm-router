@@ -6,13 +6,13 @@ always-frontier quality** on a mixed workload — and settles §8: are the opt-i
 
 ## Status
 
-**The harness is built and verified offline and against a real local Ollama model. It has not
-yet been run against a real Gemini key** — this session's `GEMINI_API_KEY` is a free-tier key
-whose daily quota (20 requests/day for `gemini-3-flash-preview`) was already exhausted by other
-work before this harness could use it, and a full run needs on the order of 100-300 real Gemini
-calls (answers across the five arms below, plus judge grading). Running it for real, and writing
-up the result in `docs/benchmark-findings.md` plus the PRD §11 decision, is the next step —
-see "Running it for real" below.
+**Done — run against real Gemini, written up, decision recorded.** All 32 items x all 5 arms
+completed with zero errors for $0.3568 total (~1.36 PLN of a 20 PLN budget). Results and the
+methodology discussion are in [`docs/benchmark-findings.md`](../docs/benchmark-findings.md); the
+§8 required-vs-optional decision is PRD §11 D10; the raw per-item output is
+`benchmark/results/20260923T085017Z.json`. Rerun any time with `uv run python -m benchmark.run`
+(e.g. after changing the dataset, the models, or `EMBEDDING_THRESHOLD`) — nothing here is a
+one-shot artefact.
 
 ## What it does
 
@@ -20,15 +20,19 @@ Five arms, over the same 32-item dataset (`data/workload.json`):
 
 | Arm | What decides |
 | --- | --- |
-| `baseline-always-frontier` | nothing — every request goes to `gemini-3-flash-preview` |
+| `baseline-always-frontier` | nothing — every request goes to `gemini-3.8-flash` |
 | `keyword` | `KeywordStrategy`: a short list of "this needs the frontier" keywords |
 | `heuristic` | `HeuristicStrategy` on its shipped defaults (`DEFAULT_WEIGHTS`/`DEFAULT_THRESHOLD`) |
 | `embedding` | `EmbeddingStrategy`, Gemini embeddings, an **uncalibrated** threshold (see below) |
-| `classifier` | `ClassifierStrategy`, classifying on the free local model |
+| `classifier` | `ClassifierStrategy`, classifying on the small route's own model |
 
-Two candidate routes throughout: `"small"` (`ollama:qwen3:8b`, free/local) and `"frontier"`
-(`gemini-3-flash-preview`) — the same pair the rest of this repo already uses in its own README
-and live tests. `benchmark/arms.py` builds all five.
+Two candidate routes throughout, both Gemini so the whole benchmark runs from one API key with
+no local-server dependency: `"small"` (`gemini-3.5-flash-lite`) and `"frontier"`
+(`gemini-3.8-flash`) — override with `LLM_ROUTER_BENCHMARK_SMALL_MODEL` /
+`LLM_ROUTER_BENCHMARK_FRONTIER_MODEL`. This repo's *other* usual small/frontier pair
+(`ollama:qwen3:8b` / `gemini-3-flash-preview`) is still what `test_live_ollama_smoke.py` uses for
+its free, budget-independent sanity check — see "Testing this harness itself". `benchmark/arms.py`
+builds all five arms.
 
 For each (arm, item) pair, `runner.run_item`:
 
@@ -92,9 +96,17 @@ rather than guessed at.
 uv run python -m benchmark.run
 ```
 
-Needs `GEMINI_API_KEY` (the frontier route and the judge) and a local Ollama server serving
-`qwen3:8b` (`ollama pull qwen3:8b`, or override with `LLM_ROUTER_OLLAMA_MODEL`). Every call is
-real and billed — `pricing.py`'s comments cite the source and date; recheck it if it's old.
+Needs only `GEMINI_API_KEY` — every route, the classifier's own call, embeddings and the judge
+are all Gemini. Every call is real and billed — `pricing.py`'s comments cite the source and
+date; recheck it if it's old.
+
+**Measured cost, not guessed:** a live call to each candidate model on one easy and one hard
+dataset-style prompt gave $0.0005-0.010/call for `gemini-3.8-flash` and $0.00003-0.0025/call for
+`gemini-3.5-flash-lite` (both models reason by default — `gemini-3.8-flash` even on a trivial
+prompt — which is *why* the per-call range is so wide); the judge (`gemini-3.1-pro-preview`)
+measured ~$0.0024/call. Even the worst case — every arm routing every item to the frontier
+model — puts a full run (32 items x 5 arms, answers + judging) at roughly **$1.60-1.70**, well
+inside a 20 PLN (~$5.26) budget with room for a retry.
 
 Useful flags:
 
@@ -115,8 +127,9 @@ and renders `docs/benchmark-findings.md`. After a real run, also:
 ## Testing this harness itself
 
 `benchmark/tests/` is entirely offline (fake routes, a fake judge, `DeterministicFakeEmbedding`)
-except `test_live_ollama_smoke.py`, which makes one real call to a local Ollama server
-(`@pytest.mark.requires_ollama`, skips without one) and deliberately never touches Gemini. Run
+except `test_live_ollama_smoke.py`, which makes real calls to a local Ollama server via
+`arms.ollama_smoke_model()` — not the benchmark's own `small_model()`/`frontier_model()`
+(`@pytest.mark.requires_ollama`, skips without one) — and deliberately never touches Gemini. Run
 with the rest of the suite (`uv run pytest`) or on their own:
 
 ```bash

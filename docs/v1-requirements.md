@@ -411,10 +411,11 @@ Every row of the spike's "Carried into v1" table, and the four C3 caveats from T
 
 ## What this does not decide
 
-- **Which heuristic signals** T-131 scores on — T-140's benchmark results settle the defaults.
+- **Which heuristic signals** T-131 scores on — settled by T-140 (`docs/benchmark-findings.md`,
+  "What this does not argue for retuning"): the shipped defaults already clear §7's target on
+  that benchmark, and the evidence there is a case for leaving them as-is, not for a specific
+  retune.
 - **Whether the ready-made strategies are presets** of the configurable component — T-132's call
   (REQ-R6-3 holds either way).
-- **Whether embedding and classifier strategies are required or optional** — T-140 decides,
-  recorded in PRD §11 (§8).
 - **Package naming and the release process** — T-151; the import path in the API section above is
   already fixed by `pyproject.toml`.

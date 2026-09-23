@@ -32,14 +32,21 @@ class TokenPrice:
 # Keyed by the `init_chat_model` identifier the harness uses, matching what `usage_metadata`'s
 # model name reports for the route that ran (REQ-R3-1's "keyed by the model that ran").
 CHAT_PRICES: dict[str, TokenPrice] = {
-    # Gemini 3 Flash Preview, PRICING_ASOF: $0.50/1M input (text), $3.00/1M output.
+    # Gemini 3.8 Flash (the "frontier" route), PRICING_ASOF: standard tier through 2026-12-31.
+    "gemini-3.8-flash": TokenPrice(input_per_million=0.75, output_per_million=3.75),
+    # Gemini 3.5 Flash-Lite (the "small" route), PRICING_ASOF.
+    "gemini-3.5-flash-lite": TokenPrice(input_per_million=0.30, output_per_million=2.50),
+    # Gemini 3 Flash Preview — this repo's usual default route, not one of this benchmark's
+    # arms, kept priced for anyone who overrides FRONTIER_MODEL/SMALL_MODEL back to it.
     "gemini-3-flash-preview": TokenPrice(input_per_million=0.50, output_per_million=3.00),
     # Gemini 3.1 Pro Preview (the judge model — never a route), prompts <=200k tokens.
     "gemini-3.1-pro-preview": TokenPrice(input_per_million=2.00, output_per_million=12.00),
     # Ollama runs locally: no per-token $ charge. Real infrastructure cost (electricity, the
     # machine) isn't zero, but isn't priced in $/token either, so it is out of scope here — an
     # assumption worth restating in the report, not silently baked into a number that looks
-    # like it means the same thing as Gemini's.
+    # like it means the same thing as Gemini's. Not one of this benchmark's arms either (see
+    # `arms.ollama_smoke_model`) — priced so the live smoke test's own cost accounting doesn't
+    # raise on an unpriced model.
     "qwen3:8b": TokenPrice(input_per_million=0.0, output_per_million=0.0),
 }
 
