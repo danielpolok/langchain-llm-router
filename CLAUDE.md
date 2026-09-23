@@ -11,8 +11,9 @@ not here.
 
 The repo holds `PRD.md` (principles), `docs/v1-requirements.md` (the numbered requirements v1
 builds to), `tasks/` (tracking rules and closed tasks — open work is in GitHub Issues),
-`src/langchain_llm_router/` (the package) and `spike/` (throwaway spike code and its tests —
-never import it from `src/` or `tests/`).
+`src/langchain_llm_router/` (the package), `spike/` (throwaway spike code and its tests — never
+import it from `src/` or `tests/`) and `benchmark/` (T-140's cost/quality benchmark — a real,
+versioned harness and dataset, not throwaway; see `benchmark/README.md`).
 
 The package:
 
@@ -55,7 +56,7 @@ server is unreachable (hooks in the root `conftest.py`, which also loads `.env`)
 are Gemini (cloud, `google_genai:gemini-3-flash-preview`) and Ollama (local, `ollama:qwen3:8b`)
 — set via `LLM_ROUTER_GEMINI_MODEL` / `LLM_ROUTER_OLLAMA_MODEL` to override. Offline tests use
 fake models (`GenericFakeChatModel`). Layout: `tests/unit_tests`, `tests/integration_tests`,
-`spike/tests`.
+`spike/tests`, `benchmark/tests`.
 
 ## Spike
 
