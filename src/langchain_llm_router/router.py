@@ -54,6 +54,7 @@ from langchain_core.callbacks import (
     Callbacks,
 )
 from langchain_core.language_models import BaseChatModel, LanguageModelInput, ModelProfile
+from langchain_core.language_models.base import LangSmithParams
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult, RunInfo
 from langchain_core.runnables import Runnable, RunnableConfig, ensure_config, patch_config
@@ -345,6 +346,28 @@ class ChatRouter(BaseChatModel):
         `langchain/agents/factory.py:560`).
         """
         return resolve_profile(self.routes)
+
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
+        """Standard LangSmith params (REQ-C1-1): `ls_model_name` names the default route.
+
+        Dead code for the router's own pipeline — `invoke`, `stream` and the rest never call
+        `_generate_with_cache` or any other base-class path that reads this (module docstring);
+        it exists only for callers that read it directly, and for `ChatModelUnitTests`'
+        `test_standard_params`, whose `Check` is part of this task's own (REQ-C1-1). The base
+        implementation (`chat_models.py:1502`) falls back to `self.model` / `self.model_name`,
+        neither of which `ChatRouter` has, so `ls_model_name` would otherwise be missing rather
+        than merely wrong — a hole the base class's own docstring invites subclasses to close
+        ("Subclasses **should override** this method").
+
+        The base implementation already reads `kwargs["model"]` first
+        (`test_standard_params_model_override`'s per-call override, which needs no change here);
+        this only adds a fallback for the no-override case, the same way `self.model` would for
+        an ordinary chat model — the default route is the one route guaranteed to answer when
+        nothing else does (R9), so it stands in for a nominal "current model" here.
+        """
+        params = super()._get_ls_params(stop=stop, **kwargs)
+        params.setdefault("ls_model_name", self.default_route)
+        return params
 
     # --- Entry points: each runs the pipeline in the module docstring (D9). ---
 
