@@ -256,12 +256,21 @@ version of both.
 - Cost is counted exactly once while the real model call stays in the trace, once the router's own
   run is a chain run rather than a model run.
 
-**v1 is under way.** [T-101](tasks/T-101-v1-requirements.md) turned the principles into 63 numbered
-requirements in [docs/v1-requirements.md](docs/v1-requirements.md) and settled the nine rules they
-left open (PRD §11).
+**v1 is merged into `main`, and not yet released.** [T-101](tasks/T-101-v1-requirements.md) turned
+the principles into 63 numbered requirements in [docs/v1-requirements.md](docs/v1-requirements.md)
+and settled the nine rules they left open (PRD §11). The core router
+([T-110](https://github.com/danielpolok/langchain-llm-router/issues/5) onward), the built-in
+strategies, the cost/quality benchmark ([findings](docs/benchmark-findings.md)) and the
+documentation are all in.
 
-**Next:** the core router ([T-110](https://github.com/danielpolok/langchain-llm-router/issues/5) onward), built-in
-strategies, a cost/quality benchmark and a PyPI release.
+**Still open:**
+
+- [T-141](https://github.com/danielpolok/langchain-llm-router/issues/23) — measuring how much of the
+  saving provider-side prompt-caching loss from route switching gives back.
+- [T-151](https://github.com/danielpolok/langchain-llm-router/issues/25) — packaging and the first
+  PyPI release.
+- [T-160](https://github.com/danielpolok/langchain-llm-router/issues/26) — first adoption in a real
+  application.
 
 ## 📕 Releases & Versioning
 
