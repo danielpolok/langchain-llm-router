@@ -1,9 +1,12 @@
 """The baseline and the four strategies T-140 compares (the task's "Scope" list).
 
-Two candidate routes throughout — `"small"` (`ollama:qwen3:8b`, free/local) and `"frontier"`
-(`google_genai:gemini-3-flash-preview`) — matching the pair the rest of this repo already uses
-for its own examples and live tests (README, `tests/integration_tests`). The baseline always
-answers on `"frontier"`; each strategy decides per request whether `"small"` is safe.
+Two candidate routes throughout, both Gemini so the whole benchmark runs from one API key with
+no local server dependency — `"small"` (`gemini-3.5-flash-lite`) and `"frontier"`
+(`gemini-3.8-flash`), picked over this repo's usual small/frontier pair
+(`ollama:qwen3:8b`/`gemini-3-flash-preview`, still `benchmark.arms.ollama_smoke_model`'s default
+for the offline-adjacent live-Ollama test) once a budget-constrained run made an all-cloud pair
+worth measuring first. The baseline always answers on `"frontier"`; each strategy decides per
+request whether `"small"` is safe.
 """
 
 from __future__ import annotations
@@ -24,9 +27,16 @@ from langchain_llm_router.strategies import (
     KeywordStrategy,
 )
 
-FRONTIER_MODEL = os.environ.get("LLM_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
-SMALL_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+FRONTIER_MODEL = os.environ.get(
+    "LLM_ROUTER_BENCHMARK_FRONTIER_MODEL", "google_genai:gemini-3.8-flash"
+)
+SMALL_MODEL = os.environ.get(
+    "LLM_ROUTER_BENCHMARK_SMALL_MODEL", "google_genai:gemini-3.5-flash-lite"
+)
 EMBED_MODEL = os.environ.get("LLM_ROUTER_GEMINI_EMBED_MODEL", "gemini-embedding-2-preview")
+OLLAMA_SMOKE_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+"""Not one of the benchmark's own arms — only `test_live_ollama_smoke.py`'s free, local,
+budget-independent sanity check uses this."""
 
 # Uncalibrated pending a real run (embedding.py: EmbeddingStrategy's threshold has no shipped
 # default by design — REQ-R7-2, D-level decision). Override with
@@ -88,6 +98,12 @@ def small_model() -> BaseChatModel:
     return init_chat_model(SMALL_MODEL)
 
 
+def ollama_smoke_model() -> BaseChatModel:
+    """The one place `OLLAMA_SMOKE_MODEL` is used — a free, local, real-provider sanity check
+    that doesn't touch a budget at all. Not part of any arm."""
+    return init_chat_model(OLLAMA_SMOKE_MODEL)
+
+
 def embeddings() -> Embeddings:
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
@@ -138,7 +154,7 @@ def build_arms() -> list[Arm]:
                 routes={"small": small_model(), "frontier": frontier_model()},
                 default_route="small",
                 strategy=ClassifierStrategy(
-                    small_model(),  # the classifier call itself: free, local (R7's spirit)
+                    small_model(),  # "ask a small model" (classifier.py) — the small route's own
                     {
                         "small": "simple, short requests: single facts, basic arithmetic, "
                         "one-step lookups, short definitions",

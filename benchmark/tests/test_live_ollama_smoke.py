@@ -2,17 +2,17 @@
 that `run_item` works against an actual provider's real `usage_metadata` shape, and that
 `bind_tools` + the two-step round trip work against a real (if small) model, not a scripted one.
 
-Deliberately avoids Gemini entirely (`arms.small_model()` on both tiers): T-140 was told to hold
-off on further Gemini spend for this session, and Ollama is free and unlimited, so it is what
-proves the harness works against a *real* provider before it is ever pointed at a metered one.
-Skips unless a local Ollama server answers (`requires_ollama`, root `conftest.py`).
+Deliberately avoids Gemini entirely (`arms.ollama_smoke_model()` on both tiers, not the
+benchmark's own `small_model()`/`frontier_model()`): free, local and unlimited, so it proves the
+harness works against a *real* provider independent of any API budget. Skips unless a local
+Ollama server answers (`requires_ollama`, root `conftest.py`).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from benchmark.arms import Arm, small_model
+from benchmark.arms import Arm, ollama_smoke_model
 from benchmark.dataset import WorkloadItem, load_dataset
 from benchmark.judge import JudgeVerdict
 from benchmark.runner import run_item
@@ -30,7 +30,7 @@ def _real_dataset_item(item_id: str) -> WorkloadItem:
 
 def test_a_real_single_turn_call_against_ollama_is_run_and_graded() -> None:
     router = ChatRouter(
-        routes={"small": small_model(), "frontier": small_model()},
+        routes={"small": ollama_smoke_model(), "frontier": ollama_smoke_model()},
         default_route="small",
         strategy=HeuristicStrategy("small", "frontier"),
     )
@@ -48,7 +48,7 @@ def test_a_real_single_turn_call_against_ollama_is_run_and_graded() -> None:
 
 def test_a_real_agent_call_against_ollama_completes_the_tool_round_trip() -> None:
     router = ChatRouter(
-        routes={"small": small_model(), "frontier": small_model()},
+        routes={"small": ollama_smoke_model(), "frontier": ollama_smoke_model()},
         default_route="small",
         strategy=HeuristicStrategy("small", "frontier"),
     )
