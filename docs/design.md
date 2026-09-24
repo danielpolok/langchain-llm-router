@@ -15,7 +15,7 @@ nodes. Middleware only works inside `create_agent`. The consequence is the proje
 **anything that works on a chat model must work identically on the router**, so the router uses
 LangChain's own mechanisms (`bind_tools`, `with_structured_output`, `with_config`, callbacks, the
 cache) instead of inventing parallel ones. It depends on `langchain-core` only, uses only its
-documented public API, and needs no proxy or service.
+public names (never private ones), and needs no proxy or service.
 
 ## Routes and policy
 

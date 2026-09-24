@@ -61,9 +61,9 @@ such as `GenericFakeChatModel`.
 
 ## Conventions
 
-- **Dependencies:** the package imports only the standard library and `langchain-core`, and only its
-  documented public API. `langchain`, `langgraph`, the provider packages and `python-dotenv` are
-  development dependencies and are never imported by `src/`.
+- **Dependencies:** the package imports only the standard library and `langchain-core`, and only
+  its public names, never private ones. `langchain`, `langgraph`, the provider packages and
+  `python-dotenv` are development dependencies and are never imported by `src/`.
 - **Comments and docstrings** say what the code does and why, in plain language. Don't refer to
   internal document, requirement or task numbers — write the behaviour out.
 - **Public API stability:** the strategy interface carries a stability promise
