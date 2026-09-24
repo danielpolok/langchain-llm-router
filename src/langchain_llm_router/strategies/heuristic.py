@@ -271,14 +271,6 @@ DEFAULT_THRESHOLD = 1.0
 class HeuristicStrategy(RoutingStrategy):
     """Routes on a difficulty score built from cheap local signals.
 
-    ```python
-    ChatRouter(
-        routes={"small": small, "frontier": frontier},
-        default_route="small",
-        strategy=HeuristicStrategy("small", "frontier"),
-    )
-    ```
-
     Args:
         tiers: The route names, cheapest first; at least two.
         thresholds: The score at which each tier gives way to the next, ascending — one fewer
@@ -294,6 +286,15 @@ class HeuristicStrategy(RoutingStrategy):
         RoutingError: for configuration that could never route — too few tiers, the wrong
             number of thresholds, thresholds out of order, a weight for a signal that doesn't
             exist. Raised here, at construction, not once per request.
+
+    Example:
+        ```python
+        ChatRouter(
+            routes={"small": small, "frontier": frontier},
+            default_route="small",
+            strategy=HeuristicStrategy("small", "frontier"),
+        )
+        ```
     """
 
     def __init__(
@@ -303,6 +304,17 @@ class HeuristicStrategy(RoutingStrategy):
         weights: Mapping[str, float] | None = None,
         signals: Mapping[str, Signal] | None = None,
     ) -> None:
+        """Check the configuration and keep it.
+
+        Args:
+            *tiers: The route names, cheapest first; at least two.
+            thresholds: The score at which each tier gives way to the next.
+            weights: What a signal counts for, by name.
+            signals: The whole signal set, replacing the defaults.
+
+        Raises:
+            RoutingError: for configuration that could never route.
+        """
         self.tiers = _checked_tiers(tiers)
         self.signals = _checked_signals(signals)
         self.weights = _checked_weights(weights, self.signals)
@@ -313,6 +325,12 @@ class HeuristicStrategy(RoutingStrategy):
 
         Thread-safe, as the interface asks: the strategy holds only its configuration, and
         scoring touches nothing but the request.
+
+        Args:
+            request: The current request.
+
+        Returns:
+            The tier's route and a reason showing the score, or `None` for an empty request.
         """
         if not request.text.strip() and not request.modalities - {"text"}:
             # Nothing to score — an empty user turn. Better the default route than a guess.

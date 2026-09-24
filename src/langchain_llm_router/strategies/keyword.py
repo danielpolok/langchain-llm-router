@@ -96,14 +96,7 @@ class _Rule:
 class KeywordStrategy(RoutingStrategy):
     """Routes on the words of the current request — the module docstring has the rules.
 
-    Rules map a route name to the keywords and patterns that send a request to it:
-
-        KeywordStrategy(
-            {
-                "coder": ["python", "regex", "stack trace", re.compile(r"```")],
-                "frontier": ["prove", "proof", "derive"],
-            }
-        )
+    Rules map a route name to the keywords and patterns that send a request to it.
 
     The first rule that matches wins, in declaration order, and the reason on the decision
     record names it — `"matched keyword 'python'"` — so a trace says what the router saw. When
@@ -112,10 +105,35 @@ class KeywordStrategy(RoutingStrategy):
     A strategy is immutable once built: the rules are compiled in `__init__` and never touched
     again, so `decide` is thread-safe, as the interface requires, and one instance can serve
     several routers.
+
+    Args:
+        rules: Route name to its keywords — a keyword, a compiled pattern, or an iterable of
+            either, in the order they should be tried.
+
+    Raises:
+        RoutingError: for a rule set that could never decide — not a mapping, empty, a blank
+            route name or keyword, a route with no keywords. Raised here, at construction.
+
+    Example:
+        ```python
+        KeywordStrategy(
+            {
+                "coder": ["python", "regex", "stack trace", re.compile(r"```")],
+                "frontier": ["prove", "proof", "derive"],
+            }
+        )
+        ```
     """
 
     def __init__(self, rules: Mapping[str, Keywords]) -> None:
-        """Compile `rules`, raising `RoutingError` for a rule set that could never decide."""
+        """Compile `rules`, raising `RoutingError` for a rule set that could never decide.
+
+        Args:
+            rules: Route name to its keywords, as described on the class.
+
+        Raises:
+            RoutingError: if the rule set could never decide.
+        """
         if not isinstance(rules, Mapping):
             msg = (
                 f"rules is {type(rules).__name__}: a KeywordStrategy takes a mapping of route "
@@ -140,6 +158,15 @@ class KeywordStrategy(RoutingStrategy):
         A matching rule is answered with even when the router has no such route: the router
         says so far better than this can, and one mistyped rule must not take the rest down
         with it (the module docstring has the reasoning).
+
+        Args:
+            request: The current request; only its text is matched.
+
+        Returns:
+            The first matching rule's route and reason, or `None` if no rule matches.
+
+        Raises:
+            RoutingError: if no rule names a route the router has.
         """
         self._check_it_can_decide(request.routes)
         for rule in self._rules:

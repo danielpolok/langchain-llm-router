@@ -209,6 +209,7 @@ class Condition(ABC):
         """The condition as a reader of the configuration would say it."""
 
     def __repr__(self) -> str:
+        """The same wording as `str`."""
         return str(self)
 
 
@@ -507,6 +508,12 @@ class Rule:
     name: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
+        """Reject a rule that could never be built into a strategy.
+
+        Raises:
+            RoutingError: for a blank route, a `when` that isn't a condition, a non-int
+                priority or a blank name.
+        """
         if not isinstance(self.route, str) or not self.route.strip():
             msg = f"the route {self.route!r} is not a route name: a rule names the route it serves"
             raise RoutingError(msg)
@@ -531,19 +538,6 @@ class Rule:
 class ConfigurableStrategy(RoutingStrategy):
     """Routes on rules of conditions, priorities and names — the module docstring has them.
 
-    ```python
-    ChatRouter(
-        routes={"small": small, "frontier": frontier},
-        default_route="small",
-        strategy=ConfigurableStrategy(
-            [
-                Rule("frontier", any_of(long_request, carries_code), name="long or code-bearing"),
-                Rule("small", always(), name="short and simple"),
-            ]
-        ),
-    )
-    ```
-
     The highest-priority rule whose condition holds decides, and its reason names it and what
     made it hold. When none does, the strategy returns `None` and the default route answers.
 
@@ -558,17 +552,40 @@ class ConfigurableStrategy(RoutingStrategy):
         RoutingError: for configuration that could never route — an empty rule set, a rule that
             can never fire because an earlier one always matches first. Raised here, at
             construction, not once per request; the module docstring lists them.
+
+    Example:
+        ```python
+        ChatRouter(
+            routes={"small": small, "frontier": frontier},
+            default_route="small",
+            strategy=ConfigurableStrategy(
+                [
+                    Rule("frontier", any_of(long_request, carries_code), name="long or code"),
+                    Rule("small", always(), name="short and simple"),
+                ]
+            ),
+        )
+        ```
     """
 
     rules: tuple[Rule, ...]
     """The rules, in the order they were declared — not the order they are tried in."""
 
     def __init__(self, rules: Sequence[Rule]) -> None:
+        """Check and order `rules`.
+
+        Args:
+            rules: The rules, in declaration order; at least one.
+
+        Raises:
+            RoutingError: for configuration that could never route.
+        """
         self.rules = _checked_rules(rules)
         self._ordered = _evaluation_order(self.rules)
         _reject_dead_rules(self._ordered)
 
     def __repr__(self) -> str:
+        """The strategy as its constructor call."""
         return f"ConfigurableStrategy({list(self.rules)!r})"
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
@@ -577,6 +594,15 @@ class ConfigurableStrategy(RoutingStrategy):
         A rule that holds is answered with even when the router has no such route: the router
         says so far better than this can, and one mistyped rule must not take the rest down
         with it (the module docstring has the reasoning).
+
+        Args:
+            request: The current request.
+
+        Returns:
+            The first holding rule's route and reason, or `None` if none holds.
+
+        Raises:
+            RoutingError: if no rule names a route the router has.
         """
         self._check_it_can_decide(request.routes)
         for label, rule in self._ordered:

@@ -151,13 +151,33 @@ class ClassifierStrategy(RoutingStrategy):
     """
 
     def __init__(self, model: BaseChatModel, route_descriptions: Mapping[str, str]) -> None:
+        """Check `route_descriptions` and keep the classifier `model`.
+
+        Args:
+            model: The chat model used only to classify.
+            route_descriptions: Each route's human-readable description.
+
+        Raises:
+            RoutingError: for configuration that could never route.
+        """
         self.model = model
         self.route_descriptions = _checked_route_descriptions(route_descriptions)
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """Classify `request.text`, or return `None` if there's nothing to classify or the
-        model's answer doesn't parse. Thread-safe: the only state is configuration, fixed
-        at construction; every request builds its own schema and prompt."""
+        """Classify `request.text`, or return `None` if there's nothing to classify.
+
+        Also `None` when the model's answer doesn't parse. Thread-safe: the only state is
+        configuration, fixed at construction; every request builds its own schema and prompt.
+
+        Args:
+            request: The current request; only its text is classified.
+
+        Returns:
+            The route the model chose and why, or `None` to abstain.
+
+        Raises:
+            RoutingError: if no route in `route_descriptions` is one the router has.
+        """
         choices = self._choices(request.routes)
         if not request.text.strip():
             return None  # nothing to classify — better the default route than a guess
@@ -170,9 +190,17 @@ class ClassifierStrategy(RoutingStrategy):
         return self._finish(cast("dict[str, Any]", result))
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """Async `decide`: a native implementation, as the interface asks of a strategy that
-        calls a model — `request.config` carries the tracing context an executor-wrapped
-        `decide` would otherwise have to inherit from the calling thread."""
+        """Async `decide`: a native implementation, as the interface asks of a model-calling one.
+
+        `request.config` carries the tracing context an executor-wrapped `decide` would
+        otherwise have to inherit from the calling thread.
+
+        Args:
+            request: The current request; only its text is classified.
+
+        Returns:
+            The route the model chose and why, or `None` to abstain.
+        """
         choices = self._choices(request.routes)
         if not request.text.strip():
             return None
@@ -183,9 +211,12 @@ class ClassifierStrategy(RoutingStrategy):
         return self._finish(cast("dict[str, Any]", result))
 
     def _choices(self, routes: tuple[str, ...]) -> tuple[str, ...]:
-        """The routes this request can classify into: the router's own routes that
-        `route_descriptions` also names, in the router's declaration order — the check only a
-        request can make, same precedent as `KeywordStrategy`/`EmbeddingStrategy`."""
+        """The routes this request can classify into.
+
+        The router's own routes that `route_descriptions` also names, in the router's
+        declaration order — the check only a request can make, same precedent as
+        `KeywordStrategy`/`EmbeddingStrategy`.
+        """
         choices = tuple(route for route in routes if route in self.route_descriptions)
         if choices:
             return choices
@@ -196,9 +227,12 @@ class ClassifierStrategy(RoutingStrategy):
         raise RoutingError(msg)
 
     def _finish(self, result: dict[str, Any]) -> RoutingChoice | None:
-        """`result` is `with_structured_output(..., include_raw=True)`'s answer: `None` if
+        """Turn the classifier's answer into a choice.
+
+        `result` is `with_structured_output(..., include_raw=True)`'s answer: `None` if
         `parsed` is `None` — a parse failure or no tool call at all, the module doc's "successful
-        call, bad answer" case — otherwise the route it named, with the reason a trace shows."""
+        call, bad answer" case — otherwise the route it named, with the reason a trace shows.
+        """
         parsed = result.get("parsed")
         if parsed is None:
             return None
@@ -238,9 +272,12 @@ def _names(names: Sequence[str] | Mapping[str, object]) -> str:
 
 
 def _schema(choices: Sequence[str]) -> type[BaseModel]:
-    """A fresh structured-output schema for this request: one field, `route`, closed to
-    `choices` — built per request because `choices` is only known once `request.routes` is
-    (module doc); cheap enough that caching it would cost more than it saves."""
+    """A fresh structured-output schema for this request.
+
+    One field, `route`, closed to `choices` — built per request because `choices` is only known
+    once `request.routes` is (module doc); cheap enough that caching it would cost more than it
+    saves.
+    """
     return create_model(
         _SCHEMA_NAME,
         __doc__="The route that should answer this request.",
