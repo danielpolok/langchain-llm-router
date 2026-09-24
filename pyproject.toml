@@ -56,7 +56,7 @@ requires = ["uv_build>=0.8.19,<0.9"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "spike", "benchmark/tests"]
+testpaths = ["tests", "benchmark/tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "--strict-markers --strict-config"
@@ -76,4 +76,4 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "PT"]
 [tool.mypy]
 strict = true
 mypy_path = "src"
-files = ["src", "tests", "spike", "benchmark", "conftest.py"]
+files = ["src", "tests", "benchmark", "conftest.py"]

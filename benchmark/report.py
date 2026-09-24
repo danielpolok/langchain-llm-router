@@ -1,5 +1,5 @@
 """Aggregate `ItemResult`s into the report the task asks for: cost and quality per strategy
-against the always-frontier baseline, and a verdict on the PRD §7 target (>=30% lower cost at
+against the always-frontier baseline, and a verdict on the target (>=30% lower cost at
 >=95% of baseline quality)."""
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _fmt_target(summary: ArmSummary) -> str:
 
 
 def render_markdown(
-    summaries: dict[str, ArmSummary], *, title: str = "T-140 Benchmark Results"
+    summaries: dict[str, ArmSummary], *, title: str = "Benchmark results"
 ) -> str:
     """The markdown report: one table, a per-arm errors/tool-accuracy note, and a verdict."""
     order = [BASELINE_ARM, "keyword", "heuristic", "embedding", "classifier"]
@@ -111,7 +111,7 @@ def render_markdown(
     lines = [
         f"# {title}",
         "",
-        f"Target (PRD §7): >= {COST_TARGET_PCT:.0f}% lower cost at "
+        f"Target: >= {COST_TARGET_PCT:.0f}% lower cost at "
         f">= {QUALITY_TARGET_PCT:.0f}% of always-frontier quality.",
         "",
         "| Arm | Items | Errors | Cost ($) | Cost saved | Mean quality (/10) "
