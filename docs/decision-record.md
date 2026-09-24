@@ -22,6 +22,26 @@ class RoutingDecision:
 
 `RoutingDecision.as_dict()` is what rides under `response_metadata["routing"]` and on the trace.
 
+The examples on this page use this router:
+
+```python
+from itertools import cycle
+
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+
+from langchain_llm_router import ChatRouter, KeywordStrategy
+
+small = GenericFakeChatModel(messages=cycle([AIMessage("hello")]), name="small")
+frontier = GenericFakeChatModel(messages=cycle([AIMessage("a proof")]), name="frontier")
+router = ChatRouter(
+    routes={"small": small, "frontier": frontier},
+    default_route="small",
+    strategy=KeywordStrategy({"frontier": ["prove"]}),
+)
+messages = [HumanMessage("Prove that there are infinitely many primes.")]
+```
+
 ### Reading it back
 
 Three ways, in the order they're worth reaching for:
@@ -61,9 +81,10 @@ from langchain_llm_router import RoutingWarning
 
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always", RoutingWarning)
-    router.invoke(messages)
+    router.invoke("hello")  # no keyword matches, so the strategy can't decide
 
-[str(warning.message) for warning in caught]
+print([str(warning.message) for warning in caught])
+assert caught[0].category.__name__ == "FallbackWarning"
 ```
 
 | Warning | Fires when | From |

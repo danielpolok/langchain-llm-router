@@ -25,8 +25,8 @@ substitutability is the point of building against `langchain-core`'s own chat-mo
 
 See also:
 
-- [`../README.md`](../README.md) — installation, the public API, and a walkthrough of the same
-  ground these examples cover.
+- [`../docs/index.md`](../docs/index.md) — the documentation: get started, every capability, and a
+  user-story page for each of these examples.
 - [`../docs/strategies.md`](../docs/strategies.md) — the three strategy levels and the full
   strategy interface reference.
 - [`../docs/decision-record.md`](../docs/decision-record.md) — the decision record, and every

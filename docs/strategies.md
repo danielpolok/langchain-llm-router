@@ -1,7 +1,7 @@
 # Strategies
 
 A **strategy** applies your routing policy to one request. `ChatRouter` calls it once per
-request — except when the route is [forced](../README.md#forcing-a-route), which skips the
+request — except when the route is [forced](capabilities/forced-routes.md), which skips the
 strategy entirely — and uses its answer to pick a route.
 
 There is one interface, working at three levels: ready-made strategies you configure and
@@ -73,7 +73,9 @@ from langchain_llm_router import ConfigurableStrategy
 from langchain_llm_router.strategies.configurable import Rule, any_of, keywords, signal_at_least
 from langchain_llm_router.strategies.heuristic import code_signal, length_signal
 
-long_or_code = any_of(signal_at_least(length_signal(20, 200), 0.5), code_signal)
+long_or_code = any_of(
+    signal_at_least(length_signal(20, 200), 0.5), signal_at_least(code_signal, 0.5)
+)
 
 ConfigurableStrategy(
     [
@@ -97,7 +99,11 @@ ever on by default — construction takes your own `Embeddings` or `BaseChatMode
 instance, with no default.
 
 ```python
+from langchain_core.embeddings import DeterministicFakeEmbedding
+
 from langchain_llm_router import EmbeddingStrategy
+
+my_embeddings = DeterministicFakeEmbedding(size=16)  # your own `Embeddings` model here
 
 EmbeddingStrategy(
     my_embeddings,
@@ -106,7 +112,7 @@ EmbeddingStrategy(
 )
 ```
 
-```python
+```python skip
 from langchain_llm_router import ClassifierStrategy
 
 ClassifierStrategy(
@@ -140,12 +146,32 @@ class MyStrategy(RoutingStrategy):
 The common case needs no subclass at all: a plain function is coerced into a strategy.
 
 ```python
+from itertools import cycle
+
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
+
+from langchain_llm_router import ChatRouter
+
+
+def my_existing_classifier(text: str) -> str:
+    return "urgent" if "asap" in text.lower() else "normal"
+
+
 def pick(request: RoutingRequest) -> RoutingChoice | str | None:
     label = my_existing_classifier(request.text)
     return label  # a bare route name works — the router writes the reason for you
 
 
-ChatRouter(routes=..., default_route=..., strategy=pick)
+def fake(name: str) -> GenericFakeChatModel:
+    return GenericFakeChatModel(messages=cycle([AIMessage(name)]), name=name)
+
+
+ChatRouter(
+    routes={"urgent": fake("urgent"), "normal": fake("normal")},
+    default_route="normal",
+    strategy=pick,
+)
 ```
 
 A plain function must be synchronous and sees only the current request's text; for an async
@@ -180,6 +206,10 @@ under `response_metadata["routing"]`, for a human reading either one.
 ### `RoutingStrategy`
 
 ```python
+from abc import ABC, abstractmethod
+from typing import ClassVar
+
+
 class RoutingStrategy(ABC):
     wants_full_context: ClassVar[bool] = False
 

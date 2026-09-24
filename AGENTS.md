@@ -36,7 +36,7 @@ hosted proxy, and replacing `@wrap_model_call` agent middleware. See
 | `tests/conventions.py` | parametrises tests over the calling conventions (`invoke`, `stream`, `batch`, async…) |
 | `examples/` | one runnable, offline script per use case; `tests/unit_tests/test_examples.py` runs each in CI |
 | `benchmark/` | the cost/quality benchmark — a versioned harness and dataset; see its README |
-| `docs/` | user reference (`strategies.md`, `decision-record.md`, `scope.md`) and `design.md` |
+| `docs/` | user documentation (`index.md`, `get-started.md`, `capabilities/`, `stories/`, and the reference pages `strategies.md`, `decision-record.md`, `scope.md`) and `design.md` |
 
 ## Commands
 
@@ -69,6 +69,11 @@ such as `GenericFakeChatModel`.
 - **Public API stability:** the strategy interface carries a stability promise
   ([docs/strategies.md](docs/strategies.md#stability-promise)). Changing a dataclass field, its
   order or a method signature needs a version bump the promise names.
+- **Documentation** is plain Markdown that `tests/unit_tests/test_docs.py` holds to account: every
+  ```` ```python ```` block runs (offline, against fakes) and only a block that needs a real provider
+  is fenced ```` ```python skip ````, every relative link and anchor resolves, every page is linked
+  from `docs/index.md`, and every name in `__all__` appears in `docs/`. A new public name or page
+  needs its docs.
 - **Tests** exercise behaviour through the public API and every calling convention
   (`tests/conventions.py`), not internals.
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are
