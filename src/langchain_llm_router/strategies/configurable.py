@@ -1,6 +1,6 @@
-"""`ConfigurableStrategy` (R6's middle level): a strategy from rules, without a strategy class.
+"""`ConfigurableStrategy`, between ready-made and custom: a strategy from rules, no class needed.
 
-The two §4 use cases REQ-R6-3 names, cost tiering and domain routing, are configuration here,
+The two headline use cases, cost tiering and domain routing, are configuration here,
 and read as what they do:
 
 ```python
@@ -15,7 +15,7 @@ ConfigurableStrategy(
     ]
 )
 
-# Domain routing: code requests to the code model; the rest is the router's default (R9).
+# Domain routing: code requests to the code model; the rest is the router's default.
 ConfigurableStrategy(
     [Rule("coder", any_of(keywords("python", "regex", "stack trace"), carries_code), name="code")]
 )
@@ -25,14 +25,14 @@ What is a rule
 --------------
 A `Rule` is a route, a condition and a rank: `Rule(route, when, priority=0, name=None)`. When
 the condition holds for a request, the rule sends it to the route. The condition is built from
-what a strategy can see of the current request (R4) — nothing else, so nothing here can misroute
+what a strategy can see of the current request — nothing else, so nothing here can misroute
 an agent loop on its tool output:
 
 | Condition | Holds when |
 | --- | --- |
 | `keywords("python", re.compile(...))` | any word is in the text, as `KeywordStrategy` reads it |
 | `signal_at_least(signal, 0.5)` | the `Signal` scores the request at least that |
-| `modality("image", "audio")` | the request carries any of those modalities (C7) |
+| `modality("image", "audio")` | the request carries any of those modalities |
 | `tools_bound()` | tools or structured output are bound to the call |
 | `predicate(func)` | `func(request)` is `True` — the escape hatch for anything else |
 | `always()` | always — the rule that answers when nothing above it did |
@@ -55,7 +55,7 @@ it can be rewritten as a higher-priority rule — and it stays because it lets a
 without the rules above it: `not_(any_of(long_request, carries_code))` says "short and simple"
 on its own, and the two-rule cost tiering above can be written with both rules that way, in any
 order. There are no operators and no nesting syntax to learn, and no other atoms: a condition
-that isn't one of these is a `predicate`, and a strategy that needs more is a class (R6).
+that isn't one of these is a `predicate`, and a strategy that needs more is a class.
 
 Nothing is guessed. `when=` takes a condition, never a bare function: a function goes through
 `predicate(func)` if it answers yes or no, or `signal_at_least(func, threshold)` if it scores,
@@ -73,7 +73,7 @@ convention of Kubernetes' `PriorityClass` and Traefik's router priority.
 Not deciding, and deciding "everything else"
 --------------------------------------------
 When no rule matches, `decide` returns `None`: it can't decide, and the router falls back to
-the default route, with a warning and the reason recorded (R9). That is right for a policy that
+the default route, with a warning and the reason recorded. That is right for a policy that
 covers only what it knows — "code goes to `coder`". It is wrong for one where "everything else"
 is a decision, as it is in cost tiering: a simple request answered by the small model is not a
 fallback, and shouldn't warn. Say so with a final `Rule(route, always())`, which is then an
@@ -81,7 +81,7 @@ ordinary decision with a reason of its own.
 
 The reason
 ----------
-Names the rule and what made it hold (R2): `"rule 'code' matched: keyword 'python'"`,
+Names the rule and what made it hold: `"rule 'code' matched: keyword 'python'"`,
 `"rule 'long or code-bearing' matched: length 0.72 >= 0.50"`. A rule with no `name` goes by its
 position in the list, `"rule #2"`. A combination reports the part that decided it — the first
 part of an `any_of` that held, every part of an `all_of` — so the reader of a trace sees which
@@ -90,7 +90,7 @@ keyword or signal it was, not only which rule.
 What is checked, and when
 -------------------------
 Everything that can be judged from the configuration alone fails at construction, with a
-`RoutingError` naming the rule at fault, never once per request (REQ-R6-3): an empty rule set;
+`RoutingError` naming the rule at fault, never once per request: an empty rule set;
 a blank route, a bad priority or a duplicate name; an empty `any_of`; an unknown modality; a
 blank keyword; a threshold outside `(0, 1]`; an `async` function where a synchronous one is
 called; and **a rule that can never fire**, because an earlier one always matches first:
@@ -104,28 +104,28 @@ called; and **a rule that can never fire**, because an earlier one always matche
 The check is sound and not complete: it proves a rule dead by structure (a signal or predicate is
 the same one only if it is the same object), so an unreachable rule it cannot see is still
 accepted, and a rule it reports really is unreachable. It assumes predicates and signals are pure
-functions of the request, which they must be anyway — `decide` runs on worker threads (C2).
+functions of the request, which they must be anyway — `decide` runs on worker threads.
 
 Route *names* can only be checked against the router's own on a request: a strategy is built
 before the router it is given to, so `request.routes` is the first sight of them. The precedent
 is `KeywordStrategy`'s, where validating every name up front would have sent every request to
 the default route over one mistyped key. Matching therefore comes first here as well: a rule
 whose route the router doesn't have returns its choice like any other, and the router reports
-it precisely — `chose 'codr', which is not one of the routes` — and falls back (R9). A typo
+it precisely — `chose 'codr', which is not one of the routes` — and falls back. A typo
 costs the requests its rule would have taken, and nothing else. Only a rule set in which *no* rule
 names a route the router has raises on the request, because that strategy can never decide
 anything.
 
 A predicate is user code, so it is checked when it runs: one that raises, or returns anything
-but a `bool`, fails the request it ran for and the router falls back (R9). A `bool` is required
+but a `bool`, fails the request it ran for and the router falls back. A `bool` is required
 rather than "truthy" because the truthy mistakes are silent ones — an un-awaited coroutine, a
 match object — that route every request the same way.
 
 The transcript
 --------------
 `wants_full_context` stays `False`, so a condition sees the current request and `messages` is
-`None` (R4). It is a class attribute, which the router reads before it builds the request
-(D6), so a configuration can't switch it on — and shouldn't: the opt-in is meant to be
+`None`. It is a class attribute, which the router reads before it builds the request,
+so a configuration can't switch it on — and shouldn't: the opt-in is meant to be
 conspicuous. A rule that needs the conversation is a one-line subclass, whose predicates then
 find it in `request.messages`:
 
@@ -136,8 +136,8 @@ class WithHistory(ConfigurableStrategy):
 
 The ready-made strategies are not presets
 -----------------------------------------
-`KeywordStrategy` and `HeuristicStrategy` are left as they are; REQ-R6-3 holds either way.
-Tried rather than assumed: a `KeywordStrategy` rebuilt as a subclass of this one matches
+`KeywordStrategy` and `HeuristicStrategy` are left as they are; both use cases are configuration
+either way. Tried rather than assumed: a `KeywordStrategy` rebuilt as a subclass of this one matches
 identically once its reason is put back in its own words (`"matched keyword 'python'"`), so the
 matching is shareable — and is shared, through the whole-word pattern for a keyword and the
 signals. What a preset would still have to override is what makes it that strategy: the reason
@@ -147,9 +147,9 @@ leaves the saving at one loop. `HeuristicStrategy` is *additive* — signals sum
 score falls in a band — which boolean rules do not express, and its reason is the score and its
 breakdown. Both stay as they are.
 
-No model, API or network call is made here (R7), and nothing outside the standard library and
-`langchain-core` is imported (R8). A predicate or signal *you* write may call one; it is handed
-`request` for that reason, and should pass `request.config` on (D9).
+No model, API or network call is made here, and nothing outside the standard library and
+`langchain-core` is imported. A predicate or signal *you* write may call one; it is handed
+`request` for that reason, and should pass `request.config` on.
 """
 
 from __future__ import annotations
@@ -182,7 +182,7 @@ __all__ = [
 ]
 
 _MODALITIES = ("text", "image", "audio", "video", "file", "other")
-"""`RoutingRequest.modalities`' closed vocabulary (C7), so a misspelt one fails at construction.
+"""`RoutingRequest.modalities`' closed vocabulary, so a misspelt one fails at construction.
 
 New values arrive with LangChain's content-block types, in a minor release (strategy.py's
 stability promise) — and are added here in the same one."""
@@ -192,7 +192,7 @@ stability promise) — and are added here in the same one."""
 
 
 class Condition(ABC):
-    """When a rule applies: a question about one request, with an answer that says why (R2).
+    """When a rule applies: a question about one request, with an answer that says why.
 
     Build one with the functions in this module — `keywords`, `signal_at_least`, `modality`,
     `tools_bound`, `predicate`, `always` — and combine them with `all_of`, `any_of` and `not_`.
@@ -368,7 +368,7 @@ def signal_at_least(signal: Signal, threshold: float, *, name: str | None = None
 
 
 def modality(*names: str) -> Condition:
-    """Holds when the request carries any of these modalities (C7), such as `"image"`."""
+    """Holds when the request carries any of these modalities, such as `"image"`."""
     if not names:
         msg = "modality() needs at least one modality"
         raise RoutingError(msg)
@@ -529,7 +529,7 @@ class Rule:
 
 
 class ConfigurableStrategy(RoutingStrategy):
-    """Routes on rules of conditions, priorities and names (R6, R7) — the module docstring has them.
+    """Routes on rules of conditions, priorities and names — the module docstring has them.
 
     ```python
     ChatRouter(
@@ -545,7 +545,7 @@ class ConfigurableStrategy(RoutingStrategy):
     ```
 
     The highest-priority rule whose condition holds decides, and its reason names it and what
-    made it hold. When none does, the strategy returns `None` and the default route answers (R9).
+    made it hold. When none does, the strategy returns `None` and the default route answers.
 
     A strategy is immutable once built: the rules are checked and ordered in `__init__` and never
     touched again, so `decide` is thread-safe as the interface requires — provided the
@@ -572,7 +572,7 @@ class ConfigurableStrategy(RoutingStrategy):
         return f"ConfigurableStrategy({list(self.rules)!r})"
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """The route of the first rule that holds, in priority order, or `None` if none does (R9).
+        """The route of the first rule that holds, in priority order, or `None` if none does.
 
         A rule that holds is answered with even when the router has no such route: the router
         says so far better than this can, and one mistyped rule must not take the rest down
@@ -589,7 +589,7 @@ class ConfigurableStrategy(RoutingStrategy):
         """At least one rule names a route the router has — the check only a request can make.
 
         A rule set that names none of them has no answer it could give, whatever the request.
-        Raising says so on the first call; the router records it and falls back (R9), where
+        Raising says so on the first call; the router records it and falls back, where
         abstaining would look like a request nothing happened to match.
         """
         if any(rule.route in routes for rule in self.rules):

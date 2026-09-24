@@ -1,4 +1,4 @@
-"""What the router reports about itself: the intersection of its routes' capabilities (C1, C3).
+"""What the router reports about itself: the intersection of its routes' capabilities.
 
 `create_agent` reads `model.profile` to decide whether a chat model can serve structured output
 through the provider's own strategy rather than a bound tool (`_supports_provider_strategy`,
@@ -6,7 +6,7 @@ through the provider's own strategy rather than a bound tool (`_supports_provide
 `model.profile.get("structured_output")` and, if that is not true, falls back to a name-pattern
 match that a router — which has no `model`/`model_name`/`model_id` of its own — never hits
 either way). A router that claimed a capability only some of its routes have would have a
-strategy picked for it that a route can't serve (R10); REQ-C3-4 is the router answering only for
+strategy picked for it that a route can't serve, so the router answers only for
 what every route can do.
 
 This module holds the reduction (`resolve_profile`); `ChatRouter._resolve_model_profile`
@@ -29,7 +29,7 @@ __all__ = ["resolve_profile"]
 
 
 def resolve_profile(routes: Mapping[str, BaseChatModel]) -> ModelProfile | None:
-    """The intersection of every route's own `.profile` (REQ-C3-4).
+    """The intersection of every route's own `.profile`.
 
     `None` when any route reports none at all (`route.profile is None`) — a route `create_agent`
     could not ask either, so the router cannot answer for it. Otherwise, per key present in
@@ -53,7 +53,7 @@ def resolve_profile(routes: Mapping[str, BaseChatModel]) -> ModelProfile | None:
     profiles = [route.profile for route in routes.values()]
     if not profiles or any(profile is None for profile in profiles):
         # No route at all — unreachable through `ChatRouter`, whose `_check_routes` validator
-        # requires at least one (REQ-R5-2) — or a route that has not resolved a profile of its
+        # requires at least one — or a route that has not resolved a profile of its
         # own. Either way, nothing can be claimed on that route's behalf.
         return None
     known = cast("list[dict[str, Any]]", profiles)  # `ModelProfile` is a `TypedDict`: a dict.
