@@ -17,5 +17,9 @@ venv/
 .ruff_cache/
 .ipynb_checkpoints/
 
+# Local agent state and personal instructions (the shared AGENTS.md / CLAUDE.md are tracked)
+.claude/
+CLAUDE.local.md
+
 # OS
 .DS_Store
