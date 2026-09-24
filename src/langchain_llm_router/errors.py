@@ -1,4 +1,4 @@
-"""Warnings and errors the router raises (R9, R10, R11).
+"""Warnings and errors the router raises.
 
 Every routing warning subclasses `RoutingWarning`, so one filter sees them all. `RoutingError`
 subclasses `ValueError`: a construction-time failure raised inside a pydantic validator surfaces
@@ -24,15 +24,15 @@ class RoutingWarning(UserWarning):
 
 
 class FallbackWarning(RoutingWarning):
-    """R9: the strategy failed, abstained or named an unknown route; the default route ran."""
+    """The strategy failed, abstained or named an unknown route; the default route ran."""
 
 
 class ToolSupportWarning(RoutingWarning):
-    """R10: routes that can't use the bound tools, at bind time and on each diverted request."""
+    """Routes that can't use the bound tools, at bind time and on each diverted request."""
 
 
 class ForcedRouteWarning(RoutingWarning):
-    """R11: a forced route gave way — only under `on_unavailable_forced_route="fallback"`."""
+    """A forced route gave way — only under `on_unavailable_forced_route="fallback"`."""
 
 
 class RoutingError(ValueError):
@@ -40,8 +40,8 @@ class RoutingError(ValueError):
 
 
 class NoToolCapableRouteError(RoutingError):
-    """R10: tools or structured output were bound, and no route can use them."""
+    """Tools or structured output were bound, and no route can use them."""
 
 
 class ForcedRouteError(RoutingError):
-    """R11: the forced route doesn't exist, or can't use the bound tools."""
+    """The forced route doesn't exist, or can't use the bound tools."""

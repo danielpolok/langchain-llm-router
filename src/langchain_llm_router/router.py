@@ -1,36 +1,38 @@
-"""`ChatRouter`: a chat model that hands each request to one of its named routes (C1, R5).
+"""`ChatRouter`: a chat model that hands each request to one of its named routes.
 
-The router's own run is a *chain* run that delegates (PRD §11): it overrides the public entry
+The router's own run is a *chain* run that delegates: it overrides the public entry
 points, not `_generate` / `_stream`, so the selected route's call is the only model run outside
-the strategy run — cost is counted once (R3) and the real call stays in the trace (C5).
+the strategy run — cost is counted once and the real call stays in the trace.
 
-Every entry point runs the same pipeline, in D9's order:
+Every entry point runs the same pipeline, in this order:
 
 1. `_start_run` opens the router's chain run.
 2. `_decide` / `_adecide` settle the route, diversion included. `_plan` says whether there is
-   anything to run: a route forced via runtime config (`configurable["route"]`, D7) or no
-   strategy at all each settle the decision outright, with no strategy run (D2) — and
+   anything to run: a route forced via runtime config (`configurable["route"]`) or no
+   strategy at all each settle the decision outright, with no strategy run — and
    otherwise the strategy runs in a child chain run of its own, with that run's child config as
    `RoutingRequest.config` and set as the context config. `_conclude` turns what the strategy
-   did into a `RoutingDecision`, falling back to the default route when it can't (R9);
+   did into a `RoutingDecision`, falling back to the default route when it can't;
    `_forced_decision` does the same for a forced route that can't be used, with
-   `ForcedRouteError` or `ForcedRouteWarning` standing in for R9's own (R11). `_divert` then
-   applies R10 to whatever settled the decision: a request whose route can't use the tools
-   bound to it goes to D1's target instead, recorded as a diversion — before the strategy run
-   closes, so its output is the same record the router run and the route run end up with (D9).
+   `ForcedRouteError` or `ForcedRouteWarning` standing in for `FallbackWarning`. `_divert`
+   then applies tool-aware routing to whatever settled the decision: a request whose route
+   can't use the tools bound to it goes to the default route instead (or, if that can't use
+   them either, the first route in declaration order that can), recorded as a diversion —
+   before the strategy run closes, so its output is the same record the router run and the
+   route run end up with.
 3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata, and the caller's tool or structured-output binding replayed on
-   the route itself (C3).
-4. `_with_record` adds the decision to the response (on exactly one chunk when streaming, D8)
-   and publishes it for `last_routing_decision()` (D3), and the router's run closes with the
-   record in its outputs. A route's error closes it as an error and propagates unchanged (C6),
+   the route itself.
+4. `_with_record` adds the decision to the response (on exactly one chunk when streaming)
+   and publishes it for `last_routing_decision()`, and the router's run closes with the
+   record in its outputs. A route's error closes it as an error and propagates unchanged,
    and withdraws the record: a call that failed has no decision to report. A caller that
    abandons a stream is not a failure, and keeps its record.
 
 `batch`, `abatch` and `astream_events` need nothing of their own: `Runnable` builds them on the
 four entry points above. `generate` and `agenerate` — and `generate_prompt` and
-`agenerate_prompt`, which call them — are built on `invoke` and `ainvoke`, one prompt at a time
-(REQ-C2-2). The one door that does not lead through them is the v3 streaming protocol, which is
+`agenerate_prompt`, which call them — are built on `invoke` and `ainvoke`, one prompt at a time.
+The one door that does not lead through them is the v3 streaming protocol, which is
 refused — `_V3_UNSUPPORTED` says why.
 """
 
@@ -102,7 +104,7 @@ from langchain_llm_router.strategy import (
 __all__ = ["ChatRouter"]
 
 AnswerT = TypeVar("AnswerT")
-"""What a routed call answers with: a message, or a structured-output payload (REQ-C3-3)."""
+"""What a routed call answers with: a message, or a structured-output payload."""
 
 _LIBRARY_MODULES = ("langchain_llm_router", "langchain_core", "langchain", "langgraph")
 """Module-name prefixes `_stacklevel` walks past to find the application's own frame.
@@ -120,7 +122,7 @@ def _is_library_frame(frame: types.FrameType) -> bool:
 
 def _stacklevel() -> int:
     """The `stacklevel` for a `warnings.warn` call made from the router's own caller's frame,
-    pointing at the first frame outside the library — the application's own code (R2, R9, R10).
+    pointing at the first frame outside the library — the application's own code.
 
     A hand-counted constant breaks whenever a frame is added or removed between the router and
     its caller: bound through `bind_tools` versus called bare, `StructuredRouter.stream`
@@ -153,61 +155,61 @@ _V3_UNSUPPORTED = (
     "_stream / _generate directly, which would bypass routing, the decision record and the "
     "run shape entirely. Use stream(), astream(), or version='v2' events."
 )
-"""Why v3 is refused rather than delegated (C2, D8, D9).
+"""Why v3 is refused rather than delegated.
 
 `_chat_model_stream_v3` (`language_models/chat_models.py:995` in `langchain-core` 1.6.3; new in
 1.4, and still beta) calls `self._stream` — the one hook a *delegating* router deliberately
 does not implement, so none of the pipeline runs. Delegating to the selected route's own v3
 stream would need the router to own the returned `ChatModelStream`: that type lives in a module
 `langchain_core` doesn't export, it has no completion hook to close the router's run with, and
-it assembles its `response_metadata` only from protocol events, so the record (D8) could only
+it assembles its `response_metadata` only from protocol events, so the record could only
 be put there by forging one. None of it exists in `langchain-core` 1.1, the minimum supported.
 Refusing at the two public doors keeps the failure honest and, unlike the base class's bare
-`NotImplementedError`, stops a chat-model run being opened for the router itself (C5)."""
+`NotImplementedError`, stops a chat-model run being opened for the router itself."""
 
 
 class ChatRouter(BaseChatModel):
-    """A chat model that picks one of several named chat models per request (C1, R5).
+    """A chat model that picks one of several named chat models per request.
 
     The response is the selected route's own, with the routing decision added under
-    `response_metadata["routing"]` (R1, R2). The routing policy is the application's: a
-    strategy applies it, and when it can't decide the default route answers (R9).
+    `response_metadata["routing"]`. The routing policy is the application's: a
+    strategy applies it, and when it can't decide the default route answers.
 
     Because the router delegates to the route rather than generating itself, the settings that
     govern a call are the *route's*: its `cache`, `rate_limiter` and `disable_streaming` apply,
-    and the router's own would never be consulted (the same reasoning as D4 gives for the
-    cache, which T-119 rejects outright rather than letting it look effective).
+    and the router's own would never be consulted (the same reasoning that makes the router
+    reject a `cache=` of its own outright rather than let it look effective).
     """
 
     routes: dict[str, BaseChatModel]
-    """Named routes, any number of them; declaration order is significant (D1).
+    """Named routes, any number of them; declaration order is significant.
 
     Each is an ordinary chat model, used as given — the router never reconfigures or mutates
-    one (REQ-R5-1). The names are the mapping's keys, so they are unique.
+    one. The names are the mapping's keys, so they are unique.
 
     A route is a chat model and not a runnable wrapped around one, because the router has to
-    ask it what it can do — `bind_tools` and `profile` for tool capability (D5), its `cache`
-    for D4 — and a wrapper answers none of those. Retries go on the router or in the provider's
-    client; `_reject_wrapped_routes` says so (REQ-C6-2)."""
+    ask it what it can do — `bind_tools` and `profile` for tool capability, its `cache`
+    for who owns response caching — and a wrapper answers none of those. Retries go on the router or
+    in the provider's client; `_reject_wrapped_routes` says so."""
 
     default_route: str
-    """Mandatory (R9). Must name one of `routes`."""
+    """Mandatory. Must name one of `routes`."""
 
     strategy: RoutingStrategy | RoutingCallable | None = Field(default=None, exclude=True)
-    """None always uses the default route. A plain callable is coerced (REQ-R6-2).
+    """None always uses the default route. A plain callable is coerced.
 
     Kept out of serialization: a strategy is code, not configuration."""
 
     on_unavailable_forced_route: Literal["error", "fallback"] = "error"
-    """R11: what happens when a forced route is unknown or can't use bound tools."""
+    """What happens when a forced route is unknown or can't use bound tools."""
 
     tool_support_overrides: dict[str, bool] = Field(default_factory=dict)
-    """Per-route override of capability detection (D5); always wins."""
+    """Per-route override of capability detection; always wins."""
 
     @field_validator("routes", mode="before")
     @classmethod
     def _reject_wrapped_routes(cls, routes: object) -> object:
-        """A runnable that wraps a chat model is not a route, and says why (REQ-C6-2).
+        """A runnable that wraps a chat model is not a route, and says why.
 
         `model.with_retry()` and `model.bind(...)` return a `RunnableBinding`, and
         `init_chat_model(configurable_fields=...)` a `_ConfigurableModel` — none of them a
@@ -215,7 +217,7 @@ class ChatRouter(BaseChatModel):
         expected type and not the thing to do instead. Retrying a single route is the reason
         people reach for this, and it would not work: `RunnableBindingBase.stream` yields
         straight from `self.bound.stream(...)`, so a wrapped route retries on `invoke` and not
-        when streamed (REQ-C6-2's amendment, 2026-09-21).
+        when streamed.
         """
         if not isinstance(routes, Mapping):
             return routes
@@ -233,7 +235,7 @@ class ChatRouter(BaseChatModel):
     @field_validator("routes")
     @classmethod
     def _check_routes(cls, routes: dict[str, BaseChatModel]) -> dict[str, BaseChatModel]:
-        """At least one route, each with a name (REQ-R5-2)."""
+        """At least one route, each with a name."""
         if not routes:
             msg = "routes is empty: a ChatRouter needs at least one route"
             raise RoutingError(msg)
@@ -246,7 +248,7 @@ class ChatRouter(BaseChatModel):
     @field_validator("cache", mode="before")
     @classmethod
     def _reject_cache(cls, cache: object) -> object:
-        """The router's own `cache=` would silently no-op otherwise (D4, REQ-C10-2).
+        """The router's own `cache=` would silently no-op otherwise.
 
         `BaseChatModel` declares `cache` (`language_models/base.py:190`) with no validator of
         its own, and `ChatRouter` inherits the field but never reads it: it delegates to each
@@ -263,7 +265,7 @@ class ChatRouter(BaseChatModel):
         """
         if cache is not None:
             msg = (
-                "cache belongs on the route, not the router (D4): ChatRouter delegates to "
+                "cache belongs on the route, not the router: ChatRouter delegates to "
                 "each route's own invoke/stream rather than running _generate_with_cache "
                 "itself, so its own cache would never be consulted — set cache= on each "
                 "route instead."
@@ -274,7 +276,7 @@ class ChatRouter(BaseChatModel):
     @field_validator("strategy", mode="before")
     @classmethod
     def _coerce_strategy(cls, strategy: object) -> RoutingStrategy | None:
-        """One interface for every strategy (D6): a plain callable is wrapped (REQ-R6-2).
+        """One interface for every strategy: a plain callable is wrapped.
 
         Before the field's own type check, so `as_strategy` is the single gate on what may be
         a strategy and says so itself. What it rejects is a `TypeError`, which pydantic does
@@ -284,7 +286,7 @@ class ChatRouter(BaseChatModel):
 
     @model_validator(mode="after")
     def _check_route_references(self) -> ChatRouter:
-        """Every name that refers to a route names one (REQ-R5-2, REQ-R9-1)."""
+        """Every name that refers to a route names one."""
         if self.default_route not in self.routes:
             msg = (
                 f"default_route {self.default_route!r} is not one of the routes: "
@@ -306,13 +308,13 @@ class ChatRouter(BaseChatModel):
 
     @property
     def config_specs(self) -> list[ConfigurableFieldSpec]:
-        """The `"route"` key (D7, REQ-C4-1): what forces a route for one call.
+        """The `"route"` key: what forces a route for one call.
 
         `Runnable`'s own default is `[]`, which would hide the key from `with_config`,
         `config={"configurable": {"route": ...}}` and config-schema introspection —
         `ConfigurableFieldSpec` (`runnables/utils.py:655`) is the mechanism LangChain gives
         every `Runnable` for exactly this. `default=None` matches what leaving the key unset
-        means: no force, the strategy decides (D2). `StructuredRouter.config_specs` forwards
+        means: no force, the strategy decides. `StructuredRouter.config_specs` forwards
         this (`_tools.py`), so a router bound through `with_structured_output` exposes it too,
         and a `RunnableBinding` — what `bind_tools` and `with_config` return — forwards a
         wrapped `Runnable`'s `config_specs` on its own (`RunnableBindingBase.config_specs`),
@@ -324,15 +326,15 @@ class ChatRouter(BaseChatModel):
                 annotation=str | None,
                 name="Route",
                 description=(
-                    "Force one of the routes for this call, skipping the strategy entirely "
-                    f"(D2, R11): {_names(self.routes)}."
+                    "Force one of the routes for this call, skipping the strategy entirely: "
+                    f"{_names(self.routes)}."
                 ),
                 default=None,
             )
         ]
 
     def _resolve_model_profile(self) -> ModelProfile | None:
-        """What the router can promise on every route's behalf (REQ-C3-4, C3, R10).
+        """What the router can promise on every route's behalf.
 
         Called by the base class's `_set_model_profile` validator (`chat_models.py:417`), and
         only when `profile` was not supplied directly — an explicit `ChatRouter(..., profile=…)`
@@ -348,12 +350,12 @@ class ChatRouter(BaseChatModel):
         return resolve_profile(self.routes)
 
     def _get_ls_params(self, stop: list[str] | None = None, **kwargs: Any) -> LangSmithParams:
-        """Standard LangSmith params (REQ-C1-1): `ls_model_name` names the default route.
+        """Standard LangSmith params: `ls_model_name` names the default route.
 
         Dead code for the router's own pipeline — `invoke`, `stream` and the rest never call
         `_generate_with_cache` or any other base-class path that reads this (module docstring);
         it exists only for callers that read it directly, and for `ChatModelUnitTests`'
-        `test_standard_params`, whose `Check` is part of this task's own (REQ-C1-1). The base
+        `test_standard_params`, whose `Check` is part of this task's own. The base
         implementation (`chat_models.py:1502`) falls back to `self.model` / `self.model_name`,
         neither of which `ChatRouter` has, so `ls_model_name` would otherwise be missing rather
         than merely wrong — a hole the base class's own docstring invites subclasses to close
@@ -363,13 +365,13 @@ class ChatRouter(BaseChatModel):
         (`test_standard_params_model_override`'s per-call override, which needs no change here);
         this only adds a fallback for the no-override case, the same way `self.model` would for
         an ordinary chat model — the default route is the one route guaranteed to answer when
-        nothing else does (R9), so it stands in for a nominal "current model" here.
+        nothing else does, so it stands in for a nominal "current model" here.
         """
         params = super()._get_ls_params(stop=stop, **kwargs)
         params.setdefault("ls_model_name", self.default_route)
         return params
 
-    # --- Entry points: each runs the pipeline in the module docstring (D9). ---
+    # --- Entry points: each runs the pipeline in the module docstring. ---
 
     def invoke(
         self,
@@ -379,13 +381,13 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> AIMessage:
-        """The selected route's own answer, with the decision record added (R1, R2)."""
+        """The selected route's own answer, with the decision record added."""
         config = ensure_config(config)
         # private API: `_convert_input` is how every chat model turns its input into messages.
         # Calling it keeps a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue`
-        # identical through the router (C2, C7, REQ-C7-2). `set_config_context` and
+        # identical through the router. `set_config_context` and
         # `coro_with_context`, used below, are public names their modules leave out of
-        # `__all__`; D9 names both as how the strategy's run is entered.
+        # `__all__`; both are how the strategy's run is entered.
         messages = self._convert_input(input).to_messages()
         run_manager = self._start_run(config, messages)
         try:
@@ -393,7 +395,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = call.route.invoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
-            discard_decision()  # this call has no decision to report (C6, D3)
+            discard_decision()  # this call has no decision to report
             run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -408,7 +410,7 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> AIMessage:
-        """Async `invoke`: the strategy is awaited too, so neither blocks the loop (C2)."""
+        """Async `invoke`: the strategy is awaited too, so neither blocks the loop."""
         config = ensure_config(config)
         messages = self._convert_input(input).to_messages()  # private API: see `invoke`
         run_manager = await self._astart_run(config, messages)
@@ -417,7 +419,7 @@ class ChatRouter(BaseChatModel):
             call = self._route_call(decision, config, run_manager, kwargs)
             message = await call.route.ainvoke(messages, call.config, stop=stop, **call.kwargs)
         except BaseException as error:
-            discard_decision()  # this call has no decision to report (C6, D3)
+            discard_decision()  # this call has no decision to report
             await run_manager.on_chain_error(error)
             raise
         message = _with_record(message, decision)
@@ -432,12 +434,12 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> Iterator[AIMessageChunk]:
-        """The route's items, passed through unchanged bar the record on one of them (D8).
+        """The route's items, passed through unchanged bar the record on one of them.
 
         "Items" and not "chunks": what `call.route.stream` yields is `AIMessageChunk`s for a
         plain or tool-bound call, but the route's own progressive partials — Pydantic objects,
         dicts, or `include_raw=True`'s `{"raw", "parsed", "parsing_error"}` — when a
-        `StructuredOutputBinding` was replayed onto it (C1, C2; only `StructuredRouter.stream`
+        `StructuredOutputBinding` was replayed onto it (only `StructuredRouter.stream`
         asks for that, and reads the result so). The annotation is the chat-model contract this
         method keeps for its ordinary callers.
 
@@ -458,7 +460,7 @@ class ChatRouter(BaseChatModel):
             stream_kwargs = call.kwargs if stop is None else {**call.kwargs, "stop": stop}
             for item in call.route.stream(messages, call.config, **stream_kwargs):
                 if output is None:
-                    # Decided before the first item; only it carries the record (D8) —
+                    # Decided before the first item; only it carries the record —
                     # wherever `_recorded_on` finds somewhere to put one.
                     item = output = _with_record(item, decision)
                 else:
@@ -467,12 +469,12 @@ class ChatRouter(BaseChatModel):
         except GeneratorExit as error:
             # A caller that stops consuming — a `break`, or the generator being finalized —
             # is not a failed call: the chunks it did take carry the record, and the record
-            # stays readable. Finalization can also run on another thread or context (D3),
+            # stays readable. Finalization can also run on another thread or context,
             # where a tombstone would erase a record that is not this call's at all.
             run_manager.on_chain_error(error)
             raise
         except BaseException as error:
-            discard_decision()  # this call has no decision to report (C6, D3)
+            discard_decision()  # this call has no decision to report
             run_manager.on_chain_error(error)
             raise
         run_manager.on_chain_end(_run_outputs(output, decision))
@@ -496,7 +498,7 @@ class ChatRouter(BaseChatModel):
             stream_kwargs = call.kwargs if stop is None else {**call.kwargs, "stop": stop}
             async for item in call.route.astream(messages, call.config, **stream_kwargs):
                 if output is None:
-                    # Decided before the first item; only it carries the record (D8) —
+                    # Decided before the first item; only it carries the record —
                     # wherever `_recorded_on` finds somewhere to put one.
                     item = output = _with_record(item, decision)
                 else:
@@ -507,7 +509,7 @@ class ChatRouter(BaseChatModel):
             await run_manager.on_chain_error(error)
             raise
         except BaseException as error:
-            discard_decision()  # this call has no decision to report (C6, D3)
+            discard_decision()  # this call has no decision to report
             await run_manager.on_chain_error(error)
             raise
         await run_manager.on_chain_end(_run_outputs(output, decision))
@@ -520,7 +522,7 @@ class ChatRouter(BaseChatModel):
         version: Literal["v1", "v2", "v3"] = "v2",
         **kwargs: Any,
     ) -> Iterator[StreamEvent]:
-        """v1 and v2 events, which are produced from `stream` and so are routed (C2).
+        """v1 and v2 events, which are produced from `stream` and so are routed.
 
         The narrower return type than the base class's is the point: v3 is refused, so a
         router only ever hands back `StreamEvent`s.
@@ -540,7 +542,7 @@ class ChatRouter(BaseChatModel):
         version: Literal["v1", "v2", "v3"] = "v2",
         **kwargs: Any,
     ) -> AsyncIterator[StreamEvent]:
-        """Async `stream_events`: v1 and v2 events, produced from `astream` (C2).
+        """Async `stream_events`: v1 and v2 events, produced from `astream`.
 
         Not an `async def`, as the base class's isn't: it hands back the iterator rather than
         being one, so a v3 caller — who would `await` this — is refused at the call itself.
@@ -561,13 +563,13 @@ class ChatRouter(BaseChatModel):
         run_id: uuid.UUID | None = None,
         **kwargs: Any,
     ) -> LLMResult:
-        """Route every prompt as `invoke` does, and answer in an `LLMResult` (C2, REQ-C2-2).
+        """Route every prompt as `invoke` does, and answer in an `LLMResult`.
 
         The base `generate` opens a model run per prompt and calls `_generate` inside it
         (`chat_models.py:1668`), so left alone it would put a model run of the router's own
-        beside the route's and bill the same tokens twice (R3, spike caveat 1). This runs
+        beside the route's and bill the same tokens twice. This runs
         `invoke` once per prompt instead, so each prompt gets what an `invoke` gets: a router
-        chain run of its own, its own decision — prompts are decided one by one (R4), not
+        chain run of its own, its own decision — prompts are decided one by one, not
         once for the batch — and the route's call as the only model run.
 
         What carries over from the base `generate`:
@@ -590,7 +592,7 @@ class ChatRouter(BaseChatModel):
         not combine its outputs.
 
         A `FallbackWarning` from a prompt run here points at the caller exactly as it does
-        under `invoke`: `_stacklevel` (T-115) walks past every frame that is this package's or
+        under `invoke`: `_stacklevel` walks past every frame that is this package's or
         LangChain's own, not a fixed count, so the extra frame `generate` adds before reaching
         `invoke` costs it nothing. (`agenerate`, whose prompts run as tasks, has no caller
         frame above them either, and neither has `abatch`'s worker threads — both still land
@@ -620,7 +622,7 @@ class ChatRouter(BaseChatModel):
         run_id: uuid.UUID | None = None,
         **kwargs: Any,
     ) -> LLMResult:
-        """Async `generate`: the prompts overlap, as the base `agenerate` overlaps them (C2).
+        """Async `generate`: the prompts overlap, as the base `agenerate` overlaps them.
 
         Every prompt runs to the end before a failure is raised — the first, in prompt order —
         because the others' route calls are already in flight and have been paid for
@@ -660,9 +662,9 @@ class ChatRouter(BaseChatModel):
         to a route, and nothing reachable through them comes here. What could is a door left
         open — the v3 streaming protocol before it was refused, or a new base-class path in a
         later `langchain-core` — and the base class would run this inside a model run of the
-        router's own, beside the route's, billing the same tokens twice without an error (R3,
-        spike surprise 3). Refusing turns that silent miscount into a failure someone sees. It
-        is also what stops `_agenerate`, which the base class builds on this, from working.
+        router's own, beside the route's, billing the same tokens twice without an error. Refusing
+        turns that silent miscount into a failure someone sees. It is also what stops `_agenerate`,
+        which the base class builds on this, from working.
         """
         msg = (
             "ChatRouter has no model call of its own: invoke, ainvoke, stream, astream, "
@@ -671,7 +673,7 @@ class ChatRouter(BaseChatModel):
         )
         raise NotImplementedError(msg)
 
-    # --- Binding: kept as given until a route is chosen (C3) ---
+    # --- Binding: kept as given until a route is chosen ---
 
     def bind_tools(
         self,
@@ -680,7 +682,7 @@ class ChatRouter(BaseChatModel):
         tool_choice: str | dict[str, Any] | bool | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, AIMessage]:
-        """Bind tools unconverted; the route that answers converts them (C3, REQ-C3-1).
+        """Bind tools unconverted; the route that answers converts them.
 
         Converting a tool is provider-specific work, and which provider does it isn't known
         until a route is chosen — so `tools` is kept exactly as given and replayed on the
@@ -688,8 +690,8 @@ class ChatRouter(BaseChatModel):
         arguments go with it rather than becoming call kwargs: `strict=` and its kind change
         how the route *builds* the schema, which only its binder can do.
 
-        That private binding is all that is bound: the router sets no `tools` kwarg of its own
-        (REQ-C3-2). A plain chat model binds *converted* tool dicts there, and LangChain reads
+        That private binding is all that is bound: the router sets no `tools` kwarg of its own.
+        A plain chat model binds *converted* tool dicts there, and LangChain reads
         them that way — `create_react_agent` calls `.get("type")` on each entry, so a raw
         `StructuredTool` in the slot crashed it, and converting to fill it would reject a
         provider-native entry such as `{"google_search": {}}`, which `convert_to_openai_tool`
@@ -703,19 +705,19 @@ class ChatRouter(BaseChatModel):
         the whole of what is checked here, and two things it cannot see are left to the first
         request that reaches them:
 
-        - An invalid binding kwarg. Conversion is deferred to the route (REQ-C3-1), so a
+        - An invalid binding kwarg. Conversion is deferred to the route, so a
           `strict=` its binder rejects fails on the first request routed to that route, as the
           route's own error, and not on this call.
         - A route that is itself a `ChatRouter`. It passes the check whatever *its* routes can
           do, because it overrides `bind_tools`; if none of them can use tools, the request
-          fails with `NoToolCapableRouteError` once it gets there (T-121's to close).
+          fails with `NoToolCapableRouteError` once it gets there.
 
         Binding again replaces the binding, as on any chat model: a binding over a binding
         hands `bind_tools` back to the model (`RunnableBinding.__getattr__`), so what the
         first held is not part of the second.
 
         `tool_choice` is typed wider than `BaseChatModel.bind_tools` types it: providers take
-        dicts and booleans too, and whatever a route accepts has to reach it unchanged (C1).
+        dicts and booleans too, and whatever a route accepts has to reach it unchanged.
         """
         self._check_tool_support()
         binding = ToolBinding(tools=tuple(tools), tool_choice=tool_choice, kwargs=dict(kwargs))
@@ -728,25 +730,25 @@ class ChatRouter(BaseChatModel):
         include_raw: bool = False,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, StructuredOutput]:
-        """Forward to the selected route's own structured output, per request (REQ-C3-3).
+        """Forward to the selected route's own structured output, per request.
 
         `BaseChatModel`'s default would build this on the *router's* `bind_tools` and drop
         `method=` and `strict=` on the way (`chat_models.py:2530`), forcing every route
         through function calling and past whatever native JSON-schema mode it has. Forwarding
         keeps each route's own — and each route's own parser with it.
 
-        LangChain builds structured output on tool binding, so R10 applies as it does to
-        `bind_tools`: the same bind-time check here, and the same per-request diversion off a
-        route that can't use tools (REQ-R10-4). As there, an invalid kwarg — `method=` a route
+        LangChain builds structured output on tool binding, so tool-aware routing applies as it does
+        to `bind_tools`: the same bind-time check here, and the same per-request diversion off a
+        route that can't use tools. As there, an invalid kwarg — `method=` a route
         doesn't support, say — fails on the first request routed to that route rather than
-        here (REQ-C3-1's deferral to call time), and a route that is itself a `ChatRouter`
+        here (each route converts at call time), and a route that is itself a `ChatRouter`
         passes this check whatever its own routes can do, failing mid-request with
-        `NoToolCapableRouteError` if none of them can use tools (T-121's to close).
+        `NoToolCapableRouteError` if none of them can use tools.
 
         What comes back routes through the router's pipeline, so the decision reaches the
         trace and `last_routing_decision()`; with `include_raw=True` the raw message carries
-        it too (D3, REQ-R2-4). Streamed progressively — the route's own parser runs — as it is
-        on a plain chat model (C1, C2): `stream` and `astream` delegate to the router's own.
+        it too. Streamed progressively — the route's own parser runs — as it is
+        on a plain chat model: `stream` and `astream` delegate to the router's own.
         """
         self._check_tool_support()
         binding = StructuredOutputBinding(
@@ -807,16 +809,15 @@ class ChatRouter(BaseChatModel):
     ) -> RoutingDecision | _StrategyCall:
         """What deciding this request takes: a decision already settled, or a strategy to run.
 
-        A route forced through runtime config (`configurable["route"]`, D7) settles it outright
+        A route forced through runtime config (`configurable["route"]`) settles it outright
         via `_forced_decision` — and so does having no strategy at all — either way with no
-        strategy run (D2, REQ-R11-1). A request with no user message gives a strategy nothing
-        to decide on, so it is not consulted either, and the default route answers (R9,
-        REQ-R4-4).
+        strategy run. A request with no user message gives a strategy nothing
+        to decide on, so it is not consulted either, and the default route answers.
         """
         forced = config.get("configurable", {}).get("route")
         if forced is not None:
             return self._forced_decision(cast("str", forced), kwargs)
-        # `_coerce_strategy` has wrapped any plain callable (REQ-R6-2).
+        # `_coerce_strategy` has wrapped any plain callable.
         strategy = cast("RoutingStrategy | None", self.strategy)
         if strategy is None:
             return RoutingDecision(route=self.default_route, reason="no strategy configured")
@@ -825,7 +826,7 @@ class ChatRouter(BaseChatModel):
             routes=tuple(self.routes),
             tools_bound=tools_are_bound(kwargs),
             wants_full_context=strategy.wants_full_context,
-            # Replaced by the strategy run's child config once that run is open (D9).
+            # Replaced by the strategy run's child config once that run is open.
             config=config,
         )
         if request is None:
@@ -833,14 +834,14 @@ class ChatRouter(BaseChatModel):
         return _StrategyCall(strategy, strategy_name(strategy), request)
 
     def _forced_decision(self, route: str, kwargs: dict[str, Any]) -> RoutingDecision:
-        """What a forced route resolves to (R11): itself, when it can serve this call, or
-        whatever `on_unavailable_forced_route` says to do when it can't (REQ-R11-2).
+        """What a forced route resolves to: itself, when it can serve this call, or
+        whatever `on_unavailable_forced_route` says to do when it can't.
 
-        Never runs the strategy (D2, REQ-R11-1) — this is `_plan`'s other way of settling the
+        Never runs the strategy — this is `_plan`'s other way of settling the
         decision outright, taken before a `_StrategyCall` would even be built. Whatever comes
-        back still goes through `_divert` afterwards, exactly like every other decision (D9,
-        `_divert`'s own docstring) — this only rules out the one case R11 makes the router's
-        own to refuse first: the forced route itself being unusable.
+        back still goes through `_divert` afterwards, exactly like every other decision (see
+        `_divert`'s own docstring) — this only rules out the one case the router must refuse
+        first: the forced route itself being unusable.
         """
         problem = self._forced_route_problem(route, kwargs)
         if problem is None:
@@ -853,11 +854,11 @@ class ChatRouter(BaseChatModel):
         return self._forced_fallback(problem)
 
     def _forced_route_problem(self, route: str, kwargs: dict[str, Any]) -> str | None:
-        """Why a forced route can't be used, or `None` when it can (REQ-R11-2).
+        """Why a forced route can't be used, or `None` when it can.
 
         Existence first. Tool capability only when something is bound — tools, or a schema,
         which LangChain builds on tool binding — using the same signal `_divert` uses for every
-        other route (D5, R10): with nothing bound, a forced route is always available on that
+        other route: with nothing bound, a forced route is always available on that
         count, and only its existence is ever in question.
         """
         if route not in self.routes:
@@ -873,18 +874,18 @@ class ChatRouter(BaseChatModel):
         run_manager: CallbackManagerForChainRun,
         kwargs: dict[str, Any],
     ) -> RoutingDecision:
-        """Settle the route, diversion included; the strategy runs in a child run (D9).
+        """Settle the route, diversion included; the strategy runs in a child run.
 
         Any call the strategy makes with `request.config` — or without it, through the context
-        config — nests under the strategy's run, so it is traced and costed there (R3).
+        config — nests under the strategy's run, so it is traced and costed there.
 
-        `_divert` (R10) is applied at every return path, before the strategy run closes: D9
-        says the decision is one record in three places — the strategy run's output, the
+        `_divert` is applied at every return path, before the strategy run closes: the
+        decision is one record in three places — the strategy run's output, the
         router run's output, the route run's metadata — and a diversion is part of settling
         the decision, not something layered on afterwards. The strategy run still ends a
         success: diverting is not a failure of the strategy, which chose correctly given what
         it knew, so `on_chain_end` runs even though the outputs it gets are the diverted
-        record, not the strategy's raw choice — T-110's precedent for a fallback, whose
+        record, not the strategy's raw choice — the same as for a fallback, whose
         strategy run likewise holds the final record.
         """
         pending = self._plan(messages, config, kwargs)
@@ -921,7 +922,7 @@ class ChatRouter(BaseChatModel):
         run_manager: AsyncCallbackManagerForChainRun,
         kwargs: dict[str, Any],
     ) -> RoutingDecision:
-        """Async `_decide`: awaits `adecide`, so the strategy never blocks the loop (C2)."""
+        """Async `_decide`: awaits `adecide`, so the strategy never blocks the loop."""
         pending = self._plan(messages, config, kwargs)
         if isinstance(pending, RoutingDecision):
             return self._divert(pending, kwargs)
@@ -949,11 +950,11 @@ class ChatRouter(BaseChatModel):
         return decision
 
     def _conclude(self, pending: _StrategyCall, outcome: object) -> RoutingDecision:
-        """The decision a strategy's outcome leads to (R2).
+        """The decision a strategy's outcome leads to.
 
         Every way a strategy can fail to decide — abstaining, raising, naming a route that
-        doesn't exist, or returning something that isn't a choice — ends on the default route
-        (R9). A raised error's traceback stays on the strategy's run in the trace.
+        doesn't exist, or returning something that isn't a choice — ends on the default route.
+        A raised error's traceback stays on the strategy's run in the trace.
         """
         if isinstance(outcome, RoutingChoice) and outcome.route in self.routes:
             return RoutingDecision(
@@ -970,7 +971,7 @@ class ChatRouter(BaseChatModel):
         return self._fallback(f"{pending.name} {cause}", strategy=pending.name)
 
     def _fallback(self, cause: str, *, strategy: str | None) -> RoutingDecision:
-        """The default route, with one `FallbackWarning` and the cause recorded (R9, R2)."""
+        """The default route, with one `FallbackWarning` and the cause recorded."""
         warnings.warn(
             f"{cause}; falling back to the default route {self.default_route!r}",
             FallbackWarning,
@@ -984,16 +985,16 @@ class ChatRouter(BaseChatModel):
         )
 
     def _forced_fallback(self, cause: str) -> RoutingDecision:
-        """R11's own fallback: the default route stands in for a forced route that can't be
-        used, with one `ForcedRouteWarning` — not `FallbackWarning`, which is R9's, for a
+        """The forced-route fallback: the default route stands in for a forced route that can't be
+        used, with one `ForcedRouteWarning` — not `FallbackWarning`, which is for a
         strategy that failed rather than a forced route that was refused — and both
-        `forced=True` and `fallback=True` recorded (REQ-R11-3). `strategy` stays unset: no
-        strategy ran (D2), so there is none to name.
+        `forced=True` and `fallback=True` recorded. `strategy` stays unset: no
+        strategy ran, so there is none to name.
 
         A dedicated method rather than a parameter on `_fallback`: that method's own callers (a
-        strategy that couldn't decide, and a request with no user message) are R9's cases, and
-        `_fallback` always uses `FallbackWarning` and never sets `forced=True` — widening its
-        signature to cover R11's different warning class would let this case leak into theirs
+        strategy that couldn't decide, and a request with no user message) are that path's cases,
+        and `_fallback` always uses `FallbackWarning` and never sets `forced=True` — widening its
+        signature to cover a different warning class would let this case leak into theirs
         through a missed keyword, for two call sites that are otherwise unrelated.
         """
         warnings.warn(
@@ -1008,14 +1009,14 @@ class ChatRouter(BaseChatModel):
             fallback=True,
         )
 
-    # --- 3. Tool capability (R10) ---
+    # --- 3. Tool capability ---
 
     def _supports_tools(self, route: str) -> bool:
-        """Whether `route` can use tools, by D5's signals (REQ-R10-1)."""
+        """Whether `route` can use tools, by the signals `supports_tools` documents."""
         return supports_tools(self.routes[route], override=self.tool_support_overrides.get(route))
 
     def _tool_capable_route(self) -> str | None:
-        """Where a request diverted off a tool-incapable route goes (D1), or `None` if nowhere.
+        """Where a request diverted off a tool-incapable route goes, or `None` if nowhere.
 
         The default route when it can use tools — the route the application already nominated
         for everything it didn't have an opinion about — and otherwise the first route in
@@ -1027,9 +1028,9 @@ class ChatRouter(BaseChatModel):
         return next((name for name in self.routes if self._supports_tools(name)), None)
 
     def _check_tool_support(self) -> None:
-        """What binding tools to this router means for the routes that can't use them (R10).
+        """What binding tools to this router means for the routes that can't use them.
 
-        Once, at bind time (REQ-R10-2), where the application can still do something about
+        Once, at bind time, where the application can still do something about
         it: one warning naming every route that will be skipped, and an error when there is
         no route left to skip to — binding tools no route can use has no outcome worth
         waiting for a request to discover.
@@ -1048,22 +1049,22 @@ class ChatRouter(BaseChatModel):
         )
 
     def _divert(self, decision: RoutingDecision, kwargs: dict[str, Any]) -> RoutingDecision:
-        """The decision R10 allows: a tool-incapable route gives way to D1's target.
+        """What tool-aware routing allows: a tool-incapable route gives way to a capable one.
 
         Only when something is bound — tools, or a schema, which LangChain builds on tool
-        binding. The strategy is not consulted again (D1): it has decided, a second run would
-        buy a second call under the strategies that make them (R7), and re-deciding could
+        binding. The strategy is not consulted again: it has decided, a second run would
+        buy a second call under the strategies that make them, and re-deciding could
         divert in a loop.
 
-        One warning per diverted request (REQ-R10-3): a diversion is not the route the policy
+        One warning per diverted request: a diversion is not the route the policy
         asked for, and it happens per request, so it is per request that the application
-        hears about it. `diverted_from` keeps the route it came from (R2).
+        hears about it. `diverted_from` keeps the route it came from.
 
-        Called from `_decide` / `_adecide`, before the strategy's run closes (D9): the decision
+        Called from `_decide` / `_adecide`, before the strategy's run closes: the decision
         is one record in three places, so the strategy run's output is the *diverted* record
         too, the same as the router run's outputs and the route run's metadata — not what the
-        strategy chose before D1 stepped in. The `forced` guard runs earlier, in `_plan`
-        (REQ-R11-2, T-116): a forced route that can't use the bound tools is refused —
+        strategy chose before the diversion stepped in. The `forced` guard runs earlier, in `_plan`:
+        a forced route that can't use the bound tools is refused —
         `ForcedRouteError`, or `ForcedRouteWarning` under `on_unavailable_forced_route`'s
         `"fallback"` setting — before a request ever gets here, so this never has to tell a
         forced route from any other. Whatever a forced route's refusal falls back to is
@@ -1096,10 +1097,10 @@ class ChatRouter(BaseChatModel):
         run_manager: CallbackManagerForChainRun | AsyncCallbackManagerForChainRun,
         kwargs: dict[str, Any],
     ) -> _RouteCall:
-        """The selected route's call, nested under the router's run with the decision (D9).
+        """The selected route's call, nested under the router's run with the decision.
 
-        The route is called as given (REQ-R5-1) — with whatever the caller bound to the
-        router replayed on it here, by the route's own binder (C3). The caller's config
+        The route is called as given — with whatever the caller bound to the
+        router replayed on it here, by the route's own binder. The caller's config
         passes on unchanged but for its callbacks, and the decision rides in the route run's
         metadata.
         """
@@ -1118,12 +1119,12 @@ class _StrategyCall:
 
     strategy: RoutingStrategy
     name: str
-    """What the strategy's run and the decision record call it (D8, D9)."""
+    """What the strategy's run and the decision record call it."""
     request: RoutingRequest
 
     @property
     def inputs(self) -> dict[str, Any]:
-        """The strategy run's inputs: what it decides on (D9).
+        """The strategy run's inputs: what it decides on.
 
         The content blocks and transcript are left out — they are already on the router's run
         and the route's, and may hold large images.
@@ -1145,22 +1146,23 @@ class _RouteCall(NamedTuple):
 
 
 def _with_record(answer: AnswerT, decision: RoutingDecision) -> AnswerT:
-    """The route's answer with the decision record added; nothing else changes (R1, R2).
+    """The route's answer with the decision record added; nothing else changes.
 
     A copy, not an edit in place: the route may keep the object it returned — its response
-    cache does — and must not find one call's record on another call's answer (C10).
+    cache does — and must not find one call's record on another call's answer.
 
-    Also publishes the decision for `last_routing_decision()` (D3). Every entry point passes
+    Also publishes the decision for `last_routing_decision()`. Every entry point passes
     through here, and so does anything built on them — including the structured-output path
-    whose parsed object has nowhere to carry a record, which is what D3 exists for.
+    whose parsed object has nowhere to carry a record, which is what `last_routing_decision()`
+    exists for.
     """
     record_decision(decision)
     return cast("AnswerT", _recorded_on(answer, decision))
 
 
 def _merge(output: Any, item: Any) -> Any:
-    """Fold `item` into the running `output` the router keeps for its own run's outputs (D9) —
-    not what the caller sees, which is `item` itself, unchanged (C1, C2).
+    """Fold `item` into the running `output` the router keeps for its own run's outputs —
+    not what the caller sees, which is `item` itself, unchanged.
 
     `AIMessageChunk`s merge with `+`, and so do `include_raw=True`'s `AddableDict` deltas. A
     structured parser's own partial — a Pydantic object, or a plain dict from a JSON-schema or
@@ -1175,12 +1177,12 @@ def _merge(output: Any, item: Any) -> Any:
 
 
 def _recorded_on(answer: object, decision: RoutingDecision) -> object:
-    """The record put wherever this answer can hold one (R2, D3) — the same rule for a whole
-    answer and for the one streamed item that carries it (D8).
+    """The record put wherever this answer can hold one — the same rule for a whole
+    answer and for the one streamed item that carries it.
 
     A message holds it in `response_metadata`. `with_structured_output(include_raw=True)`
     answers with `{"raw", "parsed", "parsing_error"}`, and the raw message holds it there
-    (REQ-R2-4) — including the first streamed item, an `AddableDict` delta that reliably has a
+    — including the first streamed item, an `AddableDict` delta that reliably has a
     `"raw"` key before any `"parsed"` key can (the parser needs raw content to parse). A parsed
     object, or a bare dict from a JSON-schema or JSON-mode parse, holds nothing and is handed
     back untouched: reaching it means `last_routing_decision()`, which `_with_record` has just
@@ -1198,12 +1200,12 @@ def _recorded_on(answer: object, decision: RoutingDecision) -> object:
 
 
 def _run_outputs(answer: object, decision: RoutingDecision) -> dict[str, Any]:
-    """The router run's outputs: the response, and the record on its own (D9)."""
+    """The router run's outputs: the response, and the record on its own."""
     return {"output": answer, ROUTING_KEY: decision.as_dict()}
 
 
 def _no_tool_capable_route(routes: Iterable[str]) -> str:
-    """The message for a router none of whose routes can use tools (REQ-R10-2)."""
+    """The message for a router none of whose routes can use tools."""
     return (
         f"no route can use tools: {_names(routes)}; binding tools or structured output needs "
         "at least one tool-capable route — tool_support_overrides can name one"

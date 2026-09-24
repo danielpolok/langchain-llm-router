@@ -1,11 +1,11 @@
-"""`HeuristicStrategy` (R6, R7): cost tiering from cheap local signals, with no extra call.
+"""`HeuristicStrategy`: cost tiering from cheap local signals, with no extra call.
 
 The §4 "cost tiering" use case: simple questions to a small model, complex ones to a frontier
 model. The request's difficulty is *scored* from signals computable on the spot — how much text
 there is, whether it carries code, how many things it asks for, whether it asks for reasoning,
 and whether it carries anything but text — and the score picks a tier. Nothing here calls a
-model, embeddings or a network service (REQ-R7-1), and nothing here is private to the package:
-it is an ordinary `RoutingStrategy` a user could have written (REQ-R6-1).
+model, embeddings or a network service, and nothing here is private to the package:
+it is an ordinary `RoutingStrategy` a user could have written.
 
 Setting one up
 --------------
@@ -38,12 +38,11 @@ Each is a plain function of the request, exported and testable on its own, and t
 replaceable through `signals=`. `weights=` scales individual signals without replacing any;
 weight `0.0` silences one.
 
-What T-140 retunes
-------------------
-The benchmark settles the defaults; the requirements say so explicitly ("which heuristic signals
-T-131 scores on — T-140's benchmark results settle the defaults"). Everything it should need to
-change is a module-level constant, so the change is mechanical and the tests it argues with are
-the tier tests in `tests/unit_tests/test_heuristic_strategy.py`:
+What a benchmark result retunes
+-------------------------------
+The defaults are meant to be settled by the benchmark (`benchmark/`), not guessed. Everything it
+should need to change is a module-level constant, so the change is mechanical and the tests it
+argues with are the tier tests in `tests/unit_tests/test_heuristic_strategy.py`:
 
 - `DEFAULT_THRESHOLD` — the two-tier bar, and with it how much traffic reaches the frontier tier.
 - `DEFAULT_WEIGHTS` — how much each signal counts (currently all equal).
@@ -57,7 +56,7 @@ What the score cannot see
 -------------------------
 Measured, not guessed — the cases below are pinned in
 `tests/unit_tests/test_heuristic_strategy.py::test_the_defaults_blind_spots_are_the_ones_we_know_of`,
-and are the evidence T-140 argues with:
+and are the evidence a benchmark argues with:
 
 - **Scripts that don't separate words with spaces.** `length_signal` counts whitespace-separated
   words, so Chinese, Japanese and Thai read as a handful of words however much they say; the
@@ -67,20 +66,20 @@ and are the evidence T-140 argues with:
 - **Length stands in for difficulty, and sometimes it is wrong in both directions.** A pasted log
   with "what does this mean?" reads as hard (`length 1.00`); "prove that P != NP implies one-way
   functions exist" reads as easy (`analysis 0.50`, one term of the two a full signal needs).
-  Local signals cannot read intent — that is the trade R7 makes, and the price of no extra call.
-  The embedding and classifier strategies (T-133, T-134) are where a router buys its way out.
+  Local signals cannot read intent — that is the trade a strategy with no extra call makes.
+  The embedding and classifier strategies are where a router buys its way out.
 
 Deciding, and not deciding
 --------------------------
 - **A request with nothing to judge** — no text and no other modality — scores nothing, so the
-  strategy abstains with `None` and the router falls back to the default route (R9). It does not
+  strategy abstains with `None` and the router falls back to the default route. It does not
   warn or raise: that is the router's to report, once.
 - **A tier that isn't one of the router's routes** is named anyway, never quietly swapped for a
   neighbouring tier. A strategy sees `request.routes` but cannot know which name the application
   meant, so it hands the router the route its policy chose and lets the router report the
   mismatch through the one path that already exists for it: a `FallbackWarning`, the default
-  route, and a record saying which route was missing (R9, REQ-R9-2).
-- **The reason** (R2) carries the score, the band it fell in and the signals that made it, so a
+  route, and a record saying which route was missing.
+- **The reason** carries the score, the band it fell in and the signals that made it, so a
   human reading a trace sees why the request was judged easy or hard:
   `"difficulty 2.50 >= 1.00 (code 1.00, length 1.00, analysis 0.50)"`.
 """
@@ -123,7 +122,7 @@ def _ramp(value: float, floor: float, ceiling: float) -> float:
 
 
 DEFAULT_LENGTH_RANGE = (20, 200)
-"""Words at which the length signal starts to rise, and at which it is fully on (T-140).
+"""Words at which the length signal starts to rise, and at which it is fully on.
 
 Twenty words is about a sentence of context; two hundred is a page of pasted material."""
 
@@ -167,7 +166,7 @@ _CODE_MARKERS: Mapping[str, re.Pattern[str]] = MappingProxyType(
         ),
     }
 )
-"""Marker family → the pattern that spots it. Two families present is fully on (T-140)."""
+"""Marker family → the pattern that spots it. Two families present is fully on."""
 
 _CODE_MARKERS_FOR_FULL = 2
 
@@ -220,7 +219,7 @@ _ANALYSIS_TERMS: tuple[str, ...] = (
     r"trade-?offs?",
     r"why (?:does|is|are|do)",
 )
-"""Words that ask for reasoning rather than recall. Two distinct ones is fully on (T-140)."""
+"""Words that ask for reasoning rather than recall. Two distinct ones is fully on."""
 
 _ANALYSIS = tuple(re.compile(rf"\b{term}", re.IGNORECASE) for term in _ANALYSIS_TERMS)
 
@@ -238,7 +237,7 @@ def analysis_signal(request: RoutingRequest) -> float:
 
 
 def modality_signal(request: RoutingRequest) -> float:
-    """Whether the request carries anything but text (C7).
+    """Whether the request carries anything but text.
 
     Binary: an image, audio, video, a document or content LangChain couldn't translate all need
     a model that can read them, and "how much of it" says nothing about difficulty.
@@ -260,17 +259,17 @@ DEFAULT_SIGNALS: Mapping[str, Signal] = MappingProxyType(
 DEFAULT_WEIGHTS: Mapping[str, float] = MappingProxyType(
     {"length": 1.0, "code": 1.0, "parts": 1.0, "analysis": 1.0, "modalities": 1.0}
 )
-"""What each default signal counts for. Equal until T-140 has evidence for anything else."""
+"""What each default signal counts for. Equal until a benchmark gives evidence for anything else."""
 
 DEFAULT_THRESHOLD = 1.0
-"""The two-tier bar (T-140): one signal fully on, or two half on, earns the stronger tier."""
+"""The two-tier bar: one signal fully on, or two half on, earns the stronger tier."""
 
 
 # --- The strategy ---
 
 
 class HeuristicStrategy(RoutingStrategy):
-    """Routes on a difficulty score built from cheap local signals (R6, R7, PRD §4).
+    """Routes on a difficulty score built from cheap local signals.
 
     ```python
     ChatRouter(
@@ -316,7 +315,7 @@ class HeuristicStrategy(RoutingStrategy):
         scoring touches nothing but the request.
         """
         if not request.text.strip() and not request.modalities - {"text"}:
-            # Nothing to score — an empty user turn. Better the default route than a guess (R9).
+            # Nothing to score — an empty user turn. Better the default route than a guess.
             return None
         contributions = {
             name: self.weights[name] * signal(request) for name, signal in self.signals.items()
@@ -331,7 +330,7 @@ class HeuristicStrategy(RoutingStrategy):
         )
 
     def _reason(self, score: float, tier: int, contributions: Mapping[str, float]) -> str:
-        """The score, the band it fell in, and the signals that made it (R2)."""
+        """The score, the band it fell in, and the signals that made it."""
         if tier == 0:
             band = f"difficulty {score:.2f} < {self.thresholds[0]:.2f}"
         elif tier == len(self.thresholds):

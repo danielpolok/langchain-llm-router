@@ -1,7 +1,7 @@
-"""The routing decision record (R2, D8) and the ways to read it back (D3).
+"""The routing decision record and the ways to read it back.
 
 A caller has three ways to the record, in the order they are worth reaching for:
-`routing_decision(response)` off the message, the trace (D9 places it three times), and
+`routing_decision(response)` off the message, the trace (where it is placed three times), and
 `last_routing_decision()` for the one path where nothing comes back that could carry it —
 structured output without `include_raw=True`, which returns a parsed object.
 
@@ -11,7 +11,7 @@ structured output without `include_raw=True`, which returns a parsed object.
 A route may itself be a `ChatRouter`. The inner router records its decision on its answer, and
 the outer router then replaces it with its own, so the message and `last_routing_decision()`
 both report the *outermost* decision — the one the caller made. Nothing is lost: the inner
-router's chain run carries its own record on the trace, where D9 put it.
+router's chain run carries its own record on the trace, as every router's run does.
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ from langchain_core.messages import BaseMessage
 __all__ = ["ROUTING_KEY", "RoutingDecision", "last_routing_decision", "routing_decision"]
 
 ROUTING_KEY = "routing"
-"""Where the record rides: `response_metadata["routing"]`, and the same key on the trace (D9)."""
+"""Where the record rides: `response_metadata["routing"]`, and the same key on the trace."""
 
 
 @dataclass(frozen=True)
 class RoutingDecision:
-    """Which route ran, and why (R2). The six fields are D8's schema."""
+    """Which route ran, and why. These six fields are the whole schema."""
 
     route: str
     """The route that ran."""
@@ -45,13 +45,14 @@ class RoutingDecision:
     """The strategy's name, or `None` when no strategy ran (no strategy, or a forced route)."""
 
     fallback: bool = False
-    """The R9 path was taken: the strategy could not decide, so the default route ran."""
+    """The default-route fallback was taken: the strategy could not decide, so the default route
+    ran."""
 
     forced: bool = False
-    """The route came from runtime config (R11)."""
+    """The route came from runtime config."""
 
     diverted_from: str | None = None
-    """The tool-incapable route the request was diverted from (R10)."""
+    """The tool-incapable route the request was diverted from."""
 
     def as_dict(self) -> dict[str, Any]:
         """The record as it rides under `response_metadata["routing"]` and on the trace."""
@@ -75,7 +76,7 @@ taken as they come: past those two, what is under this key is a record we wrote.
 
 
 def routing_decision(message: BaseMessage) -> RoutingDecision | None:
-    """Read the decision record back off a response, or `None` if it carries none (R2)."""
+    """Read the decision record back off a response, or `None` if it carries none."""
     record = message.response_metadata.get(ROUTING_KEY)
     if not isinstance(record, Mapping):
         return None
@@ -85,7 +86,7 @@ def routing_decision(message: BaseMessage) -> RoutingDecision | None:
 
 
 class _Published(NamedTuple):
-    """One routed call's record, and where it sits among the others (D3)."""
+    """One routed call's record, and where it sits among the others."""
 
     order: int
     """When it was published. Higher is later; `_order` hands them out."""
@@ -119,18 +120,18 @@ _on_thread = threading.local()
 
 
 def record_decision(decision: RoutingDecision) -> None:
-    """Publish `decision` for `last_routing_decision()` (D3). The router's own, not public API.
+    """Publish `decision` for `last_routing_decision()`. The router's own, not public API.
 
     Published in both places because neither alone answers every caller:
 
-    - the **context variable** D3 names is the exact one — per call, per task — and it is what a
+    - the **context variable** is the exact one — per call, per task — and it is what a
       caller reads after `router.invoke(…)` or an awaited `ainvoke`, including two of those
       running concurrently, which each have a context of their own;
     - but LangChain runs a sequence's steps in a *copy* of the caller's context
       (`RunnableSequence.invoke` does `context.run(step.invoke, …)`, `runnables/base.py:3454`;
       `ainvoke` awaits a task carrying the copy, `:3496`), and a `ContextVar.set` inside a copy
-      is discarded when the step returns. That copy is exactly the path D3 exists for:
-      `with_structured_output` builds `llm | output_parser` (`chat_models.py:2565`), so the
+      is discarded when the step returns. That copy is exactly the path this second placement exists
+      for: `with_structured_output` builds `llm | output_parser` (`chat_models.py:2565`), so the
       router runs as a step while the caller reads from outside it. The **thread's** own
       storage is the finest-grained place a record can survive that, so it goes there too.
     """
@@ -138,7 +139,7 @@ def record_decision(decision: RoutingDecision) -> None:
 
 
 def discard_decision() -> None:
-    """Withdraw this call's record: it failed, so it has no decision to report (C6).
+    """Withdraw this call's record: it failed, so it has no decision to report.
 
     Also the router's own. A failed call publishes nothing *and* supersedes what came before
     it, so an earlier call's record is never read back as the failed call's — which matters
@@ -156,13 +157,13 @@ def _publish(decision: RoutingDecision | None) -> None:
 
 
 def last_routing_decision() -> RoutingDecision | None:
-    """The most recent routed call's decision as seen from here (D3), or `None` if none was.
+    """The most recent routed call's decision as seen from here, or `None` if none was.
 
     The escape hatch for `with_structured_output` without `include_raw=True`, where the parsed
     object has nowhere to carry a record. It answers for:
 
     - a routed call made in this context — `router.invoke(…)`, `await router.ainvoke(…)`, or a
-      stream whose first chunk has arrived (the route is chosen before it, D8). Two calls
+      stream whose first chunk has arrived (the route is chosen before it). Two calls
       started side by side, as `asyncio.gather` starts them, each have a context of their own
       and each read their own;
     - a routed call one or more LangChain steps deep, whose record reached only this thread:

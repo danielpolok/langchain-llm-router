@@ -73,7 +73,7 @@ def test_the_routers_own_cache_is_rejected_at_construction() -> None:
     reason = error.get("ctx", {}).get("error", error["type"])
     assert isinstance(reason, RoutingError)
     assert str(reason) == (
-        "cache belongs on the route, not the router (D4): ChatRouter delegates to each "
+        "cache belongs on the route, not the router: ChatRouter delegates to each "
         "route's own invoke/stream rather than running _generate_with_cache itself, so its "
         "own cache would never be consulted — set cache= on each route instead."
     )

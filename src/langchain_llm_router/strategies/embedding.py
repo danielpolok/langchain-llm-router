@@ -1,10 +1,10 @@
-r"""`EmbeddingStrategy` (R6, R7's opt-in level): route on meaning, not words.
+r"""`EmbeddingStrategy`, opt-in because it makes calls: route on meaning, not words.
 
 `KeywordStrategy` needs the right word; `EmbeddingStrategy` needs the right *idea* — a handful of
 example requests per route, and the current request goes wherever it reads closest to. It makes
 an embedding call every request, so — unlike the heuristic and keyword strategies — it is never
-on by default: construction takes the application's own `Embeddings` instance, with no default
-(REQ-R7-2). No new dependency is added for it (R8); whatever embeddings package the application
+on by default: construction takes the application's own `Embeddings` instance, with no default.
+No new dependency is added for it; whatever embeddings package the application
 already has is what it is built from.
 
 Setting one up
@@ -22,8 +22,8 @@ EmbeddingStrategy(
 )
 ```
 
-**Examples are embedded once** (R8's spirit — no repeated work — read onto R7's "no *extra*
-call" per request beyond the one the strategy exists to make): on the first `decide` or
+**Examples are embedded once** (no repeated work: beyond the one embedding call each request
+exists to make, nothing is recomputed): on the first `decide` or
 `adecide`, in a single batched `embed_documents`/`aembed_documents` call, cached for the life of
 the strategy. Not at construction, because construction has no async hook of its own — an
 application building a router inside an async context would otherwise have to block the loop, or
@@ -33,7 +33,7 @@ path calls `embed_documents` directly, and the async path calls `aembed_document
 absent a provider override, is `Embeddings`' own default of running `embed_documents` in a
 worker thread (`embeddings.py`'s `run_in_executor(None, ...)`), so the loop is never blocked
 either way. A `threading.Lock` guards the cache: held for the sync embed, so two concurrent
-`decide` calls (C2's worker threads) embed the routes' examples only once between them; released
+`decide` calls (from worker threads) embed the routes' examples only once between them; released
 before the async embed's `await` and re-acquired only to write the result, because holding a
 plain lock across an `await` risks a second coroutine's blocking `acquire()` freezing the one
 thread the event loop runs on. The async race that leaves — two requests, both first, both
@@ -42,10 +42,10 @@ inconsistent cache.
 
 **Only the per-request query is traced.** `Embeddings` is a plain ABC: `embed_query` and
 `embed_documents` take no `config`, so a call through it is invisible to any tracer unless the
-strategy opens its own run around it (D9) — the same manual pattern `ChatRouter._start_run` uses
+strategy opens its own run around it — the same manual pattern `ChatRouter._start_run` uses
 for its own run, read from `request.config`'s callback manager rather than a chat model's
 `invoke`. Every per-request query embedding gets one, sync and async, holding the input length
-and a cost *estimate* — `Embeddings` reports no token usage, so REQ-R3-2 asks for an estimate
+and a cost *estimate* — `Embeddings` reports no token usage, so what it records is an estimate
 from input length, not a measurement, with the method recorded alongside it. The one-time
 route-example embedding does not get a run of its own: it is amortised construction-time work,
 not any one request's cost, and whichever request happened to trigger it would otherwise carry
@@ -58,41 +58,41 @@ one **cosine similarity** each; a route's score is the **maximum** over its own 
 strategy asks "is this request close to any one thing this route handles", not "close to the
 average of them", so a route with a deliberately varied example set is not penalised for its
 variety. The route with the best score decides, *if* that score clears `threshold`; otherwise the
-strategy abstains with `None` and the router falls back to the default route (R9), exactly as
+strategy abstains with `None` and the router falls back to the default route, exactly as
 `HeuristicStrategy` does below its own bar.
 
 **One global threshold, not one per route.** A per-route bar would need its own calibration
-evidence per route before the strategy could be trusted at all, multiplying T-140's work by the
-number of routes; a single bar is the simpler, more inspectable default, and nothing here stops
+evidence per route before the strategy could be trusted at all, multiplying the calibration work by
+the number of routes; a single bar is the simpler, more inspectable default, and nothing here stops
 an application from subclassing for a per-route one if its evidence calls for it. Unlike
 `HeuristicStrategy`'s signals, which are dimensionless by construction (`_ramp` always returns
 `[0.0, 1.0]`), cosine similarity's *useful* range depends entirely on the embedding model — some
 providers' vectors cluster closely and rarely score below 0.9 even for unrelated text, others
 spread out — so there is no threshold this module could default to that would mean the same thing
-for every provider. `threshold` is therefore required, with no default, the same call REQ-R7-2
-makes for the embeddings instance itself: a number that is silently wrong is worse than one the
+for every provider. `threshold` is therefore required, with no default — the same call made
+for the embeddings instance itself: a number that is silently wrong is worse than one the
 caller has to supply.
 
 **An empty request** — no text — has nothing to embed, and abstains for the same reason
-`HeuristicStrategy` does with nothing to score (R9): better the default route than a vector for
+`HeuristicStrategy` does with nothing to score: better the default route than a vector for
 the empty string, which every embedding model answers *something* for and no provider documents
 as meaningful.
 
 **Embedding failure** is not caught here. `decide`/`adecide` let the `Embeddings` call's
 exception propagate — the same shape `ConsultingStrategy` in the test suite relies on for a
 classifier's model call — and the router's own `_conclude` is what turns a strategy that raised
-into the default route with a `FallbackWarning` naming the cause (R9). Catching it here would
+into the default route with a `FallbackWarning` naming the cause. Catching it here would
 only rebuild, one strategy at a time, machinery the router already has.
 
 **A route named in `examples` that the router doesn't have** is handled the way `KeywordStrategy`
 and `ConfigurableStrategy` handle a stray rule: matching happens regardless, and the router
-reports the mismatch through `FallbackWarning` far better than this strategy could (R9) — a typo
+reports the mismatch through `FallbackWarning` far better than this strategy could — a typo
 costs only the requests that route's examples would have matched closest. The one case checked
 up front, at the first `decide`, is a route mapping that names *none* of the router's routes: that
 can never decide anything, and `RoutingError` says so before silently abstaining for the life of
 the process, the same precedent.
 
-No dependency beyond `langchain-core` is imported (R8): the similarity itself is a few lines of
+No dependency beyond `langchain-core` is imported: the similarity itself is a few lines of
 `math`, not `numpy`.
 """
 
@@ -121,11 +121,11 @@ if TYPE_CHECKING:
 __all__ = ["EmbeddingStrategy"]
 
 _EMBED_RUN_NAME = "embed_query"
-"""The name every per-request embedding run carries in a trace (D9)."""
+"""The name every per-request embedding run carries in a trace."""
 
 _CHARS_PER_TOKEN = 4
 """The rough English chars-per-token ratio several providers document for their own models —
-close enough for an overhead *estimate* (REQ-R3-2), never offered as a measurement."""
+close enough for an overhead *estimate*, never offered as a measurement."""
 
 Vector = list[float]
 _RouteVectors = dict[str, list[tuple[str, Vector]]]
@@ -133,7 +133,7 @@ _RouteVectors = dict[str, list[tuple[str, Vector]]]
 
 
 class EmbeddingStrategy(RoutingStrategy):
-    """Routes on semantic similarity to example requests per route (R6, R7, PRD §4).
+    """Routes on semantic similarity to example requests per route.
 
     ```python
     ChatRouter(
@@ -151,12 +151,12 @@ class EmbeddingStrategy(RoutingStrategy):
     ```
 
     The module docstring has the reasoning behind every choice below: examples embedded once
-    and lazily, the per-request embedding call traced as its own run (D9), maximum similarity per
+    and lazily, the per-request embedding call traced as its own run, maximum similarity per
     route, one global threshold with no default, and an embedding failure left to propagate so
-    the router's own R9 machinery handles it.
+    the router's own fallback handles it.
 
     Args:
-        embeddings: The application's own `Embeddings` instance (REQ-R7-2) — there is no
+        embeddings: The application's own `Embeddings` instance — there is no
             default, so this strategy can never be enabled by accident.
         examples: Each route's example utterances, at least one route and at least one example
             per route.
@@ -185,21 +185,21 @@ class EmbeddingStrategy(RoutingStrategy):
         self._route_vectors: _RouteVectors | None = None
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """The route whose closest example clears `threshold`, or `None` if none does (R9).
+        """The route whose closest example clears `threshold`, or `None` if none does.
 
         Thread-safe, as the interface requires: the only mutable state is the example-vector
         cache, which `_ensure_route_vectors` guards with a lock.
         """
         self._check_it_can_decide(request.routes)
         if not request.text.strip():
-            return None  # nothing to embed — better the default route than a guess (R9)
+            return None  # nothing to embed — better the default route than a guess
         route_vectors = self._ensure_route_vectors()
         vector = _traced_embed(request.config, request.text, self.embeddings.embed_query)
         return _choose(vector, route_vectors, self.threshold)
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
         """Async `decide`: a native implementation, as the interface asks of a strategy that
-        calls something (D9) — `embed_query`/`embed_documents` take no `config` for a thread's
+        calls something — `embed_query`/`embed_documents` take no `config` for a thread's
         context to ride along on, so the config has to be threaded through explicitly here.
         """
         self._check_it_can_decide(request.routes)
@@ -211,7 +211,7 @@ class EmbeddingStrategy(RoutingStrategy):
 
     def _check_it_can_decide(self, routes: tuple[str, ...]) -> None:
         """At least one route in `examples` is one the router has — the check only a request can
-        make (R9), same precedent as `KeywordStrategy`/`ConfigurableStrategy`.
+        make, same precedent as `KeywordStrategy`/`ConfigurableStrategy`.
         """
         if any(route in routes for route in self.examples):
             return
@@ -346,7 +346,7 @@ def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def _choose(vector: Vector, route_vectors: _RouteVectors, threshold: float) -> RoutingChoice | None:
-    """The route of the closest example overall, if it clears `threshold` (R2, R9)."""
+    """The route of the closest example overall, if it clears `threshold`."""
     best_route: str | None = None
     best_score = float("-inf")
     best_example = ""
@@ -364,12 +364,12 @@ def _choose(vector: Vector, route_vectors: _RouteVectors, threshold: float) -> R
     return RoutingChoice(route=best_route, reason=reason)
 
 
-# --- Tracing a per-request embedding call (D9, REQ-R3-2) ---
+# --- Tracing a per-request embedding call ---
 
 
 def _embed_outputs(text: str) -> dict[str, object]:
     """What a per-request embedding run records: the input length, and a cost *estimate* from
-    it (REQ-R3-2) — `Embeddings` reports no usage, so there is nothing to measure."""
+    it — `Embeddings` reports no usage, so there is nothing to measure."""
     return {
         "input_length": len(text),
         "estimated_tokens": max(1, math.ceil(len(text) / _CHARS_PER_TOKEN)),
@@ -379,7 +379,7 @@ def _embed_outputs(text: str) -> dict[str, object]:
 
 def _start_embed_run(config: RunnableConfig, text: str) -> CallbackManagerForChainRun:
     """Open a run for one embedding call, nested under `config`'s callback manager — the
-    strategy's run (D9) — the same manual pattern `ChatRouter._start_run` uses for its own,
+    strategy's run — the same manual pattern `ChatRouter._start_run` uses for its own,
     needed because `Embeddings.embed_query` takes no `config` of its own to do this for."""
     manager = CallbackManager.configure(
         config.get("callbacks"),
@@ -410,9 +410,9 @@ async def _astart_embed_run(config: RunnableConfig, text: str) -> AsyncCallbackM
 def _traced_embed(
     config: RunnableConfig, text: str, embed_query: Callable[[str], Vector]
 ) -> Vector:
-    """`embed_query(text)`, as its own child run of the strategy's (D9); the exception it might
-    raise propagates unchanged, so the router's own R9 machinery is what turns it into a
-    fallback (module doc) — this only makes sure the run closes either way."""
+    """`embed_query(text)`, as its own child run of the strategy's; the exception it might
+    raise propagates unchanged, so the router's own machinery is what turns it into a
+    default-route fallback (module doc) — this only makes sure the run closes either way."""
     run_manager = _start_embed_run(config, text)
     try:
         vector = embed_query(text)

@@ -1,13 +1,13 @@
-"""Current-request extraction (R4, C7): the `RoutingRequest` a strategy sees.
+"""Current-request extraction: the `RoutingRequest` a strategy sees.
 
 The router calls `build_request` and nothing else from here, after turning whatever it was
 invoked with into messages the way every chat model does (`_convert_input(...).to_messages()`),
 so a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue` all arrive the same way
-(REQ-C7-2).
+.
 
-**Which message is the current request (R4, REQ-R4-1).** The most recent user message, by
+**Which message is the current request.** The most recent user message, by
 position. Trailing AI and tool messages are skipped, so every call in an agent's tool loop
-routes on the request that started it (REQ-R4-2). System prompts never count, wherever they
+routes on the request that started it. System prompts never count, wherever they
 sit, and conversation length plays no part: what comes before the current request reaches a
 strategy only if it opts in with `wants_full_context`.
 
@@ -18,9 +18,9 @@ strategy only if it opts in with `wants_full_context`.
   `""` and no modalities; reaching back past it would route on a turn the user has moved on
   from.
 - No user message at all (an empty transcript, a system prompt alone) is `None`: the strategy
-  can't decide, and the router uses the default route (R9, REQ-R4-4).
+  can't decide, and the router uses the default route.
 
-**How it is read (C7, REQ-C7-1).** Through `BaseMessage.content_blocks`, LangChain's standard
+**How it is read.** Through `BaseMessage.content_blocks`, LangChain's standard
 view of content: string content, standard blocks, and the provider-native blocks LangChain
 translates (OpenAI Chat Completions `image_url` / `input_audio` / `file`, Anthropic `image` /
 `document` with a `source`, Google GenAI, Bedrock Converse, v0 `source_type` blocks). A block
@@ -36,11 +36,11 @@ LangChain can't translate stays `non_standard`; extraction doesn't guess at it.
   Ids LangChain generated itself (the reserved `"lc_"` prefix, minted by `ensure_id` — a fresh
   uuid4 each time a provider-native block is translated) are dropped: they say nothing about the
   request, and would make the same message read twice, or reached through two input forms, two
-  unequal requests (REQ-C7-2). Ids the provider gave the content are kept.
+  unequal requests. Ids the provider gave the content are kept.
 - A `HumanMessage` carrying provider-native tool results — Anthropic sends tool output in a
   user turn — is the current request like any other user message, though its `tool_result`
   blocks stay `non_standard`, so no tool output reaches `text`. LangChain's own canonical form
-  is a `ToolMessage`, which R4 skips.
+  is a `ToolMessage`, which extraction skips.
 - `modalities` names the kinds of content present, from a fixed vocabulary: `"text"` when `text`
   is not empty; `"image"`, `"audio"`, `"video"` and `"file"` for blocks of those types; `"file"`
   for a `text-plain` block too — a plain-text *document*, attached rather than typed, so its text
@@ -86,11 +86,11 @@ def build_request(
     wants_full_context: bool,
     config: RunnableConfig,
 ) -> RoutingRequest | None:
-    """The request a strategy decides on, or `None` when there is no user message (REQ-R4-4).
+    """The request a strategy decides on, or `None` when there is no user message.
 
     "Current request" is the most recent user message by position, ignoring trailing AI and
-    tool messages (REQ-R4-1); the module docstring has the exact rules. `None` means the
-    strategy can't decide, and the router falls back to the default route (R9).
+    tool messages; the module docstring has the exact rules. `None` means the
+    strategy can't decide, and the router falls back to the default route.
     """
     current = next((m for m in reversed(messages) if _is_user_message(m)), None)
     if current is None:
@@ -113,7 +113,7 @@ def build_request(
         routes=routes,
         tools_bound=tools_bound,
         # A new list: the strategy may reorder or trim it without touching the caller's. The
-        # messages in it are the caller's own — a transcript is not worth deep-copying (R4).
+        # messages in it are the caller's own — a transcript is not worth deep-copying.
         messages=list(messages) if wants_full_context else None,
         config=config,
     )

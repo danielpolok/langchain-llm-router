@@ -1,13 +1,13 @@
-r"""Keyword routing (R6's ready-made level, R7): words in the request name the route.
+r"""Keyword routing, ready-made and with no extra call: words in the request name the route.
 
-The fast start for domain routing (PRD §4) — "code requests to the code-strong model" is one
+The fast start for domain routing — "code requests to the code-strong model" is one
 line:
 
     strategy=KeywordStrategy({"coder": ["python", "regex", "stack trace"]})
 
-**What is matched.** The current request's text, and nothing else (R4): `request.text`, what the
+**What is matched.** The current request's text, and nothing else: `request.text`, what the
 user has just asked. A request with no text — an image on its own — matches no rule, so the
-default route answers (R9); a list of keywords has nothing to say about a picture, which is why
+default route answers; a list of keywords has nothing to say about a picture, which is why
 `modalities` plays no part here.
 
 **How a keyword matches.** As a whole word, ignoring case: `"python"` matches `"Python?"` and
@@ -39,7 +39,7 @@ answering. Keep patterns linear, and prefer a keyword where one will do.
 
 **Which rule wins.** The first that matches, in the order the rules are written: route by route,
 and within a route keyword by keyword. Declaration order is what the router already reads route
-order as (D1), it is the order a reader of the rules sees, and unlike "most matches" or "longest
+order as, it is the order a reader of the rules sees, and unlike "most matches" or "longest
 keyword" it does not change with the wording of a request. So put the specific rules first:
 `{"coder": ["unit test"], "small": ["test"]}` sends "write a unit test" to `coder`, and the same
 two rules the other way round send it to `small`.
@@ -49,10 +49,10 @@ with no keywords, a set of keywords, an empty rule set — because none of that 
 anything, and a mistake there is the caller's to fix before a request arrives.
 
 Route *names* can only be checked against the router's own on a request: a strategy is built
-before the router it is given to, so `request.routes` is the first sight of them (R6). Matching
+before the router it is given to, so `request.routes` is the first sight of them. Matching
 comes first even so. A rule whose route the router doesn't have returns its choice like any
 other, and the router reports it precisely — `chose 'codr', which is not one of the routes` —
-and falls back (R9). So a typo costs the requests that rule would have taken, and nothing else:
+and falls back. So a typo costs the requests that rule would have taken, and nothing else:
 in `{"coder": ["python"], "codr": ["prove"]}` the `coder` rule keeps working. Validating every
 name up front would instead send *every* request to the default route, and end every strategy
 run in an error, over one mistyped key.
@@ -61,8 +61,8 @@ The one case that does raise up front is a rule set where *no* rule names a rout
 has: that strategy can never decide anything, and saying so on the first request beats
 abstaining silently for the life of the process.
 
-No model, API, embedding or network call is made here or anywhere below (R7): matching is `re`
-over a string. Nothing outside the standard library and `langchain-core` is imported (R8).
+No model, API, embedding or network call is made here or anywhere below: matching is `re`
+over a string. Nothing outside the standard library and `langchain-core` is imported.
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ Keywords: TypeAlias = "Keyword | Iterable[Keyword]"
 
 @dataclass(frozen=True)
 class _Rule:
-    """One keyword or pattern, the route it names, and the reason a match writes (R2)."""
+    """One keyword or pattern, the route it names, and the reason a match writes."""
 
     route: str
     pattern: re.Pattern[str]
@@ -94,7 +94,7 @@ class _Rule:
 
 
 class KeywordStrategy(RoutingStrategy):
-    """Routes on the words of the current request (R6, R7) — the module docstring has the rules.
+    """Routes on the words of the current request — the module docstring has the rules.
 
     Rules map a route name to the keywords and patterns that send a request to it:
 
@@ -107,7 +107,7 @@ class KeywordStrategy(RoutingStrategy):
 
     The first rule that matches wins, in declaration order, and the reason on the decision
     record names it — `"matched keyword 'python'"` — so a trace says what the router saw. When
-    nothing matches, the strategy returns `None` and the default route answers (R9).
+    nothing matches, the strategy returns `None` and the default route answers.
 
     A strategy is immutable once built: the rules are compiled in `__init__` and never touched
     again, so `decide` is thread-safe, as the interface requires, and one instance can serve
@@ -135,7 +135,7 @@ class KeywordStrategy(RoutingStrategy):
         self._rules = tuple(compiled)
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """The route named by the first rule that matches, or `None` if none does (R9).
+        """The route named by the first rule that matches, or `None` if none does.
 
         A matching rule is answered with even when the router has no such route: the router
         says so far better than this can, and one mistyped rule must not take the rest down
@@ -151,7 +151,7 @@ class KeywordStrategy(RoutingStrategy):
         """At least one rule names a route the router has — the check only a request can make.
 
         A rule set that names none of them has no answer it could give, whatever the request.
-        Raising says so on the first call; the router records it and falls back (R9), where
+        Raising says so on the first call; the router records it and falls back, where
         abstaining would look like a request nothing happened to match.
         """
         if any(rule.route in routes for rule in self._rules):
@@ -192,7 +192,7 @@ def _listed(route: str, keywords: Keywords) -> list[object]:
 
 
 def _rule(route: str, keyword: object) -> _Rule:
-    """One compiled rule, and the reason a match writes (R2).
+    """One compiled rule, and the reason a match writes.
 
     `keyword` is typed `object` because this is where untyped callers land: a list of anything
     passes as `Iterable[Keyword]` when nothing type-checks it, and a clear error here beats an
@@ -255,7 +255,7 @@ def _written(pattern: re.Pattern[str]) -> str:
 
     `repr` doubles every backslash — `'\\bdef\\s+'` for `r"\bdef\s+"` — and says nothing about
     the flags, though `re.IGNORECASE` is half of what such a rule means. Whoever reads this is
-    reading a trace and deciding whether the rule did the right thing (R2).
+    reading a trace and deciding whether the rule did the right thing.
     """
     source = pattern.pattern
     written = f'r"{source}"' if '"' not in source else repr(source)

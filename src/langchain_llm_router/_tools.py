@@ -1,23 +1,23 @@
 """What the router keeps until a route is chosen, and how it tells which route can use it.
 
 Two jobs, both forced by the same fact: tools are provider-specific, and which provider will
-answer is not known at bind time (C3, R10).
+answer is not known at bind time.
 
-**Binding is kept, not applied (REQ-C3-1, REQ-C3-3).** `bind_tools` and `with_structured_output`
+**Binding is kept, not applied.** `bind_tools` and `with_structured_output`
 store what they were given in a `ToolBinding` / `StructuredOutputBinding`. It rides to the
 router's entry points as a call kwarg under `BINDING_KEY` and is replayed there, by
 `bound_route`, on the *selected route's own* binder: the provider does its own conversion, and
 `tool_choice` and binding kwargs such as `strict=` take effect where they belong — at bind time,
 changing how the schema is built — rather than as call kwargs a provider never reads.
 
-**Capability is detected, not discovered (D5, REQ-R10-1).** `BaseChatModel.bind_tools` raises
+**Capability is detected, not discovered.** `BaseChatModel.bind_tools` raises
 `NotImplementedError` at *call* time (`chat_models.py:2383`), so a route that can't use tools
-fails only once it is selected — the late failure R10 exists to pre-empt. `supports_tools`
-answers before that, from `tool_support_overrides` first, then the route's `profile`, then
-whether its class overrides `bind_tools`.
+fails only once it is selected — the late failure tool-aware routing exists to pre-empt.
+`supports_tools` answers before that, from `tool_support_overrides` first, then the route's
+`profile`, then whether its class overrides `bind_tools`.
 
 Nothing here warns or raises: what the router does with an incapable route — the bind-time
-notice (REQ-R10-2) and the per-request diversion (D1, REQ-R10-3) — is `router.py`'s, next to
+notice and the per-request diversion — is `router.py`'s, next to
 the decision record it goes into.
 """
 
@@ -60,7 +60,7 @@ StructuredOutput: TypeAlias = dict[str, Any] | BaseModel
 
 @dataclass(frozen=True)
 class ToolBinding:
-    """What `bind_tools` was called with, kept as given until a route can convert it (C3)."""
+    """What `bind_tools` was called with, kept as given until a route can convert it."""
 
     tools: tuple[Any, ...]
     """The tools exactly as the caller passed them — dicts, classes, functions or `BaseTool`s.
@@ -76,7 +76,7 @@ class ToolBinding:
     route builds the tool schema, which only its own `bind_tools` can do."""
 
     def apply(self, route: BaseChatModel) -> Runnable[LanguageModelInput, Any]:
-        """The route with these tools bound, converted by the route itself (REQ-C3-1)."""
+        """The route with these tools bound, converted by the route itself."""
         if self.tool_choice is None:
             return route.bind_tools(list(self.tools), **self.kwargs)
         return route.bind_tools(list(self.tools), tool_choice=self.tool_choice, **self.kwargs)
@@ -84,7 +84,7 @@ class ToolBinding:
 
 @dataclass(frozen=True)
 class StructuredOutputBinding:
-    """What `with_structured_output` was called with, forwarded per request (REQ-C3-3)."""
+    """What `with_structured_output` was called with, forwarded per request."""
 
     schema: dict[str, Any] | type
     include_raw: bool = False
@@ -93,14 +93,14 @@ class StructuredOutputBinding:
     (`chat_models.py:2530`), and forwarding is what gets them to the route that reads them."""
 
     def apply(self, route: BaseChatModel) -> Runnable[LanguageModelInput, Any]:
-        """The route's own structured output for this schema, built its own way (REQ-C3-3)."""
+        """The route's own structured output for this schema, built its own way."""
         return route.with_structured_output(
             self.schema, include_raw=self.include_raw, **self.kwargs
         )
 
 
 def supports_tools(route: BaseChatModel, *, override: bool | None = None) -> bool:
-    """Whether `route` can use tools, by D5's signals in order of authority (REQ-R10-1).
+    """Whether `route` can use tools, by these signals, in order of authority.
 
     1. `override`, the route's entry in `tool_support_overrides`: always wins. It is the only
        signal the application controls, and the escape hatch for a route the others read wrong.
@@ -119,11 +119,11 @@ def supports_tools(route: BaseChatModel, *, override: bool | None = None) -> boo
 
 
 def tools_are_bound(kwargs: Mapping[str, Any]) -> bool:
-    """Whether this call has tools or structured output bound (R10, `RoutingRequest`).
+    """Whether this call has tools or structured output bound (`RoutingRequest.tools_bound`).
 
     What a strategy routes on, and what decides whether a tool-incapable route may answer.
     `bind_tools` and `with_structured_output` leave a binding under `BINDING_KEY`, which is all
-    they leave (REQ-C3-2); a bare `tools` kwarg counts too, for a caller who reached for
+    they leave; a bare `tools` kwarg counts too, for a caller who reached for
     `bind(tools=...)` — the place LangChain itself looks.
     """
     return BINDING_KEY in kwargs or bool(kwargs.get("tools"))
@@ -134,10 +134,10 @@ def bound_route(
 ) -> tuple[Runnable[LanguageModelInput, AIMessage], dict[str, Any]]:
     """The runnable the selected route's call goes to, and the kwargs left for that call.
 
-    A binding is replayed on the route's own binder (REQ-C3-1, REQ-C3-3): the route is never
-    touched (REQ-R5-1) — `bind_tools` returns a new runnable over it.
+    A binding is replayed on the route's own binder: the route is never
+    touched — `bind_tools` returns a new runnable over it.
 
-    Nothing else is taken out of the call kwargs, a bare `tools` among them (REQ-C3-2). The
+    Nothing else is taken out of the call kwargs, a bare `tools` among them. The
     router binds none of its own, so one that arrives was put there by the caller — `bind(tools=…)`
     or `tools=` on the call — and reaches the route exactly as it reaches a plain chat model:
     after the replayed binding, so it wins over it, as `model.bind_tools(...).bind(tools=…)` does.
@@ -157,18 +157,18 @@ def bound_route(
 
 
 class StructuredRouter(Runnable[LanguageModelInput, Any]):
-    """What `ChatRouter.with_structured_output` hands back: route first, then parse (REQ-C3-3).
+    """What `ChatRouter.with_structured_output` hands back: route first, then parse.
 
     A `Runnable` of its own rather than `llm | parser` — the shape LangChain builds
     (`chat_models.py:2565`) — because the parser is the *route's*, and the router's own
     pipeline has to be the one that runs: one chain run, one strategy run, one decision, and a
-    record published for `last_routing_decision()` (D3, REQ-R2-4). It opens no run of its own;
+    record published for `last_routing_decision()`. It opens no run of its own;
     the router's chain run stays the root of the trace.
 
-    Streams progressively, as a plain chat model does (C1, C2): `stream` and `astream` delegate
+    Streams progressively, as a plain chat model does: `stream` and `astream` delegate
     to the router's own, with the binding riding along under `BINDING_KEY` exactly as it does
-    for `invoke` — one chain run, one strategy run, one decision (D9), and each item the
-    route's own parser produced, unchanged but for the record on the one that carries it (D8).
+    for `invoke` — one chain run, one strategy run, one decision, and each item the
+    route's own parser produced, unchanged but for the record on the one that carries it.
     The route's binder is what does the parsing; nothing here re-parses or re-merges its output.
     """
 
@@ -178,8 +178,8 @@ class StructuredRouter(Runnable[LanguageModelInput, Any]):
 
     @property
     def config_specs(self) -> list[ConfigurableFieldSpec]:
-        """The router's own (D7): a `Runnable`'s default is `[]`, which would hide the
-        `"route"` configurable key T-116 declares — and anything else the router comes to
+        """The router's own: a `Runnable`'s default is `[]`, which would hide the
+        `"route"` configurable key the router declares — and anything else the router comes to
         declare — from `with_config`, `config={"configurable": …}` and config-schema
         introspection run on the structured-output runnable rather than the router itself.
         """
@@ -203,7 +203,7 @@ class StructuredRouter(Runnable[LanguageModelInput, Any]):
         config: RunnableConfig | None = None,
         **kwargs: Any,
     ) -> StructuredOutput:
-        """Async `invoke`, so an async caller never falls back to a worker thread (C2)."""
+        """Async `invoke`, so an async caller never falls back to a worker thread."""
         return cast(
             "StructuredOutput",
             await self.router.ainvoke(input, config, **{BINDING_KEY: self.binding, **kwargs}),
@@ -220,7 +220,7 @@ class StructuredRouter(Runnable[LanguageModelInput, Any]):
         Delegating to `ChatRouter.stream` — rather than `Runnable`'s default, which would
         answer once from `invoke` — is what makes this progressive at all: the route's own
         parser is what produces the partials, and the router's `stream` already knows how to
-        pass an item through unchanged bar the record (D8), whatever shape it is.
+        pass an item through unchanged bar the record, whatever shape it is.
         """
         yield from cast(
             "Iterator[StructuredOutput]",
@@ -233,7 +233,7 @@ class StructuredRouter(Runnable[LanguageModelInput, Any]):
         config: RunnableConfig | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StructuredOutput]:
-        """Async `stream`, so an async caller never falls back to a worker thread (C2)."""
+        """Async `stream`, so an async caller never falls back to a worker thread."""
         async for item in cast(
             "AsyncIterator[StructuredOutput]",
             self.router.astream(input, config, **{BINDING_KEY: self.binding, **kwargs}),
