@@ -1,4 +1,4 @@
-"""T-117: the run shape is confirmed on a live LangSmith trace, not only offline (REQ-C5-4).
+"""The run shape is confirmed on a live LangSmith trace, not only offline.
 
 `test_tracing.py` and `test_cost.py` check the shape and the bill against the offline tracer,
 and `tests.tracing.priced_calls` stands in for what LangSmith would charge. This is the same
@@ -118,7 +118,7 @@ def stored_trace(client: Client, trace_id: Any) -> list[Run]:
 async def test_a_live_trace_shows_the_decision_and_the_real_call_priced_once(
     convention: AnyConvention, client: Client
 ) -> None:
-    """REQ-C5-4: LangSmith stores the router's chain run with the decision in its outputs, the
+    """LangSmith stores the router's chain run with the decision in its outputs, the
     strategy's run with the decision as its output, and one LLM run — the route's — carrying the
     decision in its metadata; and it prices that one call once. The router's run and the
     strategy's carry no usage of their own, and the trace's cost is the model run's."""

@@ -1,9 +1,9 @@
-"""The strategy interface (T-111): REQ-R6-1, REQ-R6-2, REQ-R6-5 and REQ-R4-3.
+"""The strategy interface: one interface for every level, and what a strategy receives.
 
-Checked at the strategy level, without `ChatRouter` (T-110 builds it in parallel). The custom
-strategies and cases are module-level so the same cases can run through `ChatRouter` once it
-lands: the "custom strategy" use case as `strategy=`, REQ-R4-3 with the router passing
-`wants_full_context` on, and REQ-R6-5's "the strategy run's child config" (T-117 opens that run).
+Checked at the strategy level, without `ChatRouter`. The custom
+strategies and cases are module-level so the same cases can run through `ChatRouter` too:
+the "custom strategy" use case as `strategy=`, wider context with the router passing
+`wants_full_context` on, and "the strategy run's child config".
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ def make_request(text: str = "hello", *, config: RunnableConfig | None = None) -
     )
 
 
-# The "custom strategy" use case (PRD §4): a team's existing classifier, plugged in. User code,
-# so its length is part of what REQ-R6-2 checks.
+# The "custom strategy" use case: a team's existing classifier, plugged in. User code,
+# so its length is part of what is checked.
 
 
 def existing_classifier(text: str) -> str:
@@ -82,14 +82,14 @@ CUSTOM_STRATEGIES = [
 ]
 
 
-# REQ-R6-2 · a custom strategy is a few lines of user code
+# a custom strategy is a few lines of user code
 
 
 @pytest.mark.parametrize(("user_code", "strategy", "reason"), CUSTOM_STRATEGIES)
 async def test_a_custom_strategy_is_five_lines(
     user_code: Callable[..., object], strategy: RoutingStrategy | RoutingCallable, reason: str
 ) -> None:
-    """REQ-R6-2: the "custom strategy" use case fits in five lines, as a function and as a
+    """The "custom strategy" use case fits in five lines, as a function and as a
     subclass, and decides the same on the sync and the async path."""
     assert len(inspect.getsource(user_code).splitlines()) <= 5
 
@@ -100,15 +100,15 @@ async def test_a_custom_strategy_is_five_lines(
 
 
 def test_a_strategy_instance_is_used_as_given() -> None:
-    """REQ-R6-2: only a plain function is wrapped; a `RoutingStrategy` passes through as is."""
+    """Only a plain function is wrapped; a `RoutingStrategy` passes through as is."""
     strategy = ClassifierStrategy()
 
     assert as_strategy(strategy) is strategy
 
 
 def test_a_function_returns_a_choice_a_route_name_or_none() -> None:
-    """REQ-R6-2: a plain function is coerced; a bare route name gets a reason written for it,
-    a `RoutingChoice` passes through unchanged, and `None` abstains (R9)."""
+    """A plain function is coerced; a bare route name gets a reason written for it,
+    a `RoutingChoice` passes through unchanged, and `None` abstains."""
     choice = RoutingChoice("coder", "mine")
     request = make_request()
 
@@ -120,8 +120,8 @@ def test_a_function_returns_a_choice_a_route_name_or_none() -> None:
 
 
 def test_a_function_that_returns_anything_else_fails_clearly() -> None:
-    """REQ-R6-2: an unusable return is a `TypeError` naming the function — which the router
-    reports like any other strategy failure (R9) rather than routing on it."""
+    """An unusable return is a `TypeError` naming the function — which the router
+    reports like any other strategy failure rather than routing on it."""
     strategy = as_strategy(lambda request: 42)  # type: ignore[arg-type,return-value]
 
     with pytest.raises(
@@ -133,7 +133,7 @@ def test_a_function_that_returns_anything_else_fails_clearly() -> None:
 
 @pytest.mark.parametrize("not_a_strategy", ["coder", 42])
 def test_what_is_neither_a_strategy_nor_a_function_is_rejected(not_a_strategy: object) -> None:
-    """REQ-R6-2: `strategy=` takes a strategy or a function, nothing else."""
+    """`strategy=` takes a strategy or a function, nothing else."""
     kind = type(not_a_strategy).__name__
 
     with pytest.raises(
@@ -143,7 +143,7 @@ def test_what_is_neither_a_strategy_nor_a_function_is_rejected(not_a_strategy: o
 
 
 def test_a_strategy_class_must_be_instantiated() -> None:
-    """REQ-R6-2: a class is callable, so without this check it would be called with each
+    """A class is callable, so without this check it would be called with each
     request and fail on every call instead of once, here."""
     with pytest.raises(TypeError, match=r"pass ClassifierStrategy\(\), not the class"):
         as_strategy(ClassifierStrategy)  # type: ignore[arg-type]
@@ -174,7 +174,7 @@ class AsyncClassifier:
     ids=["async-def", "partial", "async-call", "partial-async-call", "async-generator"],
 )
 def test_an_async_function_is_rejected_when_coerced(func: object) -> None:
-    """REQ-R6-2: `RoutingCallable` is synchronous. An async function fails at coercion — at the
+    """`RoutingCallable` is synchronous. An async function fails at coercion — at the
     router's construction — pointing at `adecide`, instead of on every sync call."""
     with pytest.raises(TypeError, match=r"subclass RoutingStrategy and override adecide instead$"):
         as_strategy(func)  # type: ignore[arg-type]
@@ -213,12 +213,12 @@ class Classifier:
 def test_a_strategy_is_named_after_its_class_or_function(
     strategy: RoutingStrategy | RoutingCallable, name: str
 ) -> None:
-    """REQ-R6-2, D8: the name the decision record and the strategy's run carry — a function's
+    """The name the decision record and the strategy's run carry — a function's
     own name, seen through `functools.partial`, rather than `partial` or `_CallableStrategy`."""
     assert strategy_name(as_strategy(strategy)) == name
 
 
-# Sync and async paths: `adecide`'s executor default (C2)
+# Sync and async paths: `adecide`'s executor default
 
 
 class BlockingStrategy(RoutingStrategy):
@@ -235,7 +235,7 @@ class BlockingStrategy(RoutingStrategy):
 
 
 async def test_adecide_runs_decide_off_the_event_loop() -> None:
-    """C2: the default `adecide` runs a blocking `decide` in a worker thread, so a task running
+    """The default `adecide` runs a blocking `decide` in a worker thread, so a task running
     alongside it on the loop is not blocked."""
     strategy = BlockingStrategy()
 
@@ -261,7 +261,7 @@ class ContextSpy(RoutingStrategy):
 
 
 async def test_adecide_carries_the_callers_context_into_decide() -> None:
-    """D9: the context the router sets around `adecide` — LangChain's config context
+    """The context the router sets around `adecide` — LangChain's config context
     (`set_config_context`) and any other context variable — reaches `decide`'s thread."""
     strategy = ContextSpy()
     config = RunnableConfig(tags=["strategy-run"])
@@ -274,7 +274,7 @@ async def test_adecide_carries_the_callers_context_into_decide() -> None:
 
 
 async def test_adecide_raises_what_decide_raises() -> None:
-    """R9: the executor hands `decide`'s own exception back, so the router can record why the
+    """The executor hands `decide`'s own exception back, so the router can record why the
     strategy failed."""
 
     class Broken(RoutingStrategy):
@@ -285,11 +285,11 @@ async def test_adecide_raises_what_decide_raises() -> None:
         await Broken().adecide(make_request())
 
 
-# REQ-R6-5 · the config a strategy's own calls must use
+# the config a strategy's own calls must use
 
 
 def test_config_takes_no_part_in_equality_or_repr() -> None:
-    """REQ-R6-5: two requests that differ only in `config` compare equal, and neither repr
+    """Two requests that differ only in `config` compare equal, and neither repr
     shows it — it identifies a run, not a request."""
     first = make_request(
         config=RunnableConfig(
@@ -306,7 +306,7 @@ def test_config_takes_no_part_in_equality_or_repr() -> None:
 
 
 def test_a_request_is_frozen_but_not_hashable() -> None:
-    """REQ-R6-5, decision: a request is frozen, but its list fields (as pinned) make it
+    """A request is frozen, but its list fields (as pinned) make it
     unhashable — said plainly, not by a generated hash failing on a list. A choice hashes."""
     request = make_request()
 
@@ -318,7 +318,7 @@ def test_a_request_is_frozen_but_not_hashable() -> None:
 
 
 class ModelBackedStrategy(RoutingStrategy):
-    """Asks a model, passing `request.config` on as the interface says to (D9)."""
+    """Asks a model, passing `request.config` on as the interface says to."""
 
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
@@ -330,7 +330,7 @@ class ModelBackedStrategy(RoutingStrategy):
 
 @pytest.mark.parametrize("path", ["decide", "adecide"])
 async def test_a_call_given_request_config_nests_under_the_strategy_run(path: str) -> None:
-    """REQ-R6-5: `config` is how a strategy's own model call joins the strategy's run (D9) —
+    """`config` is how a strategy's own model call joins the strategy's run —
     on the executor's async path too, with no context set around it (Python 3.10's case)."""
     collector = RunCollectorCallbackHandler()
     manager = CallbackManager.configure(inheritable_callbacks=[collector])
@@ -350,7 +350,7 @@ async def test_a_call_given_request_config_nests_under_the_strategy_run(path: st
     assert [run.parent_run_id for run in model_runs([root])] == [root.id]
 
 
-# REQ-R4-3 · wider context is an explicit opt-in
+# wider context is an explicit opt-in
 
 
 class FullContextStrategy(RoutingStrategy):
@@ -379,7 +379,7 @@ TRANSCRIPT: list[BaseMessage] = [
 def test_messages_only_for_a_strategy_that_opts_in(
     strategy: RoutingStrategy, messages: list[BaseMessage] | None
 ) -> None:
-    """REQ-R4-3: `messages` is `None` unless the strategy sets `wants_full_context = True`."""
+    """`messages` is `None` unless the strategy sets `wants_full_context = True`."""
     request = build_request(
         TRANSCRIPT,
         routes=ROUTES,
@@ -393,12 +393,12 @@ def test_messages_only_for_a_strategy_that_opts_in(
     assert request.messages == messages
 
 
-# REQ-R6-1 · one interface for all three levels; the built-ins use no private hooks
+# one interface for all three levels; the built-ins use no private hooks
 #
-# No built-in exists yet (T-130 to T-134), and "no private hooks" can't be checked by running
-# one. It is approximated from both sides: the interface has nothing private to hook into, a
-# built-in imports nothing from the package core that a custom strategy can't, and the core
-# never names a built-in — so it can only reach one through `RoutingStrategy`.
+# "No private hooks" can't be checked by running a strategy. It is approximated from both sides: the
+# interface has nothing private to hook into, a built-in imports nothing from the package core that
+# a custom strategy can't, and the core never names a built-in — so it can only reach one through
+# `RoutingStrategy`.
 
 
 def _is_strategy_subclass(value: object) -> TypeGuard[type[RoutingStrategy]]:
@@ -433,7 +433,7 @@ def _published_strategies() -> list[type[RoutingStrategy]]:
 
 BUILTINS = [pytest.param(cls, id=cls.__name__) for cls in _published_strategies()] or [
     pytest.param(
-        None, id="none-yet", marks=pytest.mark.skip(reason="no built-in yet: T-130 to T-134")
+        None, id="none-yet", marks=pytest.mark.skip(reason="no built-in strategy is published")
     )
 ]
 
@@ -484,7 +484,7 @@ def _identifiers(source: str) -> set[str]:
 
 
 def test_the_interface_has_no_private_hooks() -> None:
-    """REQ-R6-1: `RoutingStrategy` is `decide`, `adecide` and `wants_full_context` — nothing
+    """`RoutingStrategy` is `decide`, `adecide` and `wants_full_context` — nothing
     hidden for a built-in to hook into that a custom strategy can't see."""
     members = {
         name
@@ -496,7 +496,7 @@ def test_the_interface_has_no_private_hooks() -> None:
 
 
 def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
-    """REQ-R6-1, D6: the fields, and their order, that docs/v1-requirements.md pins under
+    """The fields, and their order, that docs/v1-requirements.md pins under
     *Public API* — what the stability promise is a promise about."""
     assert [f.name for f in fields(RoutingRequest)] == [
         "text",
@@ -512,7 +512,7 @@ def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
 
 @pytest.mark.parametrize("cls", BUILTINS)
 def test_a_builtin_is_a_public_strategy_like_any_other(cls: type[RoutingStrategy]) -> None:
-    """REQ-R6-1: every built-in is a concrete `RoutingStrategy`, exported from the package, and
+    """Every built-in is a concrete `RoutingStrategy`, exported from the package, and
     imports from the package core only what the package offers anyone."""
     source = Path(inspect.getfile(cls)).read_text(encoding="utf-8")
 
@@ -525,7 +525,7 @@ def test_a_builtin_is_a_public_strategy_like_any_other(cls: type[RoutingStrategy
 
 @pytest.mark.parametrize("cls", BUILTINS)
 def test_the_core_never_names_a_builtin(cls: type[RoutingStrategy]) -> None:
-    """REQ-R6-1: no module outside `strategies/` (bar the package's re-exports) refers to a
+    """No module outside `strategies/` (bar the package's re-exports) refers to a
     built-in, so the router can only reach it through the `RoutingStrategy` interface."""
     core = Path(langchain_llm_router.__file__).parent
 
@@ -540,7 +540,7 @@ def test_the_core_never_names_a_builtin(cls: type[RoutingStrategy]) -> None:
 
 
 def test_the_builtin_checks_catch_what_they_look_for() -> None:
-    """REQ-R6-1: the two source checks above are not vacuous while no built-in exists — a
+    """The two source checks above are not vacuous while no built-in exists — a
     private name or module is caught, an exported name or a public module is not."""
     source = (
         "from langchain_llm_router import RoutingChoice, RoutingStrategy\n"

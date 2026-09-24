@@ -1,8 +1,8 @@
-"""T-110: R9 — the router always decides.
+"""The router always decides.
 
 Whenever the strategy can't: the default route answers, one `FallbackWarning` fires, and the
 record says it fell back and why. A *route's* failure is not the strategy's and is never
-absorbed (REQ-R9-3, REQ-C6-1 — T-118's to cover in full).
+absorbed (covered in `test_errors.py`).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from tests.fakes import FakeChatModel, call_log
 
 
 class Abstains(RoutingStrategy):
-    """A strategy with no opinion on this request (D6: `None` means "can't decide")."""
+    """A strategy with no opinion on this request (`None` means "can't decide")."""
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         return None
@@ -130,7 +130,7 @@ def routing_warnings(
 async def test_a_strategy_that_cannot_decide_falls_back_to_the_default_route(
     strategy: RoutingStrategy, cause: str, convention: Convention
 ) -> None:
-    """REQ-R9-2: abstaining, raising, naming an unknown route or returning something that
+    """Abstaining, raising, naming an unknown route or returning something that
     isn't a choice — each takes the default route, warns exactly once, and is recorded as a
     fallback with a reason naming the cause."""
     router, routes = router_with(strategy)
@@ -155,7 +155,7 @@ async def test_a_strategy_that_cannot_decide_falls_back_to_the_default_route(
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_the_fallback_warning_points_at_the_caller(convention: Convention) -> None:
-    """R9: the warning is for the application to act on, so it names the line that called the
+    """The warning is for the application to act on, so it names the line that called the
     router rather than a frame inside it."""
     router, _ = router_with(Abstains())
 
@@ -175,7 +175,7 @@ async def test_the_fallback_warning_points_at_the_caller(convention: Convention)
 async def test_the_strategy_run_records_the_fallback_it_led_to(
     strategy: RoutingStrategy, cause: str
 ) -> None:
-    """D9, R2: the strategy's run is where a trace shows what it decided — including that it
+    """The strategy's run is where a trace shows what it decided — including that it
     couldn't, and what the router did instead."""
     router, _ = router_with(strategy)
     collector = RunCollectorCallbackHandler()
@@ -198,7 +198,7 @@ async def test_the_strategy_run_records_the_fallback_it_led_to(
 async def test_a_strategy_that_raises_ends_its_own_run_with_the_error(
     convention: Convention,
 ) -> None:
-    """D9: the strategy's failure closes the strategy's run — where its traceback stays for
+    """The strategy's failure closes the strategy's run — where its traceback stays for
     whoever debugs it — while the router's run and the route's call complete normally."""
     router, _ = router_with(Raises())
     collector = RunCollectorCallbackHandler()
@@ -215,8 +215,8 @@ async def test_a_strategy_that_raises_ends_its_own_run_with_the_error(
 
 
 async def test_a_request_with_no_user_message_never_reaches_the_strategy() -> None:
-    """R9, and the router's side of REQ-R4-4: with no user message there is nothing to decide
-    on, so the strategy is not consulted — no strategy run — and the default route answers
+    """The fallback, and the router's side of extraction: with no user message there is nothing to
+    decide on, so the strategy is not consulted — no strategy run — and the default route answers
     with one warning and the reason recorded."""
     strategy = Counting()
     router, routes = router_with(strategy)
@@ -244,9 +244,9 @@ async def test_a_request_with_no_user_message_never_reaches_the_strategy() -> No
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_a_route_s_failure_is_never_absorbed(convention: Convention) -> None:
-    """R9's boundary (REQ-R9-3, REQ-C6-1): only a strategy's failure falls back. The selected
+    """The fallback's boundary: only a strategy's failure falls back. The selected
     route's exception reaches the caller as itself, no other route is tried, nothing warns,
-    and the router's run closes as an error (REQ-C6-3)."""
+    and the router's run closes as an error."""
     cheap = FakeChatModel(reply="cheap answer")
     router = ChatRouter(
         routes={"frontier": FailingChatModel(), "cheap": cheap},

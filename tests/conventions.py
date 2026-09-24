@@ -1,13 +1,13 @@
-"""Call a chat model through each entry point the router overrides (C2, D9).
+"""Call a chat model through each entry point the router overrides.
 
 Offline tests parametrise over `CONVENTIONS` to check that every entry point runs the same
 pipeline — one decision step, one route call, one record. `ALL_CONVENTIONS` adds the ones that
 do not take a `RunnableConfig` whole, or that a chat model gets from somewhere else:
 
 - `batch` and `abatch` call `invoke` / `ainvoke`, and `astream_events` is built on `astream` —
-  all three from `Runnable` (REQ-C2-1);
+  all three from `Runnable`;
 - `generate` and `agenerate` are `BaseChatModel`'s own, and take a config's `callbacks`, `tags`,
-  `metadata`, `run_name` and `run_id` as separate arguments (REQ-C2-2). So they cannot carry
+  `metadata`, `run_name` and `run_id` as separate arguments. So they cannot carry
   `configurable`, and `respond` refuses a config that has one rather than drop it.
 """
 
@@ -29,12 +29,12 @@ from langchain_core.prompt_values import PromptValue
 from langchain_core.runnables import Runnable, RunnableConfig
 
 Convention: TypeAlias = Literal["invoke", "ainvoke", "stream", "astream"]
-"""An entry point the router overrides itself that takes a `RunnableConfig` whole (D9)."""
+"""An entry point the router overrides itself that takes a `RunnableConfig` whole."""
 
 AnyConvention: TypeAlias = Literal[
     "invoke", "ainvoke", "stream", "astream", "batch", "abatch", "events", "generate", "agenerate"
 ]
-"""Any calling convention REQ-C2-1 and REQ-C2-2 name, including the ones built on the above."""
+"""Every calling convention a chat model supports, including the ones built on the above."""
 
 CONVENTIONS: tuple[Convention, ...] = ("invoke", "ainvoke", "stream", "astream")
 

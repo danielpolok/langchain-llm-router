@@ -1,10 +1,10 @@
-"""T-130: the keyword strategy — REQ-R6-1 and REQ-R7-1.
+"""The keyword strategy: only the public surface, and no extra calls.
 
 The rules themselves are checked on the strategy alone; that it is an ordinary strategy, and
-that "no match" is the router's fallback rather than the strategy's business (R9), is checked
+that "no match" is the router's fallback rather than the strategy's business, is checked
 through `ChatRouter`.
 
-Every test in this module runs under `model_calls`, the counter REQ-R7-1 asks for: it is
+Every test in this module runs under `model_calls`, the no-extra-calls counter: it is
 installed as a LangChain configure hook, so it sees any LLM run started anywhere — including one
 a strategy made without passing `request.config`. A test that legitimately calls a route says so
 with `expect(...)`; every other test must end with no model call at all.
@@ -49,7 +49,7 @@ def one_line_setup() -> KeywordStrategy:
 
 
 def request_for(text: str, *, routes: tuple[str, ...] = ROUTES) -> RoutingRequest:
-    """The current request as the router hands it to a strategy (R4)."""
+    """The current request as the router hands it to a strategy."""
     return RoutingRequest(
         text=text,
         content_blocks=HumanMessage(text).content_blocks,
@@ -77,11 +77,11 @@ def routing_warnings(caught: list[warnings.WarningMessage]) -> list[warnings.War
     return [warning for warning in caught if issubclass(warning.category, RoutingWarning)]
 
 
-# REQ-R7-1 · the counter every test in this module runs under
+# the counter every test in this module runs under
 
 
 class ModelCalls(BaseCallbackHandler):
-    """Every model run started while this handler is installed (REQ-R7-1's counter)."""
+    """Every model run started while this handler is installed (the no-extra-calls counter)."""
 
     def __init__(self) -> None:
         self.started: list[str] = []
@@ -111,7 +111,7 @@ _model_calls: ContextVar[ModelCalls | None] = ContextVar("keyword_model_calls", 
 # a call made with no config at all is still counted. Registering it is a no-op while the
 # context variable is unset, which it is outside this module — but the registry is global and
 # per-process: it holds this entry for the rest of the session, and every strategy suite that
-# registers one of its own (T-131 does) adds another. Inert, not free.
+# registers one of its own (the heuristic strategy does) adds another. Inert, not free.
 register_configure_hook(_model_calls, inheritable=True)
 
 
@@ -128,7 +128,7 @@ def counting() -> Iterator[ModelCalls]:
 
 @pytest.fixture(autouse=True)
 def model_calls() -> Iterator[ModelCalls]:
-    """REQ-R7-1: no test here can pass by not looking — the calls it made are asserted for it."""
+    """No test here can pass by not looking — the calls it made are asserted for it."""
     with counting() as calls:
         yield calls
         assert calls.started == calls.expected
@@ -142,7 +142,7 @@ def _refuse(*args: object, **kwargs: object) -> NoReturn:
 async def test_the_strategy_makes_no_model_or_network_call(
     model_calls: ModelCalls, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """REQ-R7-1: deciding starts no LLM run and opens no socket — on a match, on a miss, on the
+    """Deciding starts no LLM run and opens no socket — on a match, on a miss, on the
     async path and on a rule set that fails. The socket guard is what covers an embeddings or
     HTTP call, which LangChain's callbacks would not report at all.
 
@@ -168,8 +168,8 @@ async def test_the_strategy_makes_no_model_or_network_call(
 
 
 def test_a_one_line_setup_sends_a_code_request_to_the_code_route() -> None:
-    """REQ-R6-1, §4: the fast start is the rules and nothing else — one line of user code, no
-    other configuration, and a reason naming the keyword that decided it (R2)."""
+    """The fast start is the rules and nothing else — one line of user code, no
+    other configuration, and a reason naming the keyword that decided it."""
     setup = inspect.getsource(one_line_setup).splitlines()[1:]
 
     assert len(setup) == 1
@@ -246,7 +246,7 @@ def test_a_pattern_is_the_way_past_whole_word_matching() -> None:
     """A keyword is literal on purpose; anything cleverer is the caller's pattern to write.
 
     The reason keeps the pattern as its author wrote it, flags included: `repr` would double
-    every backslash and drop `re.IGNORECASE`, which is half of what the rule means (R2).
+    every backslash and drop `re.IGNORECASE`, which is half of what the rule means.
     """
     strategy = KeywordStrategy({"coder": [re.compile(r"regexe?s?", re.IGNORECASE)]})
 
@@ -283,7 +283,7 @@ def test_a_single_keyword_need_not_be_a_list() -> None:
 
 
 async def test_the_async_path_decides_the_same() -> None:
-    """C2: `adecide` is the interface's default — `decide` in a worker thread, which is safe
+    """`adecide` is the interface's default — `decide` in a worker thread, which is safe
     because a strategy's compiled rules never change after construction."""
     strategy = one_line_setup()
     request = request_for("a python question")
@@ -292,11 +292,11 @@ async def test_the_async_path_decides_the_same() -> None:
     assert await strategy.adecide(request_for("nothing here")) is None
 
 
-# "Can't decide" (R9) and what is checked when
+# "Can't decide" and what is checked when
 
 
 def test_nothing_matched_is_no_decision_and_no_warning() -> None:
-    """R9: `None` means "can't decide", and the fallback with its warning is the router's —
+    """`None` means "can't decide", and the fallback with its warning is the router's —
     a strategy that warned too would double every notice the application sees."""
     strategy = one_line_setup()
 
@@ -309,8 +309,8 @@ def test_nothing_matched_is_no_decision_and_no_warning() -> None:
 
 
 def test_a_request_with_no_text_matches_nothing() -> None:
-    """R4, C7: an image on its own carries no words, so the strategy abstains and the default
-    route answers (R9) — which is why `modalities` takes no part in the rules."""
+    """An image on its own carries no words, so the strategy abstains and the default
+    route answers — which is why `modalities` takes no part in the rules."""
     image = HumanMessage(content=[{"type": "image", "url": "https://example.com/cat.png"}])
     request = RoutingRequest(
         text="",
@@ -326,7 +326,7 @@ def test_a_request_with_no_text_matches_nothing() -> None:
 def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
     """A typo costs the requests its own rule would have taken, and nothing else: matching
     comes before any check of the router's names, so the working rules keep working and only
-    the mistyped one ends in a fallback (R9). Validating up front would send every request to
+    the mistyped one ends in a fallback. Validating up front would send every request to
     the default route over one bad key."""
     strategy = KeywordStrategy({"coder": ["python"], "frontir": ["prove"], "small": ["hello"]})
 
@@ -342,7 +342,7 @@ def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
 def test_rules_that_name_no_route_the_router_has_raise_on_the_first_request() -> None:
     """The one case that can never decide anything: not a rule to fall back from, a rule set
     with no answer to give. A strategy is built before the router, so `request.routes` is its
-    first sight of the real names — it says so there, and the router records it (R9)."""
+    first sight of the real names — it says so there, and the router records it."""
     strategy = KeywordStrategy({"codr": ["python"], "frontir": ["prove"]})
 
     with pytest.raises(
@@ -414,14 +414,14 @@ def test_a_rule_set_that_could_never_decide_fails_at_construction(rules: Any, me
         KeywordStrategy(rules)
 
 
-# Through the router: a built-in is an ordinary strategy (REQ-R6-1)
+# Through the router: a built-in is an ordinary strategy
 
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_the_router_takes_the_route_the_matching_rule_names(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """REQ-R6-1, R2: the router runs a built-in like any other strategy — the rule's route
+    """The router runs a built-in like any other strategy — the rule's route
     answers, no other route is called, nothing warns, and the record names the rule."""
     model_calls.expect("FakeChatModel")
     router, routes = keyword_router()
@@ -442,7 +442,7 @@ async def test_the_router_takes_the_route_the_matching_rule_names(
 async def test_no_matching_rule_takes_the_default_route(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """R9: "can't decide" reaches the caller as the router's own fallback — the default route
+    """ "can't decide" reaches the caller as the router's own fallback — the default route
     answers, exactly one `FallbackWarning` fires, and the record says who couldn't decide."""
     model_calls.expect("FakeChatModel")
     router, routes = keyword_router()
@@ -469,7 +469,7 @@ async def test_no_matching_rule_takes_the_default_route(
 async def test_a_phantom_route_reaches_the_caller_as_a_fallback(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """R9, R2: the router is what reports a route that doesn't exist, and it does it precisely.
+    """The router is what reports a route that doesn't exist, and it does it precisely.
     The mistyped rule's own requests fall back with the cause on the record; the requests the
     other rules take are untouched, which is the point of matching first."""
     model_calls.expect("FakeChatModel")
@@ -504,7 +504,7 @@ async def test_a_phantom_route_reaches_the_caller_as_a_fallback(
 def test_rules_naming_no_route_at_all_reach_the_caller_as_a_fallback(
     model_calls: ModelCalls,
 ) -> None:
-    """R9, R2: the loud case, end to end — a rule set that can never decide says so on the
+    """The loud case, end to end — a rule set that can never decide says so on the
     first request, with the cause and both name lists on the record for whoever fixes it."""
     model_calls.expect("FakeChatModel")
     routes: dict[str, BaseChatModel] = {"coder": FakeChatModel(), "small": FakeChatModel()}

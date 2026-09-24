@@ -1,15 +1,16 @@
-"""T-133: the opt-in embedding-similarity strategy — REQ-R7-2 and REQ-R3-2.
+"""The opt-in embedding-similarity strategy: required arguments, tracing and cost, fallback.
 
 Three threads:
 
-- **REQ-R7-2** — construction takes the embeddings instance and the threshold as required
+- **Required arguments** — construction takes the embeddings instance and the threshold as required
   arguments, with no default for either (the module docstring explains why the threshold gets
   the same treatment as the embeddings instance): `test_construction_requires_*`.
-- **Tracing (D9, REQ-R3-2)** — every per-request `embed_query`/`aembed_query` call opens its own
+- **Tracing** — every per-request `embed_query`/`aembed_query` call opens its own
   child run of the strategy's, recording the input length and a cost *estimate* (`Embeddings`
   reports no usage): `test_each_per_request_embedding_call_is_a_child_run_of_the_strategy_run`
   and its neighbours.
-- **R9** — an embedding failure, an abstain (nothing clears the threshold, or nothing to embed),
+- **Fallback** — an embedding failure, an abstain (nothing clears the threshold, or nothing to
+embed),
   and a route the router doesn't have all end the same way a built-in strategy's always have:
   the default route, one `FallbackWarning`, the cause recorded.
 
@@ -60,7 +61,7 @@ ROUTES = ("coder", "support")
 def make_request(
     text: str, *, routes: tuple[str, ...] = ROUTES, config: RunnableConfig | None = None
 ) -> RoutingRequest:
-    """The request the router would build from a one-turn conversation (R4)."""
+    """The request the router would build from a one-turn conversation."""
     request = build_request(
         [HumanMessage(text)],
         routes=routes,
@@ -132,11 +133,11 @@ class FailingEmbeddings(Embeddings):
         raise FAILURE
 
 
-# --- REQ-R7-2: construction requires the embeddings instance, and a threshold, no defaults ---
+# --- construction requires the embeddings instance, and a threshold, no defaults ---
 
 
 def test_construction_requires_the_embeddings_instance() -> None:
-    """REQ-R7-2: no default — this strategy can never be enabled by accident."""
+    """No default — this strategy can never be enabled by accident."""
     with pytest.raises(TypeError):
         EmbeddingStrategy()  # type: ignore[call-arg]
 
@@ -147,8 +148,9 @@ def test_construction_requires_examples_too() -> None:
 
 
 def test_construction_requires_a_threshold_with_no_default() -> None:
-    """The module doc's own extension of REQ-R7-2: no similarity score means the same thing
-    across every embedding provider, so `threshold` is required like the embeddings instance."""
+    """The module doc's own extension of the no-defaults rule: no similarity score means the same
+    thing across every embedding provider, so `threshold` is required like the embeddings
+    instance."""
     with pytest.raises(TypeError):
         EmbeddingStrategy(DeterministicFakeEmbedding(size=8), EXAMPLES)  # type: ignore[call-arg]
 
@@ -246,7 +248,7 @@ def test_a_route_s_score_is_the_best_of_its_examples_not_diluted_by_the_others()
 
 
 def test_a_score_that_clears_no_threshold_abstains() -> None:
-    """R9: 1.0 is the ceiling of cosine similarity, so a threshold just above it can never be
+    """1.0 is the ceiling of cosine similarity, so a threshold just above it can never be
     cleared -- the strategy abstains and the router falls back to the default route."""
     strategy = EmbeddingStrategy(DeterministicFakeEmbedding(size=32), EXAMPLES, threshold=1.01)
 
@@ -254,7 +256,7 @@ def test_a_score_that_clears_no_threshold_abstains() -> None:
 
 
 def test_an_empty_request_abstains_without_embedding_anything() -> None:
-    """R9: nothing to embed -- the same reasoning `HeuristicStrategy` uses for nothing to score
+    """Nothing to embed -- the same reasoning `HeuristicStrategy` uses for nothing to score
     -- checked before any embedding call, sync or async, is made."""
     embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=8))
     strategy = EmbeddingStrategy(embeddings, EXAMPLES, threshold=0.5)
@@ -264,12 +266,13 @@ def test_an_empty_request_abstains_without_embedding_anything() -> None:
     assert (embeddings.document_calls, embeddings.query_calls) == (0, 0)
 
 
-# --- A route examples names that the router doesn't have (R9, KeywordStrategy's precedent) ---
+# --- A route examples names that the router doesn't have (the fallback path, `KeywordStrategy`'s
+# precedent) ---
 
 
 def test_a_route_named_in_examples_but_not_the_router_s_is_returned_anyway() -> None:
     """Matching happens regardless of what the router has -- the router reports a mismatch far
-    better than this strategy could (R9), the same precedent `KeywordStrategy` sets."""
+    better than this strategy could, the same precedent `KeywordStrategy` sets."""
     strategy = EmbeddingStrategy(DeterministicFakeEmbedding(size=8), EXAMPLES, threshold=0.99)
 
     choice = strategy.decide(make_request("reset my password", routes=("coder", "billing")))
@@ -374,7 +377,7 @@ async def test_mixing_sync_and_async_still_embeds_the_routes_only_once() -> None
     assert (embeddings.query_calls, embeddings.aquery_calls) == (1, 2)
 
 
-# --- Each per-request embedding call is its own child run of the strategy run (D9) ---
+# --- Each per-request embedding call is its own child run of the strategy run ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
@@ -382,7 +385,7 @@ async def test_each_per_request_embedding_call_is_a_child_run_of_the_strategy_ru
     convention: Convention,
 ) -> None:
     """The acceptance criterion, sync and async: router run -> strategy run -> one 'embed_query'
-    chain run holding the input length and a cost *estimate* (REQ-R3-2); the route's own call
+    chain run holding the input length and a cost *estimate*; the route's own call
     stays where it always is, directly under the router run, untouched."""
     text = "fix this stack trace"
     strategy = EmbeddingStrategy(DeterministicFakeEmbedding(size=16), EXAMPLES, threshold=-1.0)
@@ -424,12 +427,12 @@ async def test_the_route_example_embedding_is_not_traced_as_a_run_of_its_own() -
     assert [run.name for run in strategy_run.child_runs] == ["embed_query"]
 
 
-# --- Embedding failure falls back to the default route (R9) ---
+# --- Embedding failure falls back to the default route ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_an_embedding_failure_falls_back_to_the_default_route(convention: Convention) -> None:
-    """R9: the strategy does not catch the `Embeddings` call's exception (module doc) -- the
+    """The strategy does not catch the `Embeddings` call's exception (module doc) -- the
     router's own machinery turns it into the default route and one `FallbackWarning`."""
     strategy = EmbeddingStrategy(
         FailingEmbeddings(DeterministicFakeEmbedding(size=8)), EXAMPLES, threshold=0.5
@@ -458,9 +461,9 @@ async def test_an_embedding_failure_falls_back_to_the_default_route(convention: 
 
 
 def test_the_failed_embed_run_carries_the_error_and_the_route_still_answers() -> None:
-    """D9: the embedding run closes as an error too, not only the strategy run around it -- the
+    """The embedding run closes as an error too, not only the strategy run around it -- the
     traceback for whoever debugs a failed embedding call stays on the call that failed -- while
-    the router's own run and the route's call complete normally (C6)."""
+    the router's own run and the route's call complete normally."""
     strategy = EmbeddingStrategy(
         FailingEmbeddings(DeterministicFakeEmbedding(size=8)), EXAMPLES, threshold=0.5
     )
@@ -479,11 +482,11 @@ def test_the_failed_embed_run_carries_the_error_and_the_route_still_answers() ->
     assert (router_run.error, route_run.error) == (None, None)
 
 
-# --- REQ-R6-1: the built-in is exercised only through the public interface ---
+# --- the built-in is exercised only through the public interface ---
 
 
 async def test_through_the_router_an_embedding_strategy_is_an_ordinary_strategy() -> None:
-    """REQ-R6-1: nothing about running it through `ChatRouter` is special-cased.
+    """Nothing about running it through `ChatRouter` is special-cased.
 
     `DeterministicFakeEmbedding`'s vectors carry no real semantics -- two different strings
     embed unrelated to each other, however similar they read -- so the request repeats a

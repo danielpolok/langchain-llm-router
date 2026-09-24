@@ -1,4 +1,4 @@
-"""REQ-C8-2 and the T-150 acceptance criterion: every documented example runs in CI, offline.
+"""Every documented example runs in CI, offline.
 
 Each script in `examples/` is run the way its own docstring tells a reader to run it —
 `python examples/<name>.py`, from the repository root — and must exit zero. None of them needs a

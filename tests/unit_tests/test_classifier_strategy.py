@@ -1,11 +1,12 @@
-"""T-134: the opt-in small-LLM classifier strategy — REQ-R7-2 and REQ-R3-2.
+"""The opt-in small-LLM classifier strategy: required arguments, tracing and cost, fallback.
 
-Three threads, the same shape T-133's `test_embedding_strategy.py` uses for the sibling opt-in
+Three threads, the same shape `test_embedding_strategy.py` uses for the sibling opt-in
 strategy:
 
-- **REQ-R7-2** — construction takes the classifier model and the route descriptions as required
+- **Required arguments** — construction takes the classifier model and the route descriptions as
+required
   arguments, with no default for either: `test_construction_requires_*`.
-- **Tracing (D9, REQ-R3-2)** — every per-request classifier call is a real `BaseChatModel` call
+- **Tracing** — every per-request classifier call is a real `BaseChatModel` call
   made with `request.config`, so it is traced and costed *for free* by LangChain's own callback
   machinery, unlike `EmbeddingStrategy`'s manual run-opening for `Embeddings`. The classifier
   strategy module docstring explains why passing `request.config` (which `ClassifierStrategy`
@@ -14,7 +15,7 @@ strategy:
   probe rather than a hard Python-version check, by
   `tests/unit_tests/test_tracing.py::test_a_model_the_strategy_calls_nests_under_the_strategy_s_run`
   — this module does not repeat that proof, only the classifier-specific shape and cost.
-- **R9** — an empty request, a classifier answer that doesn't parse (an unknown route, or no
+- **Fallback** — an empty request, a classifier answer that doesn't parse (an unknown route, or no
   tool call at all), and a genuine call failure all end the same way a built-in strategy's
   always have: the default route, one `FallbackWarning`, the cause recorded — but by two
   different code paths (`decide`/`adecide` turning a bad-but-successful answer into `None`,
@@ -64,7 +65,7 @@ ROUTES = ("coder", "support")
 def make_request(
     text: str, *, routes: tuple[str, ...] = ROUTES, config: RunnableConfig | None = None
 ) -> RoutingRequest:
-    """The request the router would build from a one-turn conversation (R4)."""
+    """The request the router would build from a one-turn conversation."""
     request = build_request(
         [HumanMessage(text)],
         routes=routes,
@@ -97,11 +98,11 @@ def routing_warnings(caught: list[warnings.WarningMessage]) -> list[warnings.War
     return [warning for warning in caught if issubclass(warning.category, RoutingWarning)]
 
 
-# --- REQ-R7-2: construction requires the model and route_descriptions, no defaults ---
+# --- construction requires the model and route_descriptions, no defaults ---
 
 
 def test_construction_requires_the_model() -> None:
-    """REQ-R7-2: no default -- this strategy can never be enabled by accident."""
+    """No default -- this strategy can never be enabled by accident."""
     with pytest.raises(TypeError):
         ClassifierStrategy()  # type: ignore[call-arg]
 
@@ -175,7 +176,7 @@ async def test_a_valid_classification_decides_async_too() -> None:
 
 
 def test_an_unknown_route_in_the_answer_abstains_not_raises() -> None:
-    """R9: the model's tool call names something outside the `Literal` -- a successful call, a
+    """The model's tool call names something outside the `Literal` -- a successful call, a
     bad answer -- so `with_structured_output(..., include_raw=True)` reports `parsed=None`
     rather than raising, and `decide` reads that as an abstain."""
     model = NativeStructuredFakeChatModel(
@@ -196,7 +197,7 @@ def test_no_tool_call_at_all_abstains_not_raises() -> None:
 
 
 def test_an_empty_request_abstains_without_calling_the_classifier() -> None:
-    """R9: nothing to classify -- checked before any call is made, sync or async."""
+    """Nothing to classify -- checked before any call is made, sync or async."""
     model = classifier_answering("coder")
     strategy = ClassifierStrategy(model, ROUTE_DESCRIPTIONS)
 
@@ -261,14 +262,14 @@ async def test_through_the_router_that_unroutable_mapping_becomes_a_fallback_too
     )
 
 
-# --- A genuine call failure propagates and falls back through the router (R9) ---
+# --- A genuine call failure propagates and falls back through the router ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_a_classifier_call_failure_falls_back_to_the_default_route(
     convention: Convention,
 ) -> None:
-    """R9: the strategy does not catch the classifier call's exception (module doc) -- the
+    """The strategy does not catch the classifier call's exception (module doc) -- the
     router's own machinery turns it into the default route and one `FallbackWarning`."""
     model = FailingChatModel(
         model_name="model-classifier", error_type=ConnectionError, error_message="down"
@@ -299,7 +300,7 @@ async def test_a_classifier_call_failure_falls_back_to_the_default_route(
 def test_a_classifier_model_with_no_structured_output_support_falls_back_too() -> None:
     """The documented limitation (module doc): a classifier model that never implements
     `bind_tools` raises `NotImplementedError` from `with_structured_output`, which is not
-    special-cased -- it propagates like any other call failure and falls back (R9)."""
+    special-cased -- it propagates like any other call failure and falls back."""
     model = FakeChatModel(model_name="model-classifier")  # no bind_tools override
     strategy = ClassifierStrategy(model, ROUTE_DESCRIPTIONS)
     router = ChatRouter(routes=fake_routes(), default_route="support", strategy=strategy)
@@ -315,8 +316,8 @@ def test_a_classifier_model_with_no_structured_output_support_falls_back_too() -
 
 
 def test_the_failed_call_carries_the_error_and_the_route_still_answers() -> None:
-    """D9: the classifier's own run closes as an error too, not only the strategy run around it,
-    while the router's run and the route's call complete normally (C6)."""
+    """The classifier's own run closes as an error too, not only the strategy run around it,
+    while the router's run and the route's call complete normally."""
     model = FailingChatModel(model_name="model-classifier")
     strategy = ClassifierStrategy(model, ROUTE_DESCRIPTIONS)
     router = ChatRouter(routes=fake_routes(), default_route="support", strategy=strategy)
@@ -334,7 +335,7 @@ def test_the_failed_call_carries_the_error_and_the_route_still_answers() -> None
     assert (router_run.error, route_run.error) == (None, None)
 
 
-# --- The classifier call is its own child run of the strategy run, costed separately (D9, R3) ---
+# --- The classifier call is its own child run of the strategy run, costed separately ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
@@ -344,7 +345,7 @@ async def test_the_classifier_call_nests_under_the_strategy_run_and_is_costed_se
     """The acceptance criterion: router run -> strategy run -> the classifier's own chat-model
     run (a descendant, however many `Runnable` steps `with_structured_output` composes) -> and
     the route's call stays where it always is, directly under the router run, untouched. Both
-    model runs carry their own `usage_metadata`, so nothing is billed twice (R3).
+    model runs carry their own `usage_metadata`, so nothing is billed twice.
 
     `ClassifierStrategy` always passes `request.config` (module doc), so this nests identically
     whether or not the running Python's `asyncio` hands a coroutine its caller's context --
@@ -386,11 +387,11 @@ async def test_the_classifier_call_nests_under_the_strategy_run_and_is_costed_se
     assert starts.llms == []
 
 
-# --- REQ-R6-1: the built-in is exercised only through the public interface ---
+# --- the built-in is exercised only through the public interface ---
 
 
 async def test_through_the_router_a_classifier_strategy_is_an_ordinary_strategy() -> None:
-    """REQ-R6-1: nothing about running it through `ChatRouter` is special-cased."""
+    """Nothing about running it through `ChatRouter` is special-cased."""
     strategy = ClassifierStrategy(classifier_answering("coder"), ROUTE_DESCRIPTIONS)
     router = ChatRouter(routes=fake_routes(), default_route="support", strategy=strategy)
 

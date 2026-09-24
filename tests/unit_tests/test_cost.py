@@ -1,4 +1,4 @@
-"""T-117: cost is counted once, and to the model that ran (R3).
+"""Cost is counted once, and to the model that ran.
 
 Two things read a trace as a bill. `UsageMetadataCallbackHandler` (through
 `get_usage_metadata_callback`) adds up the `usage_metadata` of every chat-model run that ends,
@@ -69,14 +69,14 @@ def times(usage: UsageMetadata, count: int) -> UsageMetadata:
     )
 
 
-# --- The handler's totals are the routes' own (REQ-R3-1) ---
+# --- The handler's totals are the routes' own ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_the_usage_totals_equal_what_the_route_reports_when_called_directly(
     convention: AnyConvention,
 ) -> None:
-    """REQ-R3-1: `UsageMetadataCallbackHandler` reports, for a call through the router, exactly
+    """`UsageMetadataCallbackHandler` reports, for a call through the router, exactly
     what it reports for the same route called on its own — one model, counted once, under the
     name of the model that ran and not the router's."""
     router = ChatRouter(routes=priced_routes(), default_route="cheap", strategy=ByText())
@@ -93,7 +93,7 @@ async def test_the_usage_totals_equal_what_the_route_reports_when_called_directl
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke", "stream", "batch", "generate"])
 async def test_the_usage_totals_are_kept_per_model_across_calls(convention: AnyConvention) -> None:
-    """REQ-R3-1: calls that go to different routes add up under each route's own model name —
+    """Calls that go to different routes add up under each route's own model name —
     two to the cheap model and one to the frontier model are 2x and 1x, not 3x of either."""
     routes = priced_routes()
     router = ChatRouter(routes=routes, default_route="cheap", strategy=ByText())
@@ -107,7 +107,7 @@ async def test_the_usage_totals_are_kept_per_model_across_calls(convention: AnyC
 
 
 async def test_one_generate_over_several_prompts_is_counted_per_prompt() -> None:
-    """REQ-R3-1: `generate` over three prompts — the one call that is many routed requests — is
+    """`generate` over three prompts — the one call that is many routed requests — is
     counted three times, each under the model its own prompt was routed to."""
     router = ChatRouter(routes=priced_routes(), default_route="cheap", strategy=ByText())
 
@@ -118,14 +118,14 @@ async def test_one_generate_over_several_prompts_is_counted_per_prompt() -> None
     assert len(result.generations) == 3
 
 
-# --- The router's own run is never a charge (REQ-R3-1, C5) ---
+# --- The router's own run is never a charge ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_the_trace_holds_exactly_one_charge_and_it_is_the_route_s(
     convention: AnyConvention,
 ) -> None:
-    """REQ-R3-1, C5: what LangSmith would price is one line, for the model that ran. The router's
+    """What LangSmith would price is one line, for the model that ran. The router's
     own run and the strategy's are chain runs that carry no usage and no model identity — the
     two things that would turn either into a second charge for the same tokens."""
     router = ChatRouter(routes=priced_routes(), default_route="cheap", strategy=ByText())
@@ -150,7 +150,7 @@ async def test_the_trace_holds_exactly_one_charge_and_it_is_the_route_s(
 async def test_the_router_run_s_outputs_are_the_response_and_the_record_never_generations(
     convention: AnyConvention,
 ) -> None:
-    """R3: the router run's `output` is the answer, usage and all — the response, not a charge.
+    """The router run's `output` is the answer, usage and all — the response, not a charge.
     What makes a run chargeable is the shape the tracer reads usage from (`generations` on an LLM
     run's outputs, `tracers/langchain.py:395`), and a chain run's outputs never have it."""
     router = ChatRouter(routes=priced_routes(), default_route="cheap", strategy=ByText())
@@ -163,14 +163,14 @@ async def test_the_router_run_s_outputs_are_the_response_and_the_record_never_ge
     assert "generations" not in (router_run.outputs or {})
 
 
-# --- A strategy's own call is costed to the strategy's model (REQ-R3-2) ---
+# --- A strategy's own call is costed to the strategy's model ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_a_strategy_s_model_is_costed_on_its_own_run_inside_the_strategy_run(
     convention: AnyConvention,
 ) -> None:
-    """REQ-R3-2: a classifier's run sits inside the strategy's run with its own usage; the
+    """A classifier's run sits inside the strategy's run with its own usage; the
     answering route's usage is what it always was; the handler reports the two models
     separately, each counted once. Neither is folded into the router or into the other."""
     classifier = FakeChatModel(
@@ -209,7 +209,7 @@ async def test_a_strategy_s_model_is_costed_on_its_own_run_inside_the_strategy_r
 async def test_a_strategy_s_call_is_counted_once_whether_or_not_it_passes_its_config(
     convention: AnyConvention, pass_config: bool
 ) -> None:
-    """REQ-R3-2: where the strategy's call lands in the tree is REQ-C5-5's and depends on how it
+    """Where the strategy's call lands in the tree is a tracing question and depends on how it
     was made; that it is *counted*, once, does not — the handler is registered on the context,
     and every model run that ends reaches it."""
     classifier = FakeChatModel(
@@ -228,7 +228,7 @@ async def test_a_strategy_s_call_is_counted_once_whether_or_not_it_passes_its_co
 
 
 async def test_the_usage_in_the_whole_tree_is_what_the_two_calls_reported() -> None:
-    """R3: summing the usage of every run in the tree, chains included, gives what was spent —
+    """Summing the usage of every run in the tree, chains included, gives what was spent —
     the classifier's call and the route's, and nothing that was not a call."""
     classifier = FakeChatModel(
         model_name="model-classifier", reply="frontier", input_tokens=7, output_tokens=2

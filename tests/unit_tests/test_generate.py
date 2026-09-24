@@ -1,8 +1,8 @@
-"""T-117: `generate()` and `agenerate()` route, record and cost exactly as `invoke` does (REQ-C2-2).
+"""`generate()` and `agenerate()` route, record and cost exactly as `invoke` does.
 
 The spike's design overrode only the public entry points a call *usually* takes, so these two
 went down the base class's path: a model run of the router's own, opened around a `_generate`
-that delegates — the same tokens billed twice, with nothing to say so (spike caveat 1). The
+that delegates — the same tokens billed twice, with nothing to say so. The
 router now answers them by running `invoke` / `ainvoke` once per prompt, and this is what that
 has to keep from the base `generate` (`chat_models.py:1592`): the prompts and their runs, the
 arguments that name and tag those runs, `stop`, the `run` list on the result — and what it
@@ -198,16 +198,16 @@ def only_generation(result: LLMResult) -> ChatGeneration:
     return generation
 
 
-# --- The same call as invoke (REQ-C2-2) ---
+# --- The same call as invoke ---
 
 
 @pytest.mark.parametrize("convention", GENERATING)
 async def test_generate_routes_records_and_costs_exactly_as_invoke_does(
     convention: Generating,
 ) -> None:
-    """REQ-C2-2: the same request through `invoke` and through `generate` gives the same
+    """The same request through `invoke` and through `generate` gives the same
     decision record, the same usage totals, and the same trace — and no second LLM run, which
-    is what the base `generate` path would have added (spike caveat 1)."""
+    is what the base `generate` path would have added."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
     )
@@ -244,9 +244,9 @@ async def test_generate_routes_records_and_costs_exactly_as_invoke_does(
 async def test_a_generation_is_the_route_s_message_with_only_the_record_added(
     convention: Generating,
 ) -> None:
-    """REQ-R1-1 on the `generate` path: the message in the generation equals the one the route
-    itself puts there — content, usage, tool calls, metadata — with `routing` the sole
-    addition. (`id` names the route's own run, so it differs between two calls by design.)"""
+    """The answer is the route's own on the `generate` path: the message in the generation equals
+    the one the route itself puts there — content, usage, tool calls, metadata — with `routing` the
+    sole addition. (`id` names the route's own run, so it differs between two calls by design.)"""
     router = ChatRouter(routes=fake_routes("cheap", "frontier"), default_route="frontier")
     direct = fake_routes("frontier")["frontier"]
 
@@ -265,7 +265,7 @@ async def test_a_generation_is_the_route_s_message_with_only_the_record_added(
 async def test_a_strategy_that_abstains_warns_once_per_prompt_and_records_the_fallback(
     convention: Generating,
 ) -> None:
-    """REQ-R2-1, REQ-R9-2 on the `generate` path: each prompt is decided on its own, so each
+    """On the `generate` path each prompt is decided on its own, so each
     that the strategy cannot decide falls back with one warning and a record that says so."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"),
@@ -287,7 +287,7 @@ async def test_a_strategy_that_abstains_warns_once_per_prompt_and_records_the_fa
 
 
 def test_generate_publishes_the_decision_for_last_routing_decision() -> None:
-    """D3: every routed call publishes its record, and `generate` is one — after a call over
+    """Every routed call publishes its record, and `generate` is one — after a call over
     several prompts the last one decided is what `last_routing_decision()` reads."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
@@ -305,7 +305,7 @@ def test_generate_publishes_the_decision_for_last_routing_decision() -> None:
 async def test_each_prompt_gets_its_own_decision_run_and_generation(
     convention: Generating,
 ) -> None:
-    """REQ-C2-2, R4: a prompt is routed on its own text, so three prompts to two routes are three
+    """A prompt is routed on its own text, so three prompts to two routes are three
     decisions, three router runs and three generations — in the order the prompts came, with
     `LLMResult.run` naming each prompt's router run, the top-level run the caller called."""
     routes = fake_routes("cheap", "frontier")
@@ -342,7 +342,7 @@ async def test_each_prompt_gets_its_own_decision_run_and_generation(
 async def test_the_arguments_that_name_and_tag_a_run_reach_every_prompt_s_run(
     convention: Generating,
 ) -> None:
-    """REQ-C2-2: `callbacks`, `tags`, `metadata` and `run_name` apply to every prompt's run, as
+    """`callbacks`, `tags`, `metadata` and `run_name` apply to every prompt's run, as
     the base `generate` applies them to each of its model runs, and `run_id` names the first
     prompt's alone. The route's own runs get the tags and metadata — and their own name, as they
     do under `invoke`."""
@@ -378,7 +378,7 @@ async def test_the_arguments_that_name_and_tag_a_run_reach_every_prompt_s_run(
 
 @pytest.mark.parametrize("convention", GENERATING)
 async def test_stop_and_keyword_arguments_reach_the_route(convention: Generating) -> None:
-    """REQ-C2-2, REQ-R5-1: `stop` and the caller's keyword arguments go to the route as they do
+    """`stop` and the caller's keyword arguments go to the route as they do
     from `invoke`, and the router adds none. The prompts reach it in the order they came."""
     route = Watching(model_name="model-only", reply="an answer")
     router = ChatRouter(routes={"only": route}, default_route="only")
@@ -393,7 +393,7 @@ async def test_stop_and_keyword_arguments_reach_the_route(convention: Generating
 
 
 async def test_agenerate_runs_its_prompts_at_the_same_time() -> None:
-    """C2: as the base `agenerate` does, this overlaps its prompts — the route only answers once
+    """As the base `agenerate` does, this overlaps its prompts — the route only answers once
     three of them are waiting on it, so prompts awaited one after another would never get past
     the first."""
     route = Meeting(model_name="model-only", reply="an answer", width=3)
@@ -407,7 +407,7 @@ async def test_agenerate_runs_its_prompts_at_the_same_time() -> None:
 
 @pytest.mark.parametrize("convention", GENERATING)
 async def test_an_empty_generate_answers_as_a_chat_model_does(convention: Generating) -> None:
-    """C1: no prompts, no runs — the same empty result a chat model gives, `run` unset."""
+    """No prompts, no runs — the same empty result a chat model gives, `run` unset."""
     router = ChatRouter(routes=fake_routes("only"), default_route="only")
     bare = fake_routes("only")["only"]
 
@@ -419,7 +419,7 @@ async def test_an_empty_generate_answers_as_a_chat_model_does(convention: Genera
 
 
 async def test_generate_prompt_and_agenerate_prompt_are_routed_too() -> None:
-    """REQ-C2-2: the base class builds `generate_prompt` on `generate`, so the router's answers
+    """The base class builds `generate_prompt` on `generate`, so the router's answers
     it with no code of its own — through the same routed pipeline, one model run each."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
@@ -439,11 +439,11 @@ async def test_generate_prompt_and_agenerate_prompt_are_routed_too() -> None:
         assert (len(starts.chat_models), len(starts.chains)) == (1, 2)
 
 
-# --- Errors stay the route's (C6) ---
+# --- Errors stay the route's ---
 
 
 def test_a_route_s_error_stops_generate_and_surfaces_unchanged() -> None:
-    """C6: the route's own exception is what the caller gets, the failed prompt's router run
+    """The route's own exception is what the caller gets, the failed prompt's router run
     closes as an error, and later prompts are never started — `generate` runs them in order."""
     routes: dict[str, BaseChatModel] = {"good": FakeChatModel(reply="good"), "bad": Failing()}
     router = ChatRouter(routes=routes, default_route="good", strategy=ByText())
@@ -463,7 +463,7 @@ def test_a_route_s_error_stops_generate_and_surfaces_unchanged() -> None:
 
 
 async def test_agenerate_finishes_every_prompt_and_then_raises_the_route_s_error() -> None:
-    """C6: the prompts of an `agenerate` are in flight together, so the ones that can still answer
+    """The prompts of an `agenerate` are in flight together, so the ones that can still answer
     do — their calls are paid for — and every router run closes, the failed one as an error. The
     route's own exception is then raised, unchanged."""
     routes: dict[str, BaseChatModel] = {"good": Slow(reply="good"), "bad": Failing()}
@@ -481,7 +481,7 @@ async def test_agenerate_finishes_every_prompt_and_then_raises_the_route_s_error
 
 
 async def test_agenerate_raises_the_first_prompt_s_failure_not_the_first_to_finish() -> None:
-    """C6: "the first, in prompt order" (the docstring's own words) is not the same as "the first
+    """ "the first, in prompt order" (the docstring's own words) is not the same as "the first
     to finish" -- two prompts fail for different reasons, the *second* prompt's route fails
     immediately and the *first* prompt's route only after a moment, and `agenerate` still raises
     the first prompt's own exception. `asyncio.gather` keeps `outcomes` in submission order
@@ -495,14 +495,14 @@ async def test_agenerate_raises_the_first_prompt_s_failure_not_the_first_to_fini
     assert raised.value is DELAYED_FAILURE
 
 
-# --- The refusal that remains (R3) ---
+# --- The refusal that remains ---
 
 
 @pytest.mark.parametrize("convention", GENERATING)
 async def test_a_call_that_goes_around_the_routed_entry_points_is_refused_not_double_counted(
     convention: Generating,
 ) -> None:
-    """R3: the base class's own `generate` opens a model run for the router and calls `_generate`
+    """The base class's own `generate` opens a model run for the router and calls `_generate`
     inside it. `_generate` refuses, so that path fails where someone sees it instead of billing
     the route's tokens a second time under the router's name — and no route is called."""
     routes = fake_routes("cheap", "frontier")

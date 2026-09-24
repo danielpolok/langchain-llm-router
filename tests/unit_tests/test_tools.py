@@ -1,16 +1,17 @@
-"""T-115: tools and structured output through the router (C3, R10, and R2's structured half).
+"""Tools and structured output through the router (tool binding, tool-aware routing, and the
+structured half of the record).
 
-What is here, in order: capability detection, one signal at a time (REQ-R10-1); the bind-time
-cases and the per-request diversion (REQ-R10-2, REQ-R10-3), each run through `bind_tools` *and*
-through `with_structured_output` (REQ-R10-4); the binding replayed on the route the strategy
-chose (REQ-C3-1) and the raw `tools` copy kept for LangChain's own checks (REQ-C3-2);
-`with_structured_output` forwarding what the base default drops (REQ-C3-3); the record on
-structured output (REQ-R2-4); and where each warning points — a count of frames, so asserted
+What is here, in order: capability detection, one signal at a time; the bind-time
+cases and the per-request diversion, each run through `bind_tools` *and*
+through `with_structured_output`; the binding replayed on the route the strategy
+chose and the raw `tools` copy kept for LangChain's own checks;
+`with_structured_output` forwarding what the base default drops; the record on
+structured output; and where each warning points — a count of frames, so asserted
 rather than assumed.
 
 Neighbours, not repeated here: what falling back does is `test_fallback.py`'s, and the record's
 schema and the limits of `last_routing_decision()` are `test_decision.py`'s. A *forced* route
-that can't use the bound tools (REQ-R11-2) is T-116's.
+that can't use the bound tools is `test_forced_routes.py`'s.
 """
 
 from __future__ import annotations
@@ -93,7 +94,7 @@ class ByText(RoutingStrategy):
     """The request's text names the route, so each test picks a route with its input.
 
     Counts how often it was asked: a diversion happens after the strategy has decided, and must
-    not ask again (D1).
+    not ask again.
     """
 
     def __init__(self) -> None:
@@ -105,7 +106,7 @@ class ByText(RoutingStrategy):
 
 
 class Abstains(RoutingStrategy):
-    """A strategy with no opinion, so the default route answers (R9)."""
+    """A strategy with no opinion, so the default route answers."""
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         return None
@@ -130,8 +131,8 @@ def router_of(
 def mixed(strategy: RoutingStrategy | None = None) -> tuple[ChatRouter, dict[str, BaseChatModel]]:
     """`first` and `frontier` (the default) can use tools; `cheap` can't.
 
-    In that order, so the default is *not* the first route able to take a diversion — D1 has a
-    choice to make, and a test can tell which way it went.
+    In that order, so the default is *not* the first route able to take a diversion — the diversion
+    has a choice to make, and a test can tell which way it went.
     """
     return router_of(
         {"first": True, "cheap": False, "frontier": True},
@@ -141,7 +142,7 @@ def mixed(strategy: RoutingStrategy | None = None) -> tuple[ChatRouter, dict[str
 
 
 class Binder(NamedTuple):
-    """One way to put tools on a router, so a test can run through each (REQ-R10-4)."""
+    """One way to put tools on a router, so a test can run through each."""
 
     bind: Callable[[ChatRouter], Runnable[LanguageModelInput, Any]]
     message: Callable[[Any], AIMessage]
@@ -180,7 +181,8 @@ def routing_warnings(caught: list[warnings.WarningMessage]) -> list[warnings.War
 
 
 def bind(binder: Binder, router: ChatRouter) -> Runnable[LanguageModelInput, Any]:
-    """Bind on a router that has a tool-incapable route, hearing the warning R10 gives for it.
+    """Bind on a router that has a tool-incapable route, hearing the warning tool-aware routing
+    gives for it.
 
     Tests of what a *request* does start here, so the bind-time notice neither goes unasserted
     nor reaches the request's own warning count.
@@ -216,7 +218,7 @@ def metadata_of(run: Run) -> dict[str, Any]:
 
 
 def diverted(route: str, *, to: str) -> RoutingDecision:
-    """The record for a request `ByText` sent to `route` and D1 sent to `to`."""
+    """The record for a request `ByText` sent to `route` and the diversion sent to `to`."""
     return RoutingDecision(
         route=to,
         reason=f"asked for {route!r}; {route!r} can't use the bound tools, so it was diverted "
@@ -226,7 +228,7 @@ def diverted(route: str, *, to: str) -> RoutingDecision:
     )
 
 
-# --- REQ-R10-1: capability is detected per D5, and an override wins ---
+# --- capability is detected from each signal in turn, and an override wins ---
 
 CAPABILITY = [
     pytest.param(
@@ -278,14 +280,14 @@ CAPABILITY = [
 def test_tool_capability_is_read_from_each_signal_in_d5_s_order(
     route: BaseChatModel, override: bool | None, expected: bool
 ) -> None:
-    """REQ-R10-1, D5: `profile["tool_calling"]` when the route reports one, else whether its
+    """`profile["tool_calling"]` when the route reports one, else whether its
     class overrides `bind_tools` — and an override always wins. Each signal is exercised on its
     own, and against the ones that come after it."""
     assert supports_tools(route, override=override) is expected
 
 
 async def test_tool_support_overrides_change_what_the_router_does_with_a_route() -> None:
-    """REQ-R10-1, D5: through the router, `tool_support_overrides` is what the warning names and
+    """Through the router, `tool_support_overrides` is what the warning names and
     what a request is diverted on — a route that could use tools but is pinned off is skipped,
     and one the profile rules out but the application vouches for is kept."""
     routes: dict[str, BaseChatModel] = {
@@ -320,12 +322,12 @@ async def test_tool_support_overrides_change_what_the_router_does_with_a_route()
     assert revived_warnings == []
 
 
-# --- REQ-R10-2: binding warns up front, or refuses when nothing could serve ---
+# --- binding warns up front, or refuses when nothing could serve ---
 
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_binding_to_routes_that_can_all_use_tools_says_nothing(binder: Binder) -> None:
-    """REQ-R10-2, REQ-R10-4: the case where nothing is wrong is silent — no warning, no error."""
+    """The case where nothing is wrong is silent — no warning, no error."""
     router, _ = router_of({"a": True, "b": True}, default="a")
 
     with warnings.catch_warnings(record=True) as caught:
@@ -338,7 +340,7 @@ def test_binding_to_routes_that_can_all_use_tools_says_nothing(binder: Binder) -
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_binding_warns_once_naming_the_routes_that_cannot_use_tools(binder: Binder) -> None:
-    """REQ-R10-2, REQ-R10-4: one `ToolSupportWarning`, not one per route, listing exactly the
+    """One `ToolSupportWarning`, not one per route, listing exactly the
     routes that can't — in declaration order — and saying where their requests will go."""
     router, _ = router_of({"local": False, "frontier": True, "cheap": False}, default="frontier")
 
@@ -356,7 +358,7 @@ def test_binding_warns_once_naming_the_routes_that_cannot_use_tools(binder: Bind
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_the_bind_time_warning_names_the_route_d1_will_divert_to(binder: Binder) -> None:
-    """REQ-R10-2, D1: when the default route is one of those that can't use tools, requests go
+    """When the default route is one of those that can't use tools, requests go
     to the first route that can — and the warning says so rather than naming the default."""
     router, _ = router_of({"cheap": False, "first": True, "second": True}, default="cheap")
 
@@ -373,7 +375,7 @@ def test_the_bind_time_warning_names_the_route_d1_will_divert_to(binder: Binder)
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_binding_when_no_route_can_use_tools_is_an_error(binder: Binder) -> None:
-    """REQ-R10-2, REQ-R10-4: `NoToolCapableRouteError` at bind time, naming the routes, and no
+    """`NoToolCapableRouteError` at bind time, naming the routes, and no
     warning — there is nothing to divert to, so the notice would only be noise."""
     router, routes = router_of({"a": False, "b": False}, default="a")
 
@@ -392,7 +394,7 @@ def test_binding_when_no_route_can_use_tools_is_an_error(binder: Binder) -> None
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_an_override_can_make_a_route_the_one_that_can_use_tools(binder: Binder) -> None:
-    """REQ-R10-1, REQ-R10-2: the error is about what the router believes, and the override is
+    """The error is about what the router believes, and the override is
     how an application corrects that belief — with it, binding succeeds and warns about the
     other route."""
     router, _ = router_of({"a": False, "b": False}, default="a", tool_support_overrides={"b": True})
@@ -408,7 +410,7 @@ def test_an_override_can_make_a_route_the_one_that_can_use_tools(binder: Binder)
 
 
 def test_each_binding_gets_its_own_bind_time_warning() -> None:
-    """REQ-R10-2: the notice belongs to the act of binding, so binding again says it again."""
+    """The notice belongs to the act of binding, so binding again says it again."""
     router, _ = mixed()
 
     with warnings.catch_warnings(record=True) as caught:
@@ -418,7 +420,7 @@ def test_each_binding_gets_its_own_bind_time_warning() -> None:
     assert [w.category for w in routing_warnings(caught)] == [ToolSupportWarning] * 2
 
 
-# --- REQ-R10-3: a request sent to a route that can't use the tools is diverted (D1) ---
+# --- a request sent to a route that can't use the tools is diverted ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
@@ -426,7 +428,7 @@ def test_each_binding_gets_its_own_bind_time_warning() -> None:
 async def test_a_request_sent_to_a_tool_incapable_route_goes_to_the_default_route(
     binder: Binder, convention: AskConvention
 ) -> None:
-    """REQ-R10-3, REQ-R10-4, D1: the default route is the first choice for a diversion — even
+    """The default route is the first choice for a diversion — even
     when a tool-capable route comes before it in declaration order. The request runs there, the
     warning says so once, `diverted_from` names where it was headed, and the route it left is
     never called."""
@@ -451,7 +453,7 @@ async def test_a_request_sent_to_a_tool_incapable_route_goes_to_the_default_rout
 async def test_when_the_default_cannot_use_tools_a_diverted_request_goes_to_the_first_that_can(
     binder: Binder, chosen: str
 ) -> None:
-    """REQ-R10-3, D1: with the default route unable to take a diversion, it goes to the first
+    """With the default route unable to take a diversion, it goes to the first
     tool-capable route in declaration order — not the last, and not one the strategy would
     have liked better. `chosen` covers both a route that isn't the default and the default
     itself."""
@@ -476,7 +478,7 @@ BOUND_CONVENTIONS = tuple(c for c in ALL_CONVENTIONS if c not in ("generate", "a
 
 @pytest.mark.parametrize("convention", BOUND_CONVENTIONS)
 async def test_every_calling_convention_diverts_and_records_it(convention: Convention) -> None:
-    """REQ-R10-3, REQ-R2-1: a diverted request carries the record with `diverted_from` however
+    """A diverted request carries the record with `diverted_from` however
     it was called — including `batch` and event streams — and warns exactly once."""
     router, routes = mixed()
     bound = bind(TOOLS, router)
@@ -495,7 +497,7 @@ async def test_every_calling_convention_diverts_and_records_it(convention: Conve
 async def test_generate_diverts_when_the_tools_are_passed_as_a_call_argument(
     convention: Literal["generate", "agenerate"],
 ) -> None:
-    """REQ-R10-3, REQ-R2-1, REQ-C2-2: `generate` takes its tools as a call argument, as on any
+    """`generate` takes its tools as a call argument, as on any
     chat model, and diverts a request off a route that can't use them — the diversion recorded,
     one warning, and no second model run."""
     router, routes = mixed()
@@ -514,7 +516,7 @@ async def test_generate_diverts_when_the_tools_are_passed_as_a_call_argument(
 
 
 async def test_one_warning_is_raised_for_each_diverted_request() -> None:
-    """REQ-R10-3: per request, and only for the requests that were diverted."""
+    """Per request, and only for the requests that were diverted."""
     router, _ = mixed()
     bound = bind(TOOLS, router)
 
@@ -534,13 +536,13 @@ async def test_one_warning_is_raised_for_each_diverted_request() -> None:
 
 
 class _DiversionCase(NamedTuple):
-    """One way a request ends up diverted, and what the trace should show for it (D9)."""
+    """One way a request ends up diverted, and what the trace should show for it."""
 
     build: Callable[[], ChatRouter]
     text: str
     record: RoutingDecision
     has_strategy_run: bool
-    """Whether a strategy ran at all — no strategy means no strategy run (D9), so there are
+    """Whether a strategy ran at all — no strategy means no strategy run, so there are
     only two placements to compare, not three."""
 
 
@@ -607,10 +609,10 @@ DIVERSION_CASES = [
 async def test_the_diverted_record_is_the_same_in_all_of_d9_s_places(
     case: _DiversionCase, convention: AskConvention
 ) -> None:
-    """REQ-R10-3, D1, D9: a diversion is settled inside the decision step (`_decide`), before
+    """A diversion is settled inside the decision step (`_decide`), before
     the strategy run closes — so the strategy run's output, the router run's outputs, the route
     run's metadata and the response all carry the *same* diverted record, not the strategy's
-    undiverted choice. The strategy still ran once (D1: no second consultation) and its run is
+    undiverted choice. The strategy still ran once (no second consultation) and its run is
     still a success — diverting is not a failure of the strategy."""
     router = case.build()
     bound = bind(TOOLS, router)
@@ -638,14 +640,14 @@ async def test_the_diverted_record_is_the_same_in_all_of_d9_s_places(
     assert (router_run.outputs or {})[ROUTING_KEY] == case.record.as_dict()
     assert metadata_of(route_run)[ROUTING_KEY] == case.record.as_dict()
     # Exactly one child run of each kind proves the strategy was not consulted a second time
-    # for the diversion (D1) — a re-run would show as a second chain run among the children.
+    # for the diversion — a re-run would show as a second chain run among the children.
     assert [run.run_type for run in router_run.child_runs].count("chain") == (
         1 if case.has_strategy_run else 0
     )
 
 
 async def test_an_escalated_diversion_warning_closes_both_runs() -> None:
-    """REQ-R10-3, D9: `_divert`'s warning can be escalated to an error like any other; the
+    """`_divert`'s warning can be escalated to an error like any other; the
     `try`/`except` in `_decide` that already closes the strategy run when `_conclude` raises
     covers `_divert` too (it runs inside the same block), so the strategy run closes as an
     error and the router run closes as an error behind it — neither is left open."""
@@ -667,7 +669,7 @@ async def test_an_escalated_diversion_warning_closes_both_runs() -> None:
 
 
 async def test_a_request_with_nothing_bound_is_never_diverted() -> None:
-    """REQ-R10-3: R10 applies to tools and structured output, and only when they are bound: the
+    """Tool-aware routing applies to tools and structured output, and only when they are bound: the
     same router, called plainly, sends a request to the route the strategy chose."""
     router, routes = mixed()
 
@@ -684,7 +686,7 @@ async def test_a_request_with_nothing_bound_is_never_diverted() -> None:
 
 
 async def test_a_fallback_onto_a_default_that_cannot_use_tools_is_diverted_too() -> None:
-    """REQ-R10-3, REQ-R9-2: the default route is where a strategy that can't decide sends the
+    """The default route is where a strategy that can't decide sends the
     request, and it may itself be a route that can't use the tools. The request is diverted
     like any other, and the record keeps both facts — it fell back, and it was diverted — with
     a warning each."""
@@ -707,7 +709,7 @@ async def test_a_fallback_onto_a_default_that_cannot_use_tools_is_diverted_too()
 
 
 async def test_with_no_strategy_a_default_that_cannot_use_tools_is_diverted() -> None:
-    """REQ-R10-3, D1: no strategy means the default route, and the rule is the same — the request
+    """No strategy means the default route, and the rule is the same — the request
     goes to the first route that can use the tools, and no strategy run is opened for it."""
     router, _ = router_of({"cheap": False, "first": True}, default="cheap")
     bound = bind(TOOLS, router)
@@ -729,7 +731,7 @@ async def test_with_no_strategy_a_default_that_cannot_use_tools_is_diverted() ->
 
 
 async def test_tools_bound_past_the_bind_time_check_still_cannot_reach_an_incapable_route() -> None:
-    """REQ-R10-2, REQ-R10-3: `bind_tools` refuses to bind when no route can use tools, but
+    """`bind_tools` refuses to bind when no route can use tools, but
     `bind(tools=...)` puts them in the call kwargs directly and never asks. The request is then
     the last chance, and it fails as a `NoToolCapableRouteError` — with the router's run closed
     as an error — rather than as the route's own `NotImplementedError`."""
@@ -768,7 +770,7 @@ async def test_a_strategy_is_told_whether_tools_or_structured_output_are_bound(
     expected: bool,
     convention: AskConvention,
 ) -> None:
-    """REQ-R10-4, D6: `RoutingRequest.tools_bound` is true whenever tools *or structured output* are
+    """`RoutingRequest.tools_bound` is true whenever tools *or structured output* are
     bound — the latter leaves nothing in the call kwargs to read, so the router has to know —
     and false otherwise. The strategy's run in the trace records the same."""
     seen: list[bool] = []
@@ -789,17 +791,17 @@ async def test_a_strategy_is_told_whether_tools_or_structured_output_are_bound(
     assert (strategy_run.inputs or {})["tools_bound"] is expected
 
 
-# --- REQ-C3-1, REQ-C3-2: the binding is replayed on the route that was chosen ---
+# --- the binding is replayed on the route that was chosen ---
 
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_each_route_receives_the_tools_in_its_own_form(convention: Convention) -> None:
-    """REQ-C3-1: the router keeps the tools as given, and the route the strategy picks converts
+    """The router keeps the tools as given, and the route the strategy picks converts
     them — two routes with different conversions each get their own, from the same binding.
 
     Nothing is converted at bind time (no route's `bind_tools` has run), the route's binder
     receives the caller's own objects, and what reaches the provider is the route's form of
-    them — not the raw list the router also holds (REQ-C3-2), and not the router's private
+    them — not the raw list the router also holds, and not the router's private
     binding kwarg."""
     routes: dict[str, BaseChatModel] = {
         "openai": capable("openai"),
@@ -848,7 +850,7 @@ BINDING_KWARGS = [
 async def test_binding_kwargs_reach_the_route_s_binder_and_not_its_call(
     convention: Convention, kwargs: dict[str, Any]
 ) -> None:
-    """REQ-C3-1: `tool_choice` and binding kwargs such as `strict=` are replayed on the route's
+    """`tool_choice` and binding kwargs such as `strict=` are replayed on the route's
     own `bind_tools` — the same call, with the same arguments, as binding the route directly,
     whether or not a `tool_choice` comes with them.
 
@@ -872,7 +874,7 @@ async def test_binding_kwargs_reach_the_route_s_binder_and_not_its_call(
 
 
 def test_bind_tools_puts_nothing_but_the_private_binding_in_the_kwargs() -> None:
-    """REQ-C3-2 (amended): the router binds no `tools` kwarg of its own — a consumer that reads
+    """The router binds no `tools` kwarg of its own — a consumer that reads
     one off a chat model's binding would misread the raw, unconverted objects as the converted
     form a plain model puts there. Only the private binding key rides along."""
     router, _ = router_of({"a": True}, default="a")
@@ -900,7 +902,7 @@ def _agent_script() -> list[AIMessage]:
 
 
 def test_create_react_agent_builds_and_answers_with_a_pre_bound_router() -> None:
-    """REQ-C3-2: `create_react_agent` reads a bound model's own `bind_tools` output to decide
+    """`create_react_agent` reads a bound model's own `bind_tools` output to decide
     whether to bind tools again (`_should_bind_tools`, `langgraph/prebuilt/chat_agent_executor.py`)
     — before the fix this read the raw `tools` slot and crashed with `AttributeError:
     'StructuredTool' object has no attribute 'get'`. With no slot to misread, the agent builds
@@ -915,19 +917,19 @@ def test_create_react_agent_builds_and_answers_with_a_pre_bound_router() -> None
 
     assert out["messages"][-1].content == "It is sunny in Paris"
     # Two turns of the loop, each a request through the router: the binding is replayed on the
-    # route at call time (REQ-C3-1), so it is replayed once per turn, not once for the agent.
+    # route at call time, so it is replayed once per turn, not once for the agent.
     assert route.bind_calls == [{"tools": [get_weather], "tool_choice": None}] * 2
 
 
 def test_create_agent_builds_and_answers_with_a_pre_bound_router() -> None:
-    """REQ-C3-2: `langchain.agents.create_agent` is the other consumer the reviewer named; the
+    """`langchain.agents.create_agent` is the other consumer the reviewer named; the
     same pre-bound router builds and answers through it."""
     from langchain.agents import create_agent
 
     route = ToolCallingFakeChatModel(model_name="a", script=_agent_script())
     router = ChatRouter(routes={"a": route}, default_route="a")
     # `create_agent` types `model` as `str | BaseChatModel`; a bound model is a `Runnable`, not
-    # a `BaseChatModel`, on the router as on any chat model (REQ-C3-2's whole point — LangChain
+    # a `BaseChatModel`, on the router as on any chat model (the whole point — LangChain
     # accepts it at runtime; the annotation just doesn't say so).
     bound = cast("BaseChatModel", router.bind_tools([get_weather]))
 
@@ -938,7 +940,7 @@ def test_create_agent_builds_and_answers_with_a_pre_bound_router() -> None:
 
 
 def test_a_later_bare_bind_tools_is_honoured() -> None:
-    """REQ-C3-2: with no slot for `bound_route` to discard, a bare `bind(tools=...)` layered on
+    """With no slot for `bound_route` to discard, a bare `bind(tools=...)` layered on
     top of `bind_tools` reaches the route as a call kwarg — exactly as it does on a plain chat
     model, where the later binding wins over the earlier one's converted slot."""
     explicit = [
@@ -973,7 +975,7 @@ async def chunks_of(
 async def test_disable_streaming_for_tool_calling_behaves_as_on_the_route(
     convention: Literal["stream", "astream"],
 ) -> None:
-    """REQ-C3-2: a route with `disable_streaming="tool_calling"` does not stream while tools
+    """A route with `disable_streaming="tool_calling"` does not stream while tools
     are bound and does otherwise — and bound through the router it does exactly the same. The
     unbound calls are the control: streaming is on, so the difference is the tools."""
     route = capable("a", disable_streaming="tool_calling")
@@ -990,14 +992,14 @@ async def test_disable_streaming_for_tool_calling_behaves_as_on_the_route(
     assert len(routed_plain) > 1
 
 
-# --- REQ-C3-3: `with_structured_output` reaches the route's own implementation ---
+# --- `with_structured_output` reaches the route's own implementation ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_method_and_strict_reach_the_route_s_structured_output(
     convention: AskConvention,
 ) -> None:
-    """REQ-C3-3: the base default pops `method=` and `strict=` and drops them
+    """The base default pops `method=` and `strict=` and drops them
     (`chat_models.py:2530`), so every route would be forced through function calling. The
     override forwards them, and the answer is the route's own parse of its own reply."""
     route = capable("a")
@@ -1013,7 +1015,7 @@ async def test_method_and_strict_reach_the_route_s_structured_output(
 
 
 def test_a_route_keeps_its_own_structured_output_defaults() -> None:
-    """REQ-C3-3: what the caller didn't pass isn't passed — no `strict`, and the route picks
+    """What the caller didn't pass isn't passed — no `strict`, and the route picks
     its own `method` — and the schema reaches the route as it was given."""
     route = capable("a")
     router = ChatRouter(routes={"a": route}, default_route="a")
@@ -1026,7 +1028,7 @@ def test_a_route_keeps_its_own_structured_output_defaults() -> None:
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_include_raw_returns_the_usual_triple(convention: AskConvention) -> None:
-    """REQ-C3-3: `include_raw=True` answers `{"raw", "parsed", "parsing_error"}` as it does on
+    """`include_raw=True` answers `{"raw", "parsed", "parsing_error"}` as it does on
     any chat model, with the route's own message under `raw`."""
     router, _ = router_of({"a": True}, default="a")
 
@@ -1040,7 +1042,7 @@ async def test_include_raw_returns_the_usual_triple(convention: AskConvention) -
 
 
 def test_a_parse_failure_is_reported_under_parsing_error() -> None:
-    """REQ-C3-3: the route's parser is the one that runs, so its failure is reported the way
+    """The route's parser is the one that runs, so its failure is reported the way
     LangChain reports it — `parsed` is `None`, `parsing_error` says why — and the raw message
     is still there, record included."""
     bad_call = ToolCall(name="Answer", args={}, id="call_1", type="tool_call")
@@ -1058,7 +1060,7 @@ def test_a_parse_failure_is_reported_under_parsing_error() -> None:
 
 
 def test_a_dict_schema_answers_a_dict() -> None:
-    """REQ-C3-3: the schema is given to the route as it came, so a JSON-schema dict gets the
+    """The schema is given to the route as it came, so a JSON-schema dict gets the
     route's dict-shaped parse, not a Pydantic object."""
     router, _ = router_of({"a": True}, default="a")
 
@@ -1068,7 +1070,7 @@ def test_a_dict_schema_answers_a_dict() -> None:
 
 
 async def test_structured_output_streams_whatever_the_route_itself_gives() -> None:
-    """REQ-C3-3: `capable()`'s fake hands its tool call over in one final chunk (as some real
+    """`capable()`'s fake hands its tool call over in one final chunk (as some real
     routes do too), so `stream`/`astream` answer with the one item that produces — not because
     the router holds a stream back to one item, which `test_structured_streaming_*` next to
     this disproves for a route that streams progressively."""
@@ -1079,7 +1081,7 @@ async def test_structured_output_streams_whatever_the_route_itself_gives() -> No
     assert [item async for item in structured.astream("hello")] == [Answer(answer="42")]
 
 
-# --- Progressive structured streaming: the router matches a plain route exactly (C1, C2) ---
+# --- Progressive structured streaming: the router matches a plain route exactly ---
 
 StreamConvention = Literal["stream", "astream"]
 
@@ -1111,8 +1113,8 @@ async def stream_all(
 
 
 def reduced(items: list[Any]) -> Any:
-    """`items` folded together the way `ChatRouter.stream` folds them for its own run output
-    (D9): `+` for a delta, replaced by the newest when that raises — a parsed partial is
+    """`items` folded together the way `ChatRouter.stream` folds them for its own run output:
+    `+` for a delta, replaced by the newest when that raises — a parsed partial is
     cumulative, not a delta. What a caller gets is each `item` on its own, unfolded; this is
     only for asserting on the *final* state the whole sequence adds up to."""
     total = items[0]
@@ -1140,7 +1142,7 @@ STRUCTURED_SCHEMAS = [
 async def test_structured_streaming_matches_the_plain_route_exactly(
     case: dict[str, Any], final: object, convention: StreamConvention, include_raw: bool
 ) -> None:
-    """REQ-C3-3, C1, C2: the reviewer's measurement, pinned — a route that streams progressive
+    """The reviewer's measurement, pinned — a route that streams progressive
     tool-call or JSON-mode chunks answers `with_structured_output(...).stream()`/`.astream()`
     through the router exactly as it does when called directly: the same number of items
     (genuinely more than one, the whole point of the fix), the same `parsed` values — up to
@@ -1172,7 +1174,7 @@ async def test_structured_streaming_matches_the_plain_route_exactly(
 
 @pytest.mark.parametrize("convention", ["stream", "astream"])
 async def test_exactly_one_structured_item_carries_the_record(convention: StreamConvention) -> None:
-    """D8, REQ-R2-4: with `include_raw=True`, exactly one item's `raw` message carries the
+    """With `include_raw=True`, exactly one item's `raw` message carries the
     routing record — the first, which the reviewer's measurement shows always has a `"raw"`
     key before any `"parsed"` key can (the parser needs raw content first)."""
     router = ChatRouter(routes={"a": streaming_route()}, default_route="a")
@@ -1195,7 +1197,7 @@ async def test_exactly_one_structured_item_carries_the_record(convention: Stream
 async def test_a_parsed_only_structured_stream_still_sets_the_last_decision(
     convention: StreamConvention,
 ) -> None:
-    """D3: nothing in a parsed-only progressive stream can carry the record (no item is a
+    """Nothing in a parsed-only progressive stream can carry the record (no item is a
     message, or a mapping with one under `"raw"`), so `last_routing_decision()` is what a
     caller reads — set as soon as the first partial arrives, same as for a whole answer."""
     router = ChatRouter(
@@ -1215,7 +1217,7 @@ async def test_a_parsed_only_structured_stream_still_sets_the_last_decision(
 
 
 def test_an_abandoned_structured_stream_keeps_its_record() -> None:
-    """C6, D3: T-114's `GeneratorExit` handling covers a structured stream too — stopping early
+    """The `GeneratorExit` handling covers a structured stream too — stopping early
     is not a failure, and the record the first item published stays readable."""
     router = ChatRouter(routes={"a": streaming_route()}, default_route="a")
     structured = router.with_structured_output(Person)
@@ -1228,7 +1230,7 @@ def test_an_abandoned_structured_stream_keeps_its_record() -> None:
 
 
 def test_a_structured_stream_that_fails_withdraws_the_record() -> None:
-    """C6, D3: a route that raises partway through a structured stream closes the router's run
+    """A route that raises partway through a structured stream closes the router's run
     as an error and withdraws the record, exactly as a plain message stream does."""
 
     class FailsPartway(StreamingStructuredFakeChatModel):
@@ -1254,7 +1256,7 @@ def test_a_structured_stream_that_fails_withdraws_the_record() -> None:
 
 
 async def test_structured_output_batches_each_request_to_its_own_route() -> None:
-    """C2, REQ-R2-4: `batch` and `abatch` are `Runnable`'s, built on the calling convention
+    """`batch` and `abatch` are `Runnable`'s, built on the calling convention
     the structured output has — each input is routed on its own, and each raw message carries
     its own record."""
     router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
@@ -1269,11 +1271,11 @@ async def test_structured_output_batches_each_request_to_its_own_route() -> None
 
 
 def test_structured_output_forwards_the_router_s_config_specs() -> None:
-    """D7: `StructuredRouter.config_specs` is the router's own, not `Runnable`'s default `[]`
+    """`StructuredRouter.config_specs` is the router's own, not `Runnable`'s default `[]`
     — so a spec the router declares is visible through `with_structured_output(...)` too,
     for `with_config`, `config={"configurable": …}` and config-schema introspection run on
     the structured runnable rather than the router itself. The router's real `"route"` key
-    (T-116) is covered end to end in `test_forced_routes.py`; this checks the forwarding
+    is covered end to end in `test_forced_routes.py`; this checks the forwarding
     itself, generically, with a throwaway spec added through a subclass."""
     spec = ConfigurableFieldSpec(id="probe", annotation=str, default="x")
 
@@ -1288,14 +1290,14 @@ def test_structured_output_forwards_the_router_s_config_specs() -> None:
     assert router.with_structured_output(Answer).config_specs == [spec]
 
 
-# --- REQ-R2-4: structured output has an answer for R2 ---
+# --- structured output has an answer for the decision record ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_with_include_raw_the_raw_message_carries_the_record(
     convention: AskConvention,
 ) -> None:
-    """REQ-R2-4, D3: the record rides on the route's own message under `raw`, and the parsed
+    """The record rides on the route's own message under `raw`, and the parsed
     object beside it is the route's parse, untouched."""
     router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
 
@@ -1311,7 +1313,7 @@ async def test_with_include_raw_the_raw_message_carries_the_record(
 async def test_a_parsed_only_call_is_answered_by_the_last_decision(
     convention: AskConvention,
 ) -> None:
-    """REQ-R2-4, D3: without `include_raw=True` the caller holds a parsed object with nowhere
+    """Without `include_raw=True` the caller holds a parsed object with nowhere
     to carry a record, and `last_routing_decision()` is the answer.
 
     An earlier call, routed elsewhere, comes first: whatever the previous test — or this
@@ -1332,8 +1334,8 @@ async def test_a_parsed_only_call_is_answered_by_the_last_decision(
 async def test_the_last_decision_survives_a_structured_call_made_as_a_sequence_step(
     convention: AskConvention,
 ) -> None:
-    """REQ-R2-4, D3: `prompt | structured` runs the structured call in a *copy* of the caller's
-    context, which discards what it sets — the shape D3's thread-level record exists for."""
+    """`prompt | structured` runs the structured call in a *copy* of the caller's
+    context, which discards what it sets — the shape the thread-level record exists for."""
     router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
     await ask(router, convention, "a")
     chain = RunnableLambda(lambda text: text) | router.with_structured_output(Answer)
@@ -1347,7 +1349,7 @@ async def test_the_last_decision_survives_a_structured_call_made_as_a_sequence_s
 
 @pytest.mark.parametrize("binder", BINDERS)
 async def test_a_bound_call_is_one_router_run_over_one_model_run(binder: Binder) -> None:
-    """REQ-C5-1, REQ-R2-2 (D9): tools or structured output, the router's own run is the root and
+    """Tools or structured output, the router's own run is the root and
     carries the record, and the route's call is the only model run below it — the strategy's
     run opens none — so cost is counted once."""
     router, _ = router_of({"a": True, "b": True}, default="a", strategy=ByText())
@@ -1369,7 +1371,7 @@ class DecideFailsAdecideWorks(RoutingStrategy):
     Tells apart `StructuredRouter.ainvoke` calling `router.ainvoke` from calling the *sync*
     `router.invoke` by mistake (mutation M25, previously uncaught): the wrong call would reach
     `decide`, not `adecide`, and surface as `Raises raised AssertionError` absorbed into a
-    fallback (R9) instead of the strategy's own choice.
+    fallback instead of the strategy's own choice.
     """
 
     def decide(self, request: RoutingRequest) -> RoutingChoice:
@@ -1401,7 +1403,7 @@ async def test_structured_ainvoke_awaits_the_router_s_own_ainvoke() -> None:
 
 
 def test_binding_twice_keeps_the_last_binding_as_on_any_chat_model() -> None:
-    """REQ-C3-1: a binding over a binding reaches the model's own `bind_tools` again
+    """A binding over a binding reaches the model's own `bind_tools` again
     (`RunnableBinding.__getattr__`), so the second call replaces the first rather than adding
     to it. The router does what a plain tool-capable chat model does, and the check is
     against one: what the route's last binder saw, and what its call got, are identical.
@@ -1421,7 +1423,7 @@ def test_binding_twice_keeps_the_last_binding_as_on_any_chat_model() -> None:
 
 
 def test_structured_output_after_tools_replaces_them_as_on_any_chat_model() -> None:
-    """REQ-C3-3: the same rule across the two kinds of binding: `with_structured_output` on a
+    """The same rule across the two kinds of binding: `with_structured_output` on a
     runnable already bound with tools is the model's own `with_structured_output`, and the
     tools the first binding held are not part of it — on a plain chat model and through the
     router."""
@@ -1474,7 +1476,7 @@ async def call_from_here(
 
 @pytest.mark.parametrize("binder", BINDERS)
 def test_the_bind_time_warning_points_at_the_line_that_bound(binder: Binder) -> None:
-    """REQ-R10-2: the warning is for the application to act on, so it names the line that
+    """The warning is for the application to act on, so it names the line that
     called `bind_tools` or `with_structured_output`, not a frame inside the router."""
     router, _ = mixed()
 
@@ -1502,11 +1504,11 @@ CALLED_THROUGH = [
 async def test_the_per_request_warning_points_at_the_line_that_called(
     binder: Binder, convention: Convention
 ) -> None:
-    """REQ-R10-3: a diversion is raised from inside the router's pipeline, at whatever depth
+    """A diversion is raised from inside the router's pipeline, at whatever depth
     the calling convention and the binding put it — a fixed constant would have to be pinned
-    per combination, as `bind_tools` needed one and `with_structured_output` (T-115's
+    per combination, as `bind_tools` needed one and `with_structured_output` (the
     `StructuredRouter.stream`/`astream`, now delegating to the router's own rather than
-    `Runnable`'s default) needed another; `_stacklevel` (T-115) walks to the boundary instead,
+    `Runnable`'s default) needed another; `_stacklevel` walks to the boundary instead,
     so every combination here names the same thing: the line that called the bound runnable."""
     router, _ = mixed()
     bound = bind(binder, router)

@@ -1,15 +1,15 @@
-"""T-116: a route forced through runtime config is honoured (C4, R11, D2, D7).
+"""A route forced through runtime config is honoured.
 
-`config_specs` declares the `"route"` configurable key (REQ-C4-1), which `_plan` reads ahead of
+`config_specs` declares the `"route"` configurable key, which `_plan` reads ahead of
 the strategy: a forced route skips the strategy entirely, never calling its `decide` /
-`adecide` (REQ-R11-1, D2). An unavailable forced route — unknown, or unable to use tools that
-are bound — errors by default and falls back only under `on_unavailable_forced_route="fallback"`
-(REQ-R11-2), recording `forced=True` throughout and `fallback=True` with a reason naming the
-forced route and why, when it gave way (REQ-R11-3). Everything else in runtime config keeps
-reaching the route exactly as before (REQ-C4-2).
+`adecide`. An unavailable forced route — unknown, or unable to use tools that
+are bound — errors by default and falls back only under `on_unavailable_forced_route="fallback"`,
+recording `forced=True` throughout and `fallback=True` with a reason naming the
+forced route and why, when it gave way. Everything else in runtime config keeps
+reaching the route exactly as before.
 
 Neighbours, not repeated here: capability detection itself, and what `_divert` does with an
-ordinary (unforced) diversion, are `test_tools.py`'s (D5, R10); R9's own fallback — a strategy
+ordinary (unforced) diversion, are `test_tools.py`'s; the ordinary fallback — a strategy
 that can't decide — is `test_fallback.py`'s.
 """
 
@@ -59,7 +59,7 @@ class Answer(BaseModel):
 class Counting(RoutingStrategy):
     """Would always choose `would_choose`; counts how often it is consulted.
 
-    What proves REQ-R11-1's "the strategy's `decide` is not called": a forced route that still
+    What proves "the strategy's `decide` is not called": a forced route that still
     left `calls == 0` was never given the chance to disagree.
     """
 
@@ -73,7 +73,7 @@ class Counting(RoutingStrategy):
 
 
 class ConfigCapturingRoute(FakeChatModel):
-    """A route that keeps a copy of every `RunnableConfig` it was invoked with (REQ-C4-2)."""
+    """A route that keeps a copy of every `RunnableConfig` it was invoked with."""
 
     configs_seen: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -119,16 +119,16 @@ def tool_router(**fields: Any) -> tuple[ChatRouter, dict[str, BaseChatModel]]:
 FORCED_CONVENTIONS = tuple(c for c in ALL_CONVENTIONS if c not in ("generate", "agenerate"))
 """Every calling convention that carries a `RunnableConfig` a forced route can ride in.
 
-`generate` / `agenerate` cannot (REQ-C2-2): they take `callbacks`, `tags`, `metadata`,
+`generate` / `agenerate` cannot: they take `callbacks`, `tags`, `metadata`,
 `run_name` and `run_id` as separate arguments and no config at all — see
 `test_generate_and_agenerate_have_no_way_to_carry_a_forced_route`."""
 
 
-# --- REQ-C4-1: the key is declared, and both standard ways to set it force the route ---
+# --- the key is declared, and both standard ways to set it force the route ---
 
 
 def test_config_specs_declares_the_route_key() -> None:
-    """REQ-C4-1, D7: exactly one spec, `id="route"`, defaulting to unforced (`None`)."""
+    """Exactly one spec, `id="route"`, defaulting to unforced (`None`)."""
     router, routes = router_of()
 
     (spec,) = router.config_specs
@@ -142,7 +142,7 @@ def test_config_specs_declares_the_route_key() -> None:
 
 @pytest.mark.parametrize("convention", FORCED_CONVENTIONS)
 async def test_config_configurable_route_forces_it(convention: AnyConvention) -> None:
-    """REQ-C4-1, REQ-R11-1: `config={"configurable": {"route": ...}}` forces the named route on
+    """`config={"configurable": {"route": ...}}` forces the named route on
     every convention that carries a config — including `batch`, `abatch` and `astream_events`,
     which reach it through `Runnable` rather than the router's own entry points."""
     strategy = Counting()
@@ -159,7 +159,7 @@ async def test_config_configurable_route_forces_it(convention: AnyConvention) ->
 
 
 def test_with_config_configurable_route_forces_it_too() -> None:
-    """REQ-C4-1: `with_config(configurable={"route": ...})` — LangChain's other standard way to
+    """`with_config(configurable={"route": ...})` — LangChain's other standard way to
     set a configurable field — forces it exactly the same way as passing `config=` directly."""
     strategy = Counting()
     router, _ = router_of(strategy=strategy)
@@ -195,8 +195,8 @@ def test_a_route_named_none_is_not_forced() -> None:
 async def test_generate_and_agenerate_have_no_way_to_carry_a_forced_route(
     convention: Literal["generate", "agenerate"],
 ) -> None:
-    """REQ-C2-2: `generate` / `agenerate` take no `RunnableConfig` at all, so there is nowhere
-    for `configurable["route"]` to ride — expected, not a gap in R11's coverage."""
+    """`generate` / `agenerate` take no `RunnableConfig` at all, so there is nowhere
+    for `configurable["route"]` to ride — expected, not a gap in the forced-route coverage."""
     router, _ = router_of()
 
     with pytest.raises(ValueError, match=r"generate\(\) has no argument for"):
@@ -208,11 +208,11 @@ async def test_generate_and_agenerate_have_no_way_to_carry_a_forced_route(
         )
 
 
-# --- REQ-R11-1: the strategy is skipped outright, and no strategy run opens for it (D2, D9) ---
+# --- the strategy is skipped outright, and no strategy run opens for it ---
 
 
 async def test_no_strategy_run_opens_for_a_forced_route() -> None:
-    """D2, D9: skipping the strategy means no strategy run — the route's call is the router
+    """Skipping the strategy means no strategy run — the route's call is the router
     run's only child — and the forced record is the one both places on the trace carry."""
     strategy = Counting()
     router, _ = router_of(strategy=strategy)
@@ -234,11 +234,11 @@ async def test_no_strategy_run_opens_for_a_forced_route() -> None:
     assert routing_decision(message) == RoutingDecision.from_dict(record)
 
 
-# --- REQ-R11-2, REQ-R11-3: an unknown forced route ---
+# --- an unknown forced route ---
 
 
 def test_an_unknown_forced_route_errors_by_default() -> None:
-    """REQ-R11-2: `on_unavailable_forced_route` defaults to `"error"` — an unknown name raises
+    """`on_unavailable_forced_route` defaults to `"error"` — an unknown name raises
     `ForcedRouteError` naming it, before the strategy or any route is ever touched."""
     strategy = Counting()
     router, routes = router_of(strategy=strategy)
@@ -255,10 +255,10 @@ def test_an_unknown_forced_route_errors_by_default() -> None:
 
 
 def test_an_unknown_forced_route_falls_back_under_the_fallback_setting() -> None:
-    """REQ-R11-2, REQ-R11-3: `on_unavailable_forced_route="fallback"` sends the request to the
-    default route instead, with exactly one `ForcedRouteWarning` — not `FallbackWarning`, R9's
-    own — and both `forced=True` and `fallback=True` recorded, the reason naming the forced
-    route and why it could not be used."""
+    """`on_unavailable_forced_route="fallback"` sends the request to the
+    default route instead, with exactly one `ForcedRouteWarning` — not `FallbackWarning`, the
+    strategy fallback's own — and both `forced=True` and `fallback=True` recorded, the reason naming
+    the forced route and why it could not be used."""
     strategy = Counting()
     router, routes = router_of(strategy=strategy, on_unavailable_forced_route="fallback")
 
@@ -285,12 +285,12 @@ def test_an_unknown_forced_route_falls_back_under_the_fallback_setting() -> None
     assert [len(call_log(route)) for route in routes.values()] == [1, 0, 0]
 
 
-# --- REQ-R11-2, REQ-R11-3: a forced route that exists but can't use the bound tools ---
+# --- a forced route that exists but can't use the bound tools ---
 
 
 def test_a_tool_incapable_forced_route_errors_by_default() -> None:
-    """REQ-R11-2, R10: when tools are bound, a forced route needs to be able to use them too —
-    the same D5 signals `_divert` reads for any other route — or it is refused just as an
+    """When tools are bound, a forced route needs to be able to use them too —
+    the same signals `_divert` reads for any other route — or it is refused just as an
     unknown name is."""
     router, routes = tool_router()
     with pytest.warns(ToolSupportWarning):
@@ -307,7 +307,7 @@ def test_a_tool_incapable_forced_route_errors_by_default() -> None:
 
 
 def test_a_tool_incapable_forced_route_falls_back_under_the_fallback_setting() -> None:
-    """REQ-R11-2, REQ-R11-3: the same `"fallback"` path as the unknown-route case, for a route
+    """The same `"fallback"` path as the unknown-route case, for a route
     that exists but can't use the bound tools."""
     router, routes = tool_router(on_unavailable_forced_route="fallback")
     with pytest.warns(ToolSupportWarning):
@@ -329,8 +329,8 @@ def test_a_tool_incapable_forced_route_falls_back_under_the_fallback_setting() -
 
 
 def test_a_forced_route_that_cannot_use_structured_output_is_refused_too() -> None:
-    """REQ-R10-4, REQ-R11-2: `with_structured_output` builds on tool binding, so the same rule
-    applies through it — R10's parity requirement, exercised for a forced route."""
+    """`with_structured_output` builds on tool binding, so the same rule
+    applies through it — the parity tool-aware routing requires, exercised for a forced route."""
     router, _ = tool_router()
     with pytest.warns(ToolSupportWarning):
         bound = router.with_structured_output(Answer)
@@ -359,8 +359,9 @@ def test_a_forced_route_with_nothing_bound_needs_only_to_exist() -> None:
 
 async def test_a_forced_route_fallback_onto_an_incapable_default_is_diverted_too() -> None:
     """`_divert`'s own docstring promise: a forced-route fallback is not special-cased out of
-    R10's diversion. Here the default itself can't use the bound tools, so after R11's fallback
-    lands on it, R10 diverts a second time — both facts land in the one record."""
+    tool diversion. Here the default itself can't use the bound tools, so after the forced-route
+    fallback lands on it, tool-aware routing diverts a second time — both facts land in the one
+    record."""
     routes: dict[str, BaseChatModel] = {
         "cheap": FakeChatModel(model_name="model-cheap", reply="cheap answer"),
         "capable": ToolCallingFakeChatModel(model_name="model-capable", reply="capable answer"),
@@ -394,14 +395,14 @@ async def test_a_forced_route_fallback_onto_an_incapable_default_is_diverted_too
     assert [len(call_log(route)) for route in routes.values()] == [0, 1]
 
 
-# --- config_specs is visible through every wrapper (D7) ---
+# --- config_specs is visible through every wrapper ---
 
 
 def test_config_specs_is_visible_bound_and_with_config() -> None:
-    """D7: `bind_tools`, `with_structured_output` and a plain `with_config` all still expose
+    """`bind_tools`, `with_structured_output` and a plain `with_config` all still expose
     the `"route"` spec — `bind_tools`/`with_config` through `RunnableBinding.config_specs`
     forwarding to `self.bound.config_specs` (`runnables/base.py`), and
-    `with_structured_output` through `StructuredRouter.config_specs` (`_tools.py`, T-115)."""
+    `with_structured_output` through `StructuredRouter.config_specs` (`_tools.py`)."""
     router, _ = tool_router()
     expected = router.config_specs
 
@@ -417,7 +418,7 @@ def test_config_specs_is_visible_bound_and_with_config() -> None:
 
 
 def test_a_forced_route_works_end_to_end_through_bind_tools() -> None:
-    """D7: the spec being visible is only half of it — forcing has to actually work once a
+    """The spec being visible is only half of it — forcing has to actually work once a
     router is bound, not only on the bare router."""
     router, routes = tool_router()
     with pytest.warns(ToolSupportWarning):
@@ -431,14 +432,14 @@ def test_a_forced_route_works_end_to_end_through_bind_tools() -> None:
     assert len(call_log(routes["cheap"])) == 1
 
 
-# --- REQ-C4-2: everything else in runtime config keeps reaching the route unchanged ---
+# --- everything else in runtime config keeps reaching the route unchanged ---
 
 
 def test_other_runtime_configuration_still_reaches_the_route_unchanged() -> None:
-    """REQ-C4-2: `tags`, `metadata`, `callbacks` and `max_concurrency` set on the router's
-    config keep reaching the route exactly as before T-116 — forcing a route changes nothing
-    about the rest of the config. `run_name` names the *router's* own run, as it already did
-    (T-110's `test_the_caller_s_configuration_reaches_the_route`); it is not repeated onto the
+    """`tags`, `metadata`, `callbacks` and `max_concurrency` set on the router's
+    config keep reaching the route exactly as before forced routes existed — forcing a route changes
+    nothing about the rest of the config. `run_name` names the *router's* own run, as it already did
+    (`test_the_caller_s_configuration_reaches_the_route`); it is not repeated onto the
     route's own run, since `_route_call` replaces the route run's callbacks (which drops a
     `run_name` meant for the same run as the old callbacks) — unrelated to forcing, and
     unchanged by it."""
@@ -473,7 +474,7 @@ def test_other_runtime_configuration_still_reaches_the_route_unchanged() -> None
 async def test_forcing_a_route_does_not_disturb_config_on_any_convention(
     convention: Convention,
 ) -> None:
-    """REQ-C4-2: the regression check repeated across every convention the router overrides
+    """The regression check repeated across every convention the router overrides
     itself — a forced route is still just a request, and the rest of its config travels with
     it exactly as an unforced one's does."""
     routes: dict[str, BaseChatModel] = {

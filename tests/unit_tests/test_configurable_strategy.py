@@ -1,4 +1,4 @@
-"""T-132: the configurable strategy — REQ-R6-3.
+"""The configurable strategy: the headline use cases from configuration alone.
 
 The headline tests express both §4 use cases as configuration alone: `cost_tiering()` and
 `domain_routing()` are module-level so the same two setups run on the strategy alone, through
@@ -7,7 +7,7 @@ parts they are made of: each condition, priority and tie-breaking, everything th
 construction (and the dead-rule check's reach in both directions), and what fails only on a
 request — narrowly.
 
-Every test in this module runs under `model_calls`, the counter REQ-R7-1 asks for, installed as a
+Every test in this module runs under `model_calls`, the no-extra-calls counter, installed as a
 LangChain configure hook the way `test_keyword_strategy.py` does it: it sees any LLM run started
 anywhere, including one a strategy made without passing `request.config`. A test that
 legitimately calls a route says so with `expect(...)`; every other test must end with no model
@@ -87,7 +87,7 @@ def make_request(
     routes: tuple[str, ...] = ROUTES,
     tools: bool = False,
 ) -> RoutingRequest:
-    """The current request as the router hands it to a strategy (R4, C7)."""
+    """The current request as the router hands it to a strategy."""
     message = HumanMessage(content=list(blocks)) if blocks is not None else HumanMessage(text)
     request = build_request(
         [message],
@@ -123,11 +123,11 @@ def calls_per_route(routes: dict[str, BaseChatModel]) -> dict[str, int]:
     return {name: len(call_log(route)) for name, route in routes.items()}
 
 
-# REQ-R7-1 · the counter every test in this module runs under
+# the counter every test in this module runs under
 
 
 class ModelCalls(BaseCallbackHandler):
-    """Every model run started while this handler is installed (REQ-R7-1's counter)."""
+    """Every model run started while this handler is installed (the no-extra-calls counter)."""
 
     def __init__(self) -> None:
         self.started: list[str] = []
@@ -172,7 +172,7 @@ def counting() -> Iterator[ModelCalls]:
 
 @pytest.fixture(autouse=True)
 def model_calls() -> Iterator[ModelCalls]:
-    """REQ-R7-1: no test here can pass by not looking — the calls it made are asserted for it."""
+    """No test here can pass by not looking — the calls it made are asserted for it."""
     with counting() as calls:
         yield calls
         assert calls.started == calls.expected
@@ -264,9 +264,9 @@ TIERING_TEXTS = [text for _, text, _, _ in TIERING_CASES]
 
 @pytest.mark.parametrize(("text", "route", "reason"), TIERING)
 def test_cost_tiering_is_configuration_alone(text: str, route: str, reason: str) -> None:
-    """REQ-R6-3, §4: cheap for short simple requests, frontier for long or code-bearing ones —
+    """Cheap for short simple requests, frontier for long or code-bearing ones —
     built from rules and conditions, with no strategy class, and each decision's reason names the
-    rule and the signal that decided it (R2)."""
+    rule and the signal that decided it."""
     strategy = cost_tiering()
 
     assert type(strategy) is ConfigurableStrategy
@@ -295,9 +295,9 @@ DOMAIN = [
 
 @pytest.mark.parametrize(("text", "expected"), DOMAIN)
 def test_domain_routing_is_configuration_alone(text: str, expected: RoutingChoice | None) -> None:
-    """REQ-R6-3, §4: code requests to a code route, built from keywords and a signal with no
+    """Code requests to a code route, built from keywords and a signal with no
     strategy class. Everything else is a request the rules have nothing to say about — `None`,
-    which the router turns into its default route (R9)."""
+    which the router turns into its default route."""
     strategy = domain_routing()
 
     assert type(strategy) is ConfigurableStrategy
@@ -305,7 +305,7 @@ def test_domain_routing_is_configuration_alone(text: str, expected: RoutingChoic
 
 
 def test_the_setups_define_no_strategy_class() -> None:
-    """REQ-R6-3: "without a strategy class" is checked at the source — neither setup declares a
+    """ "without a strategy class" is checked at the source — neither setup declares a
     class or a `decide`, so nothing in them is code a user would have to write and test."""
     for setup in (cost_tiering, domain_routing, independent_cost_tiering):
         body = inspect.getsource(setup).split('"""')[-1]  # past the docstring, which says so
@@ -314,7 +314,7 @@ def test_the_setups_define_no_strategy_class() -> None:
 
 
 def test_a_reader_sees_from_the_configuration_what_will_happen() -> None:
-    """REQ-R6-3: the strategy prints as the rules it holds, each with the condition in words —
+    """The strategy prints as the rules it holds, each with the condition in words —
     what a user reads to know what a request will do, without running one."""
     assert repr(cost_tiering()) == (
         "ConfigurableStrategy(["
@@ -331,7 +331,7 @@ def route_of(strategy: ConfigurableStrategy, text: str) -> str | None:
 
 
 def test_the_order_independent_spelling_decides_the_same_in_any_order() -> None:
-    """REQ-R6-3: `not_` is what lets a rule be read without the rules above it. Both rules of
+    """`not_` is what lets a rule be read without the rules above it. Both rules of
     the policy stand alone, so writing them in the other order — or ranking them any way at all —
     gives the same decisions as the ordered spelling above, on every request of the corpus."""
     ordered = cost_tiering()
@@ -358,7 +358,7 @@ def test_the_order_independent_spelling_decides_the_same_in_any_order() -> None:
 async def test_cost_tiering_through_the_router(
     convention: Convention, text: str, route: str, reason: str, model_calls: ModelCalls
 ) -> None:
-    """REQ-R6-3, R2: the configured strategy plugged in through `strategy=` — the tier its rules
+    """The configured strategy plugged in through `strategy=` — the tier its rules
     picked answers on every entry point, nothing warns (an `always()` rule is a decision, not a
     fallback), and the record carries the reason that names the rule."""
     model_calls.expect("FakeChatModel")
@@ -380,7 +380,7 @@ async def test_cost_tiering_through_the_router(
 async def test_domain_routing_through_the_router(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """REQ-R6-3, R2: a code request goes to the code route, silently, with the rule on the
+    """A code request goes to the code route, silently, with the rule on the
     record."""
     model_calls.expect("FakeChatModel")
     router, routes = make_router(domain_routing())
@@ -403,7 +403,7 @@ async def test_domain_routing_through_the_router(
 async def test_a_request_no_rule_matches_takes_the_default_route(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """R9: "everything else" left to the router is its own fallback — the default route answers,
+    """ "everything else" left to the router is its own fallback — the default route answers,
     exactly one `FallbackWarning` fires, and the record says who couldn't decide. The strategy
     itself neither warns nor raises."""
     model_calls.expect("FakeChatModel")
@@ -431,7 +431,7 @@ async def test_a_request_no_rule_matches_takes_the_default_route(
 async def test_a_final_always_rule_makes_everything_else_a_decision(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """R2, R9: domain routing with `Rule("small", always())` last — the same request that fell
+    """Domain routing with `Rule("small", always())` last — the same request that fell
     back above is now a decision with a reason of its own: no warning, `fallback` unset."""
     model_calls.expect("FakeChatModel")
     carries_code = signal_at_least(code_signal, 0.5, name="code")
@@ -492,7 +492,7 @@ def test_a_keyword_reads_a_request_as_keyword_strategy_does() -> None:
 
 
 def test_a_keyword_names_the_word_that_matched() -> None:
-    """R2: several keywords are tried in the order given and the first that is in the text is the
+    """Several keywords are tried in the order given and the first that is in the text is the
     reason; a compiled pattern is written as its author wrote it, flags included."""
     request = make_request("a python regex")
 
@@ -528,7 +528,7 @@ def test_a_signal_is_named_after_its_function_unless_told_otherwise() -> None:
 
 def test_a_signal_that_returns_no_number_fails_the_request_it_ran_for() -> None:
     """A signal is user code, so what it returns is checked when it runs: a clear error, which the
-    router reports as any other strategy failure (R9), rather than a comparison's own."""
+    router reports as any other strategy failure, rather than a comparison's own."""
     request = make_request("anything")
     broken: Signal = lambda request: None  # type: ignore[assignment,return-value]  # noqa: E731
 
@@ -539,7 +539,7 @@ def test_a_signal_that_returns_no_number_fails_the_request_it_ran_for() -> None:
 
 
 def test_a_modality_holds_for_a_request_that_carries_it() -> None:
-    """C7: `modality` reads the request's modalities — here from a real text-and-image message."""
+    """`modality` reads the request's modalities — here from a real text-and-image message."""
     picture = make_request(
         "what is this?", blocks=[{"type": "text", "text": "what is this?"}, IMAGE]
     )
@@ -683,7 +683,7 @@ def test_a_condition_reads_as_the_words_of_its_configuration() -> None:
 
 
 def test_a_script_without_spaces_needs_a_predicate_to_be_called_long() -> None:
-    """A limit the signals bring with them (T-131's finding), pinned so nobody meets it in
+    """A limit the signals bring with them, pinned so nobody meets it in
     production: `length_signal` counts whitespace-separated words, so a long request in Chinese
     reads as one word and scores nothing. A predicate on the text's length is the way round —
     and it is a rule like any other."""
@@ -788,7 +788,7 @@ def test_a_catch_all_can_be_declared_first_with_a_lower_priority() -> None:
 
 
 def test_an_unnamed_rule_goes_by_its_declaration_position() -> None:
-    """R2: a rule with no name is "rule #N" — N counting from 1 in the order written, not the
+    """A rule with no name is "rule #N" — N counting from 1 in the order written, not the
     order tried, so it points at the line a reader has open."""
     strategy = ConfigurableStrategy(
         [Rule("small", keywords("a"), name="named"), Rule("coder", keywords("b"), priority=9)]
@@ -806,7 +806,7 @@ def test_an_unnamed_rule_goes_by_its_declaration_position() -> None:
 
 
 def test_nothing_matched_is_no_decision_and_no_warning() -> None:
-    """R9: `None` means "can't decide", and the fallback with its warning is the router's — a
+    """`None` means "can't decide", and the fallback with its warning is the router's — a
     strategy that warned too would double every notice the application sees."""
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -817,7 +817,7 @@ def test_nothing_matched_is_no_decision_and_no_warning() -> None:
 
 
 def test_a_request_with_no_text_matches_no_keyword() -> None:
-    """R4, C7: an image on its own has no words, so a keyword rule abstains — while a `modality`
+    """An image on its own has no words, so a keyword rule abstains — while a `modality`
     rule is exactly the condition that does read it."""
     picture = make_request("", blocks=[IMAGE])
 
@@ -1011,7 +1011,7 @@ BAD_CONFIGURATION: list[Any] = [
 def test_configuration_that_could_never_work_fails_at_construction(
     build: Any, message: str
 ) -> None:
-    """REQ-R6-3: everything that can be judged from the configuration alone is judged when it is
+    """Everything that can be judged from the configuration alone is judged when it is
     built — a `RoutingError` naming what is wrong, never a surprise on the first request."""
     with pytest.raises(RoutingError, match=rf"^{re.escape(message)}$"):
         build()
@@ -1027,7 +1027,7 @@ class AsyncPredicate:
 
 
 def test_an_async_function_is_refused_where_a_synchronous_one_is_called() -> None:
-    """REQ-R6-3: an `async def` returns a coroutine, which is truthy — so a rule built on one
+    """An `async def` returns a coroutine, which is truthy — so a rule built on one
     would match every request, silently. It is refused when built, as a function or as a
     callable object."""
     with pytest.raises(
@@ -1207,7 +1207,7 @@ DEAD_RULES: list[Any] = [
 def test_a_rule_that_can_never_fire_is_refused_and_one_that_can_is_not(
     rules: list[Rule], message: str | None
 ) -> None:
-    """REQ-R6-3: conflicting and unreachable rules fail at construction. The check is sound, so a
+    """Conflicting and unreachable rules fail at construction. The check is sound, so a
     rule it reports is really dead — and the cases with `None` are the ones it must leave alone:
     the specific rule first, a threshold order that works, a priority that reorders."""
     if message is None:
@@ -1242,8 +1242,8 @@ def test_a_rule_the_check_calls_dead_never_fires_and_the_reverse_order_does() ->
 def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
     """A typo costs the requests its own rule would have taken, and nothing else: matching comes
     before any check of the router's names, so the working rules keep working and only the
-    mistyped one ends in a fallback (R9). Validating every name up front would send every
-    request to the default route over one bad key — the mistake T-130's review found."""
+    mistyped one ends in a fallback. Validating every name up front would send every
+    request to the default route over one bad key — a mistake a review once found."""
     strategy = ConfigurableStrategy(
         [
             Rule("coder", keywords("python"), name="code"),
@@ -1264,7 +1264,7 @@ def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
 def test_a_rule_set_that_names_no_route_the_router_has_raises_on_the_request() -> None:
     """The one case that can never decide anything: not a rule to fall back from, a rule set with
     no answer to give. A strategy is built before the router, so `request.routes` is its first
-    sight of the real names — it says so there, and the router records it (R9)."""
+    sight of the real names — it says so there, and the router records it."""
     strategy = ConfigurableStrategy(
         [Rule("codr", keywords("python")), Rule("codr", keywords("sql")), Rule("frontir", always())]
     )
@@ -1284,7 +1284,7 @@ def test_a_rule_set_that_names_no_route_the_router_has_raises_on_the_request() -
 async def test_a_phantom_route_reaches_the_caller_as_a_fallback_and_only_for_its_rule(
     convention: Convention, model_calls: ModelCalls
 ) -> None:
-    """R9, R2: the router reports a route that doesn't exist, precisely. The mistyped rule's own
+    """The router reports a route that doesn't exist, precisely. The mistyped rule's own
     requests fall back with the cause on the record; the requests another rule takes are
     untouched (no warning, the route answers)."""
     model_calls.expect("FakeChatModel")
@@ -1329,7 +1329,7 @@ async def test_a_phantom_route_reaches_the_caller_as_a_fallback_and_only_for_its
 def test_rules_naming_no_route_at_all_reach_the_caller_as_a_fallback(
     model_calls: ModelCalls,
 ) -> None:
-    """R9, R2: the loud case, end to end — the first request says so, with the cause and both
+    """The loud case, end to end — the first request says so, with the cause and both
     name lists on the record for whoever fixes it."""
     model_calls.expect("FakeChatModel")
     strategy = ConfigurableStrategy([Rule("codr", keywords("python"))])
@@ -1355,7 +1355,7 @@ def test_rules_naming_no_route_at_all_reach_the_caller_as_a_fallback(
 def test_a_predicate_that_raises_fails_only_the_request_it_ran_for(
     model_calls: ModelCalls,
 ) -> None:
-    """R9: a predicate is user code, checked when it runs. One that raises — or returns a
+    """A predicate is user code, checked when it runs. One that raises — or returns a
     non-bool — ends that request in the router's fallback with the cause on the record, and no
     other request: rules above it still decide theirs."""
     model_calls.expect("FakeChatModel", "FakeChatModel")
@@ -1391,8 +1391,8 @@ def test_a_predicate_that_raises_fails_only_the_request_it_ran_for(
 
 
 def test_a_configuration_sees_the_current_request_only() -> None:
-    """R4: `wants_full_context` stays at the interface's default. A configuration can't switch it
-    on — it is a class attribute the router reads before it builds the request (D6)."""
+    """`wants_full_context` stays at the interface's default. A configuration can't switch it
+    on — it is a class attribute the router reads before it builds the request."""
     assert ConfigurableStrategy.wants_full_context is False
     assert ConfigurableStrategy([Rule("small", always())]).wants_full_context is False
 
@@ -1404,7 +1404,7 @@ def conversation_is_long(request: RoutingRequest) -> bool:
 def test_a_predicate_sees_the_transcript_only_in_a_subclass_that_opts_in(
     model_calls: ModelCalls,
 ) -> None:
-    """R4, D6: the documented way to let a rule read the conversation — a one-line subclass with
+    """The documented way to let a rule read the conversation — a one-line subclass with
     the class attribute set. The same rules, on the same three-message conversation, route on the
     history in the subclass and don't see any in the base class."""
 
@@ -1437,7 +1437,7 @@ def test_a_predicate_sees_the_transcript_only_in_a_subclass_that_opts_in(
 
 
 def test_the_component_is_an_ordinary_public_strategy() -> None:
-    """REQ-R6-1: one interface serves all three levels — the configured strategy is a concrete
+    """One interface serves all three levels — the configured strategy is a concrete
     `RoutingStrategy` exported from the package, on the interface's defaults."""
     strategy = cost_tiering()
 
@@ -1466,7 +1466,7 @@ def test_a_strategy_is_immutable_once_built() -> None:
 
 
 async def test_the_async_path_decides_the_same() -> None:
-    """C2: `adecide` is the interface's default — `decide` in a worker thread — which is safe
+    """`adecide` is the interface's default — `decide` in a worker thread — which is safe
     because the configuration never changes; concurrent requests each get their own answer."""
     strategy = cost_tiering()
     requests = [make_request(text) for text in TIERING_TEXTS]
@@ -1476,13 +1476,13 @@ async def test_the_async_path_decides_the_same() -> None:
     assert answers == [strategy.decide(request) for request in requests * 8]
 
 
-# REQ-R7-1 · no model, API or network call
+# no model, API or network call
 
 
 async def test_the_strategy_makes_no_model_or_network_call(
     model_calls: ModelCalls, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """REQ-R7-1: deciding starts no LLM run and opens no socket, with every kind of condition — on
+    """Deciding starts no LLM run and opens no socket, with every kind of condition — on
     a match, on a miss, on the async path and on a configuration that fails. The socket guard is
     what covers an embeddings or HTTP call, which LangChain's callbacks would not report at all.
 
@@ -1520,7 +1520,7 @@ async def test_the_strategy_makes_no_model_or_network_call(
 
 
 def test_the_no_call_check_catches_a_call(model_calls: ModelCalls) -> None:
-    """REQ-R7-1: the counter is not vacuous here — a predicate that does call a model (which the
+    """The counter is not vacuous here — a predicate that does call a model (which the
     component itself never does; user code may) is caught, with no run around it at all."""
     model = FakeChatModel(reply="yes")
     strategy = ConfigurableStrategy(

@@ -1,16 +1,16 @@
-"""T-118: C6 — errors, retries and fallbacks stay LangChain's job.
+"""Errors, retries and fallbacks stay LangChain's job.
 
 The router adds no error handling of its own. A route's exception is the caller's exception:
 the same object, with its type and args intact, raised after exactly one attempt and with no
-`FallbackWarning` — R9's fallback absorbs a *strategy's* failure and nothing else (REQ-R9-3).
+`FallbackWarning` — the fallback absorbs a *strategy's* failure and nothing else.
 What a caller wants instead is what LangChain already gives every runnable:
 `router.with_retry(...)` and `router.with_fallbacks([...])` wrap the router as they wrap a
-model (REQ-C6-2). A *route* is not wrapped that way — it is a chat model, and a runnable
+model. A *route* is not wrapped that way — it is a chat model, and a runnable
 wrapped around one is refused at construction, because retrying a wrapped route would work on
-`invoke` and silently not when streamed (REQ-C6-2, amended 2026-09-21).
+`invoke` and silently not when streamed.
 
 However a call fails, the router's chain run closes through `on_chain_error` and no run is left
-open (REQ-C6-3) — including on the paths that are not ordinary exceptions, where absorbing the
+open — including on the paths that are not ordinary exceptions, where absorbing the
 error would be the real bug: a `KeyboardInterrupt` or a cancelled task must reach the caller
 untouched rather than be recorded as a strategy that "could not decide".
 """
@@ -133,7 +133,8 @@ class PicksFrontier(RoutingStrategy):
 
 
 class Abstains(RoutingStrategy):
-    """A strategy with no opinion, so the R9 fallback runs and can be escalated to an error."""
+    """A strategy with no opinion, so the default-route fallback runs and can be escalated to an
+    error."""
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         return None
@@ -157,7 +158,7 @@ def failing_router(
 
     With no strategy, `frontier` is the default route, so it is the one that runs. With a
     strategy — which always picks `frontier` — `cheap` is the default instead, so a failure the
-    router wrongly absorbed could not hide: it would come back as `"cheap answer"` (REQ-R9-3).
+    router wrongly absorbed could not hide: it would come back as `"cheap answer"`.
     """
     routes: dict[str, BaseChatModel] = {
         "frontier": frontier if frontier is not None else FailingChatModel(),
@@ -200,7 +201,7 @@ async def stream_into(
 ) -> None:
     """Stream into `chunks`, so a caller expecting a failure can still read what arrived.
 
-    A stream that dies has handed its caller real chunks already, and C6 says those are the
+    A stream that dies has handed its caller real chunks already, and those are the
     route's own; `pytest.raises` returns the exception, not the chunks, so they go in a list
     the test holds.
     """
@@ -228,7 +229,7 @@ def outline(collector: RunCollectorCallbackHandler) -> list[tuple[str, bool]]:
 
 
 def open_runs(collector: RunCollectorCallbackHandler) -> list[str]:
-    """Runs the tracer started and never saw end — REQ-C6-3's "no dangling open run"."""
+    """Runs the tracer started and never saw end — the "no dangling open run" check."""
     return [run.name for run in collector.run_map.values()]
 
 
@@ -238,12 +239,12 @@ def one_tree(collector: RunCollectorCallbackHandler) -> tuple[Run, list[Run]]:
     return root, list(root.child_runs or [])
 
 
-# --- REQ-C6-1 / REQ-R9-3: a route's exception is the caller's exception ---
+# --- a route's exception is the caller's exception ---
 
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_a_route_s_exception_reaches_the_caller_unchanged(convention: Convention) -> None:
-    """REQ-C6-1: the selected route's exception arrives as the same object, with its type and
+    """The selected route's exception arrives as the same object, with its type and
     args intact. The route ran exactly once, so the router retried nothing, and it warned
     about nothing."""
     router, routes = failing_router()
@@ -262,7 +263,7 @@ async def test_a_route_s_exception_reaches_the_caller_unchanged(convention: Conv
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_a_route_failure_never_reaches_another_route(convention: Convention) -> None:
-    """REQ-R9-3: R9's fallback absorbs a *strategy's* failure only. Here the strategy decided
+    """The fallback absorbs a *strategy's* failure only. Here the strategy decided
     perfectly well, so the chosen route's failure is the answer — the default route is not
     tried instead, and nothing warns about a fallback that never happened."""
     strategy = PicksFrontier()
@@ -284,8 +285,8 @@ async def test_a_route_failure_never_reaches_another_route(convention: Conventio
 async def test_a_route_that_dies_mid_stream_keeps_the_chunks_it_yielded(
     convention: Streaming,
 ) -> None:
-    """REQ-C6-1 while streaming: the chunks already handed over are the route's own — the
-    first of them carrying the record (D8) — and the failure that follows them is unchanged."""
+    """While streaming: the chunks already handed over are the route's own — the
+    first of them carrying the record — and the failure that follows them is unchanged."""
     router, routes = failing_router(frontier=HalfStreamingChatModel())
     chunks: list[AIMessage] = []
 
@@ -305,7 +306,7 @@ async def test_a_route_that_dies_mid_stream_keeps_the_chunks_it_yielded(
 
 
 def test_a_route_s_keyboard_interrupt_is_not_an_error_to_absorb() -> None:
-    """REQ-C6-1 for what is not an `Exception`: an interrupted route stops the caller.
+    """For what is not an `Exception`: an interrupted route stops the caller.
     Answering from another route here would answer a request the user gave up on."""
     router, routes = failing_router(frontier=InterruptingChatModel())
 
@@ -320,12 +321,12 @@ def test_a_route_s_keyboard_interrupt_is_not_an_error_to_absorb() -> None:
 
 
 async def test_a_cancelled_route_ends_as_it_does_without_the_router() -> None:
-    """REQ-C6-1 on the async path, where `BaseChatModel` itself does not pass a cancelled call
+    """On the async path, where `BaseChatModel` itself does not pass a cancelled call
     through unchanged: `agenerate` collects any `BaseException` but filters its `on_llm_end`
     cleanup on `Exception` (`chat_models.py:1837`), so a `CancelledError` becomes an
     `AttributeError` before any caller sees it.
 
-    That is LangChain's behaviour, and C6 says the router neither hides it nor adds to it: the
+    That is LangChain's behaviour, and the router neither hides it nor adds to it: the
     same route called directly and called through the router must fail identically — and the
     router must still not treat it as a reason to answer from somewhere else.
     """
@@ -343,12 +344,12 @@ async def test_a_cancelled_route_ends_as_it_does_without_the_router() -> None:
     assert routing_warnings(caught) == []
 
 
-# --- REQ-C6-2: LangChain's own wrappers, on the router as on a model ---
+# --- LangChain's own wrappers, on the router as on a model ---
 
 
 @pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
 async def test_with_retry_retries_the_whole_routed_call(convention: Blocking) -> None:
-    """REQ-C6-2: `router.with_retry()` is the supported way to retry a routed request. Each
+    """`router.with_retry()` is the supported way to retry a routed request. Each
     attempt re-runs the pipeline under a nested run of its own, and the answer that finally
     arrives still carries its record — the wrapper sits outside the router, so nothing about
     routing changes."""
@@ -375,7 +376,7 @@ async def test_with_retry_retries_the_whole_routed_call(convention: Blocking) ->
 
 
 def test_with_retry_gives_up_with_the_route_s_own_exception() -> None:
-    """REQ-C6-2 with REQ-C6-1: when the retries run out, what surfaces is still the route's
+    """When the retries run out, what surfaces is still the route's
     exception — the wrapper re-raises it rather than one of its own."""
     router, routes = failing_router()
     retrying = router.with_retry(stop_after_attempt=2, wait_exponential_jitter=False)
@@ -391,7 +392,7 @@ def test_with_retry_gives_up_with_the_route_s_own_exception() -> None:
 async def test_with_retry_streams_exactly_as_it_does_on_a_bare_model(
     convention: Streaming,
 ) -> None:
-    """REQ-C6-2's "as on a model", including where LangChain's wrapper stops short:
+    """The router behaves "as on a model", including where LangChain's wrapper stops short:
     `RunnableBindingBase.stream` hands straight to `self.bound.stream`, so `with_retry` does
     not retry a *streamed* call at all. The router must neither paper over that nor make it
     worse — the same scenario, through a bare chat model and through a router over that model,
@@ -424,7 +425,7 @@ async def test_with_retry_streams_exactly_as_it_does_on_a_bare_model(
 async def test_with_fallbacks_hands_a_failing_router_over_to_another_model(
     convention: Blocking,
 ) -> None:
-    """REQ-C6-2: because the router lets the route's failure through, `with_fallbacks` sees it
+    """Because the router lets the route's failure through, `with_fallbacks` sees it
     and the caller gets the other model's answer. That answer is not the router's, so it
     carries no routing record, and the router warned about nothing."""
     router, routes = failing_router()
@@ -446,9 +447,9 @@ async def test_with_fallbacks_hands_a_failing_router_over_to_another_model(
 
 
 def test_with_fallbacks_leaves_the_same_trace_a_model_would() -> None:
-    """REQ-C6-2, REQ-C6-3: the router's run closes as an error before the fallback model runs,
+    """The router's run closes as an error before the fallback model runs,
     the fallback's own run is clean, and nothing is left open. The router's run is a *chain*
-    run where a model's would be an LLM run (PRD §11); which runs failed, and in what order,
+    run where a model's would be an LLM run; which runs failed, and in what order,
     is what a bare model does too — that is what "behaves as on a model" means here."""
     router, _ = failing_router()
     routed = RunCollectorCallbackHandler()
@@ -467,14 +468,14 @@ def test_with_fallbacks_leaves_the_same_trace_a_model_would() -> None:
     assert open_runs(routed) == open_runs(bare) == []
 
 
-# --- REQ-C6-3: every failure closes the router's run and leaves nothing open ---
+# --- every failure closes the router's run and leaves nothing open ---
 
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_a_route_failure_closes_the_router_s_run_as_an_error(
     convention: Convention,
 ) -> None:
-    """REQ-C6-3: the tracer records `on_chain_error` on the router's chain run, the route's
+    """The tracer records `on_chain_error` on the router's chain run, the route's
     own run is closed as an error beneath it, the router's run publishes no outputs, and no
     run is left open."""
     router, _ = failing_router()
@@ -495,7 +496,7 @@ async def test_a_route_failure_closes_the_router_s_run_as_an_error(
 async def test_a_stream_that_dies_part_way_still_closes_the_router_s_run(
     convention: Streaming,
 ) -> None:
-    """REQ-C6-3 on the streaming paths, where the failure arrives after the router has already
+    """On the streaming paths, where the failure arrives after the router has already
     handed chunks to its caller: the run still closes as an error, not as a success."""
     router, _ = failing_router(frontier=HalfStreamingChatModel())
     collector = RunCollectorCallbackHandler()
@@ -511,12 +512,12 @@ async def test_a_stream_that_dies_part_way_still_closes_the_router_s_run(
 
 
 def test_a_stream_the_caller_walks_away_from_leaves_no_run_open() -> None:
-    """REQ-C6-3's other half — "no dangling open run" — for the one path that is not a
+    """The other half of "no dangling open run", for the one path that is not a
     failure: a caller that `break`s out of `stream` and drops the generator. `GeneratorExit`
     reaches the router when the generator is finalized, and the run has to close there or the
     trace keeps an open run for a request that is long over.
 
-    What this does *not* do is withdraw the record; that is T-114's, in `test_decision.py`.
+    What this does *not* do is withdraw the record; that is covered in `test_decision.py`.
     """
     router = ChatRouter(
         routes={"frontier": FakeChatModel(reply="one two three four")},
@@ -538,8 +539,8 @@ def test_a_stream_the_caller_walks_away_from_leaves_no_run_open() -> None:
 async def test_an_interrupted_strategy_is_never_absorbed_as_a_fallback(
     convention: Convention,
 ) -> None:
-    """REQ-C6-3, and R9's limit: `KeyboardInterrupt` and a cancelled task are not "the
-    strategy could not decide". They propagate, no route is called, nothing warns, and both
+    """No dangling open run, and the fallback's limit: `KeyboardInterrupt` and a cancelled task are
+    not "the strategy could not decide". They propagate, no route is called, nothing warns, and both
     the strategy's run and the router's close as errors with nothing left open."""
     expected = KeyboardInterrupt if convention == "invoke" else asyncio.CancelledError
     router, routes = failing_router(Interrupts())
@@ -561,7 +562,7 @@ async def test_an_interrupted_strategy_is_never_absorbed_as_a_fallback(
 
 
 def test_a_fallback_warning_escalated_to_an_error_closes_both_runs() -> None:
-    """REQ-C6-3 for an application running under `-W error`: turning `FallbackWarning` into an
+    """For an application running under `-W error`: turning `FallbackWarning` into an
     exception must not strand the runs the router had already opened. It closes the strategy's
     run and its own, calls no route, and the warning reaches the caller."""
     router, routes = failing_router(Abstains())
@@ -581,21 +582,21 @@ def test_a_fallback_warning_escalated_to_an_error_closes_both_runs() -> None:
 
 
 def test_the_router_has_nothing_of_its_own_to_retry_or_fall_back_with() -> None:
-    """REQ-C6-1's "no router-level retry or model fallback", as configuration: retries and
+    """No router-level retry or model fallback, as configuration: retries and
     model fallbacks are `with_retry` / `with_fallbacks`, so the router grows no field for
-    them. `default_route` is R9's — a strategy's fallback, never a failed model's."""
+    them. `default_route` is a strategy's fallback, never a failed model's."""
     assert not {"retry", "retries", "max_retries", "fallbacks", "fallback_model"} & set(
         ChatRouter.model_fields
     )
 
 
-# --- REQ-C6-2: a route is a chat model, and a wrapped one is refused ---
+# --- a route is a chat model, and a wrapped one is refused ---
 
 
 def wrapped_routes() -> dict[str, Runnable[LanguageModelInput, AIMessage]]:
     """The wrappers someone would reach for, and the class each arrives as.
 
-    `with_retry` is the one REQ-C6-2's amendment is about; `bind` is the same shape and the
+    `with_retry` is the one the wrapped-route check is about; `bind` is the same shape and the
     likelier accident, since `model.bind(...)` reads like configuration rather than a wrapper.
     """
     model = FakeChatModel()
@@ -625,7 +626,7 @@ def refusal_of(route: Runnable[LanguageModelInput, AIMessage]) -> tuple[tuple[An
 
 @pytest.mark.parametrize("label", list(wrapped_routes()))
 def test_a_wrapped_route_is_refused_with_both_alternatives_named(label: str) -> None:
-    """REQ-C6-2: a route is a chat model. A runnable wrapped around one is rejected at
+    """A route is a chat model. A runnable wrapped around one is rejected at
     construction, by a `RoutingError` naming the route, what it actually is, and *both* ways
     to get retries — rather than by pydantic's `model_type` complaint, which names the type it
     wanted and nothing to do about it.
@@ -650,7 +651,7 @@ def test_a_wrapped_route_is_refused_with_both_alternatives_named(label: str) -> 
 
 
 def test_the_refusal_replaces_pydantic_s_type_complaint_rather_than_following_it() -> None:
-    """REQ-C6-2: the check runs `mode="before"`, so the wrapped route never reaches the field's
+    """The check runs `mode="before"`, so the wrapped route never reaches the field's
     own type check. A caller sees one error — the one that says what to do — not two, and not
     a bare `model_type`."""
     wrapped = cast("BaseChatModel", FakeChatModel().with_retry(stop_after_attempt=2))
@@ -662,8 +663,8 @@ def test_the_refusal_replaces_pydantic_s_type_complaint_rather_than_following_it
 
 
 def test_an_unusual_chat_model_is_still_a_route() -> None:
-    """REQ-C6-2's limit: the check rejects *wrappers*, not chat models that look unusual. A
-    `BaseChatModel` subclass is a route however odd it is — including one that overrides
+    """The limit of the wrapped-route check: it rejects *wrappers*, not chat models that look
+    unusual. A `BaseChatModel` subclass is a route however odd it is — including one that overrides
     `invoke` itself, which is what a wrapper is really doing."""
 
     class OpinionatedChatModel(FakeChatModel):

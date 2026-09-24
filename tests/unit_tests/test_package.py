@@ -1,11 +1,11 @@
-"""Package-level guarantees: R8 (langchain-core only) and C9 (langchain-core 1.x)."""
+"""Package-level guarantees: it needs langchain-core only, and langchain-core 1.x."""
 
 from importlib.metadata import requires, version
 
 from packaging.requirements import Requirement
 
 # The public API pinned in docs/v1-requirements.md. Tasks add their names as they land:
-# the remaining built-in strategy (T-134) is still to come.
+# the remaining built-in strategy is still to come.
 PINNED_EXPORTS = {
     "ChatRouter",
     "KeywordStrategy",
