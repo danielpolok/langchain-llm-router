@@ -2,7 +2,7 @@
 
 This is what proves the harness's wiring — usage capture, the agent tool round trip, the
 embedding-cost estimate, per-item error isolation — works before it is ever pointed at a real,
-metered provider (T-140: build and verify the harness without spending further Gemini quota).
+metered provider (build and verify the harness without spending Gemini quota).
 """
 
 from __future__ import annotations

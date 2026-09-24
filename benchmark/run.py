@@ -1,11 +1,10 @@
-"""T-140's one command to reproduce the benchmark:
+"""The one command to reproduce the benchmark:
 
     uv run python -m benchmark.run
 
-Needs `GEMINI_API_KEY` (the frontier route, the judge) and a local Ollama server serving
-`qwen3:8b` (the small route, the classifier's own model) — both real-provider preconditions this
-repo already documents in `CLAUDE.md`. Every call is real and billed; see `benchmark/README.md`
-before running this against a metered key.
+Needs `GEMINI_API_KEY`: every route, the classifier's own call, the embeddings and the judge are
+all Gemini. Every call is real and billed; see `benchmark/README.md` before running this against a
+metered key.
 """
 
 from __future__ import annotations

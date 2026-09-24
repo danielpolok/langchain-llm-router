@@ -1,4 +1,4 @@
-"""The baseline and the four strategies T-140 compares (the task's "Scope" list).
+"""The baseline and the four strategies the benchmark compares.
 
 Two candidate routes throughout, both Gemini so the whole benchmark runs from one API key with
 no local server dependency — `"small"` (`gemini-3.5-flash-lite`) and `"frontier"`
@@ -39,7 +39,7 @@ OLLAMA_SMOKE_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b"
 budget-independent sanity check uses this."""
 
 # Uncalibrated pending a real run (embedding.py: EmbeddingStrategy's threshold has no shipped
-# default by design — REQ-R7-2, D-level decision). Override with
+# default by design). Override with
 # LLM_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD once a live run's similarity scores say what a good
 # bar actually is; see benchmark/README.md.
 EMBEDDING_THRESHOLD = float(os.environ.get("LLM_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD", "0.5"))

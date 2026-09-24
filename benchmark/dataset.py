@@ -1,4 +1,4 @@
-"""The mixed workload dataset (T-140): easy/hard, several domains, single-turn and agent tasks.
+"""The mixed workload dataset: easy/hard, several domains, single-turn and agent tasks.
 
 Loaded from `data/workload.json` rather than written as Python literals, so the dataset can be
 inspected, diffed and versioned independently of the code that runs it (the task's "a versioned

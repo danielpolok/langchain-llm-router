@@ -1,5 +1,5 @@
-"""Cost math: real usage priced correctly per model, and the embedding estimate matches T-133's
-own chars-per-token method (T-140's acceptance criterion: "cost from recorded usage x price").
+"""Cost math: real usage priced correctly per model, and the embedding estimate matches the
+embedding strategy's own chars-per-token method.
 """
 
 from __future__ import annotations

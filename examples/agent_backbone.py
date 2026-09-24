@@ -1,8 +1,8 @@
-"""Agent backbone (PRD §4): the router as the model behind `create_agent`.
+"""Agent backbone: the router as the model behind `create_agent`.
 
-`ChatRouter` is a `BaseChatModel` (C1), so it goes anywhere a chat model goes, `create_agent`
-included: the strategy routes each model call the agent makes on that call's current request
-(R4), and every tool-calling round trip goes through the same routing pipeline as a plain
+`ChatRouter` is a `BaseChatModel`, so it goes anywhere a chat model goes, `create_agent`
+included: the strategy routes each model call the agent makes on that call's current request,
+and every tool-calling round trip goes through the same routing pipeline as a plain
 `invoke`. See `examples/agent_middleware.py` for combining this with `@wrap_model_call`, and
 `docs/scope.md` for when agent-state-aware selection calls for middleware instead.
 
@@ -50,7 +50,7 @@ def main() -> AIMessage:
     router = ChatRouter(
         routes={"small": small, "frontier": frontier},
         default_route="small",
-        # A weather lookup doesn't need the frontier model; only "urgent" traffic does. R4:
+        # A weather lookup doesn't need the frontier model; only "urgent" traffic does. Note:
         # every call in the tool-calling round trip below routes on this same original request,
         # not on the tool's own output.
         strategy=KeywordStrategy({"small": ["weather"], "frontier": ["urgent"]}),

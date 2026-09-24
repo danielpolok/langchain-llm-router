@@ -101,9 +101,7 @@ def _fmt_target(summary: ArmSummary) -> str:
     return "**met**" if met else "not met"
 
 
-def render_markdown(
-    summaries: dict[str, ArmSummary], *, title: str = "Benchmark results"
-) -> str:
+def render_markdown(summaries: dict[str, ArmSummary], *, title: str = "Benchmark results") -> str:
     """The markdown report: one table, a per-arm errors/tool-accuracy note, and a verdict."""
     order = [BASELINE_ARM, "keyword", "heuristic", "embedding", "classifier"]
     rows = [summaries[name] for name in order if name in summaries]

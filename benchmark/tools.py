@@ -1,4 +1,4 @@
-"""The fixed toolkit agent-kind workload items are bound against (T-140).
+"""The fixed toolkit agent-kind workload items are bound against.
 
 Five tools, one per dataset domain plus a general-purpose one, each deterministic — canned or
 computed from its arguments, never random or time-dependent — so a run is reproducible and

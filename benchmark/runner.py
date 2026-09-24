@@ -1,8 +1,8 @@
-"""Run the dataset through one arm and grade every answer (T-140).
+"""Run the dataset through one arm and grade every answer.
 
 One item, one arm: invoke the router (a two-step tool round trip for `kind == "agent"`),
 capture usage with `get_usage_metadata_callback`, read the routing decision straight off the
-response (`routing_decision`, D3), price it (`costing.py`), and grade the final answer with the
+response (`routing_decision`), price it (`costing.py`), and grade the final answer with the
 judge (`judge.py`). Errors are per item — a rate limit or a flaky local model shouldn't lose the
 rest of the run — recorded on the result rather than raised.
 """
@@ -65,7 +65,7 @@ def _run_agent(
 ) -> tuple[AIMessage, dict[str, UsageMetadata], str | None]:
     """One tool round trip: bind the full toolkit, invoke, execute at most the first tool call
     the model makes, invoke again with its result. The *first* call's routing decision is what
-    the report attributes the item to (R4: routing looks at the current request, and the first
+    the report attributes the item to (routing looks at the current request, and the first
     call is the one that saw it as a fresh human turn)."""
     bound = router.bind_tools(list(ALL_TOOLS))
     messages: list[HumanMessage | AIMessage | ToolMessage] = [HumanMessage(item.prompt)]
@@ -98,8 +98,8 @@ def run_item(
 ) -> ItemResult:
     """Run and grade one item on one arm. `embed=True` when the arm's strategy embeds the
     request (only `EmbeddingStrategy`'s arm) — the only way to know is to be told, since the
-    router's response carries no signal that an embedding call happened (D9's own docstring:
-    `Embeddings` emits no callbacks at all)."""
+    router's response carries no signal that an embedding call happened (see the embedding
+    strategy's docstring: `Embeddings` emits no callbacks at all)."""
     try:
         if item.kind == "agent":
             response, usage_by_model, tool_called = _run_agent(arm.router, item)

@@ -1,9 +1,9 @@
-# Lint, type-check and test every push to main/v1 and every pull request.
+# Lint, type-check and test every push to main and every pull request.
 name: CI
 
 on:
   push:
-    branches: [main, v1]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.10 is where async callbacks only propagate through an explicit config (D9).
+        # 3.10 is where async callbacks only propagate through an explicit config.
         python-version: ["3.10", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,20 +43,19 @@ jobs:
       # Real-provider tests skip without GEMINI_API_KEY or a reachable Ollama server.
       - run: uv run pytest -q
 
-  # REQ-C9-1: the other end of the supported range (`langchain-core>=1.1,<2` in pyproject.toml).
+  # The other end of the supported range (`langchain-core>=1.1,<2` in pyproject.toml).
   # `test` above always resolves langchain-core to today's latest 1.x, via the committed
   # `uv.lock` — that is the ceiling. One job, on 3.10 (the `test` matrix's own comment says why:
-  # it is where async callbacks only propagate through an explicit config, D9 — the Python
+  # it is where async callbacks only propagate through an explicit config — the Python
   # version most likely to show a floor regression), pinned to the floor instead of a second
   # Python axis on the matrix above: the langchain-core range and the Python range are
   # orthogonal, and crossing them combinatorially buys little for the cost of the extra jobs.
   test-min-langchain-core:
     runs-on: ubuntu-latest
     # Non-blocking for now: this job surfaces one real, pre-existing gap at the langchain-core
-    # 1.1 floor that is not fixable here — `_resolve_model_profile` (REQ-C3-4, `_profile.py`)
+    # 1.1 floor that is not fixable here — `_resolve_model_profile` (`_profile.py`)
     # is a hook `BaseChatModel`'s own `_set_model_profile` validator calls, and that validator
-    # does not exist below langchain-core 1.3.0 (bisected directly; see the REQ-C3-4 amendment,
-    # docs/v1-requirements.md) — `router.profile` is `None` at the floor regardless of what
+    # does not exist below langchain-core 1.3.0 (bisected directly) — `router.profile` is `None` at the floor regardless of what
     # `_resolve_model_profile` would return. There is also one order-dependent flake,
     # `test_strategy.py::test_adecide_carries_the_callers_context_into_decide`: it passes
     # standalone and within `tests/unit_tests` alone at this floor, but fails as part of the
@@ -86,7 +85,7 @@ jobs:
       # `langchain-core>=1.4.0,<2.0.0` — a real conflict with the floor this job tests, not a
       # resolver quirk — so the `dev` group is left out entirely and only what running `tests/`
       # needs is added back with `--with`. The two files that subclass `langchain_tests`
-      # (REQ-C1-1, REQ-C1-3 — `tests/unit_tests/test_standard_suite.py` and its
+      # (`tests/unit_tests/test_standard_suite.py` and its
       # `integration_tests` counterpart) run here too, not excluded: `langchain-tests==1.0.2`
       # (released before `langchain-core` 1.1.0 shipped, and requiring `langchain-core>=1.1.0`
       # itself — confirmed on PyPI and by actually running the standard suite against it at this

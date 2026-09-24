@@ -1,4 +1,4 @@
-"""LLM-as-judge quality scoring (T-140: "a judge model evaluates; it never routes").
+"""LLM-as-judge quality scoring: a judge model evaluates; it never routes.
 
 The judge is a model distinct from both candidate routes (`gemini-3-flash-preview` and
 `qwen3:8b`) — `DEFAULT_JUDGE_MODEL` is a separate, stronger Gemini model, chosen so grading

@@ -1,4 +1,4 @@
-"""Pinned $ pricing for the models this benchmark calls (T-140).
+"""Pinned $ pricing for the models this benchmark calls.
 
 Prices drift; these are a snapshot, not a live lookup — `PRICING_SOURCE` and `PRICING_ASOF` say
 where they came from and when, so a reader can tell whether to re-check them before trusting an
@@ -30,7 +30,7 @@ class TokenPrice:
 
 
 # Keyed by the `init_chat_model` identifier the harness uses, matching what `usage_metadata`'s
-# model name reports for the route that ran (REQ-R3-1's "keyed by the model that ran").
+# model name reports for the route that ran (usage is keyed by the model that ran).
 CHAT_PRICES: dict[str, TokenPrice] = {
     # Gemini 3.8 Flash (the "frontier" route), PRICING_ASOF: standard tier through 2026-12-31.
     "gemini-3.8-flash": TokenPrice(input_per_million=0.75, output_per_million=3.75),
@@ -51,8 +51,8 @@ CHAT_PRICES: dict[str, TokenPrice] = {
 }
 
 # Gemini Embedding 2, PRICING_ASOF: $0.20/1M text input tokens. `EmbeddingStrategy` reports no
-# usage (embedding.py's docstring), so this prices T-133's chars-per-token estimate, matching
-# what the T-140 issue asks for ("the input-length estimate from T-133").
+# usage (embedding.py's docstring), so this prices the chars-per-token estimate the strategy
+# itself uses.
 EMBEDDING_PRICE_PER_MILLION_TOKENS = 0.20
 
 

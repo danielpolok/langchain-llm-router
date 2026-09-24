@@ -1,8 +1,8 @@
 # The decision record, warnings and errors
 
-Every routed call records **which route ran and why** (R2). This page is the reference for that
+Every routed call records **which route ran and why**. This page is the reference for that
 record, for the three ways to read it back, and for every warning and error the router raises —
-R9 (fallback), R10 (tool-aware routing) and R11 (forced routes) each show up here as one.
+the default-route fallback, tool-aware routing and forced routes each show up here as one.
 
 ## The decision record
 
@@ -15,9 +15,9 @@ class RoutingDecision:
     route: str  # the route that ran
     reason: str  # why, in words, for a human reading a trace
     strategy: str | None  # the strategy's class name, or None (no strategy, or a forced route)
-    fallback: bool  # R9's path was taken: the strategy couldn't decide
-    forced: bool  # the route came from runtime config (R11)
-    diverted_from: str | None  # the tool-incapable route this request was diverted from (R10)
+    fallback: bool  # the default-route fallback was taken: the strategy couldn't decide
+    forced: bool  # the route came from runtime config
+    diverted_from: str | None  # the tool-incapable route this request was diverted from
 ```
 
 `RoutingDecision.as_dict()` is what rides under `response_metadata["routing"]` and on the trace.
@@ -38,7 +38,7 @@ Three ways, in the order they're worth reaching for:
    ```
 
 2. **The trace.** The same record is placed three times: as the strategy run's output, as part
-   of the router's own chain-run output, and in the selected route's run metadata (D9) — so it's
+   of the router's own chain-run output, and in the selected route's run metadata — so it's
    visible in LangSmith, or to any callback handler, without touching the response at all.
 
 3. **`last_routing_decision()`** — the escape hatch for the one path where nothing comes back
@@ -68,9 +68,9 @@ with warnings.catch_warnings(record=True) as caught:
 
 | Warning | Fires when | From |
 | --- | --- | --- |
-| `FallbackWarning` | The strategy failed, abstained (`decide` returned `None`), or named a route the router doesn't have. The default route answers instead, with the cause in the recorded `reason`. | R9 |
-| `ToolSupportWarning` | Once at bind time, naming the routes that can't use the bound tools; again on each request the router diverts away from a tool-incapable route (per D1: the default route if it's tool-capable, else the first tool-capable route in declaration order). | R10 |
-| `ForcedRouteWarning` | A forced route couldn't be used and the router was built with `on_unavailable_forced_route="fallback"` — R9/R10 then apply to the fallback that follows. | R11 |
+| `FallbackWarning` | The strategy failed, abstained (`decide` returned `None`), or named a route the router doesn't have. The default route answers instead, with the cause in the recorded `reason`. | default-route fallback |
+| `ToolSupportWarning` | Once at bind time, naming the routes that can't use the bound tools; again on each request the router diverts away from a tool-incapable route (the default route if it's tool-capable, else the first tool-capable route in declaration order). | tool-aware routing |
+| `ForcedRouteWarning` | A forced route couldn't be used and the router was built with `on_unavailable_forced_route="fallback"` — the ordinary fallback and tool-diversion rules then apply to the route that follows. | forced routes |
 
 ## Errors
 
@@ -80,13 +80,13 @@ failure raises the subclass directly:
 
 | Error | Raised when | From |
 | --- | --- | --- |
-| `NoToolCapableRouteError` | Tools or structured output are bound and **no** route can use them. | R10 |
-| `ForcedRouteError` | A forced route (`config={"configurable": {"route": ...}}`) doesn't exist, or can't use the bound tools — and the router was built with the default `on_unavailable_forced_route="error"`. | R11 |
+| `NoToolCapableRouteError` | Tools or structured output are bound and **no** route can use them. | tool-aware routing |
+| `ForcedRouteError` | A forced route (`config={"configurable": {"route": ...}}`) doesn't exist, or can't use the bound tools — and the router was built with the default `on_unavailable_forced_route="error"`. | forced routes |
 
-## Forced routes (R11)
+## Forced routes
 
-Runtime config pins one call to a named route, skipping the strategy entirely (D2) — useful for
-comparing models on the same traffic (§4 "experimentation"):
+Runtime config pins one call to a named route, skipping the strategy entirely — useful for
+comparing models on the same traffic:
 
 ```python
 router.invoke(messages, config={"configurable": {"route": "frontier"}})
@@ -97,7 +97,7 @@ A forced route is **never silently swapped**: an unknown or tool-incapable force
 have it fall back to the default route instead, with a `ForcedRouteWarning` and the reason
 recorded. See [`examples/experimentation.py`](../examples/experimentation.py) for both paths.
 
-## Tool-aware routing (R10)
+## Tool-aware routing
 
 When tools or structured output are bound, the router checks every route up front:
 
@@ -107,17 +107,17 @@ When tools or structured output are bound, the router checks every route up fron
 - **Binding warns up front**, naming the routes that can't use the bound tools
   (`ToolSupportWarning`); if *none* can, binding raises `NoToolCapableRouteError` instead —
   there'd be nothing left to route to.
-- **A request the strategy sends to a tool-incapable route is diverted**, per D1, to the default
+- **A request the strategy sends to a tool-incapable route is diverted** to the default
   route if it's tool-capable, otherwise the first tool-capable route in declaration order — with
   a `ToolSupportWarning` and `diverted_from` naming the route the strategy actually picked.
 
 `with_structured_output` follows the same rules — structured output counts as tool binding.
 
-## Always decides (R9)
+## Always decides
 
 A default route is mandatory (`ChatRouter(..., default_route=...)`), and every way a strategy
 can fail to decide reaches it the same way: the strategy raised, abstained (`None`), or named an
 unknown route. Each case is a `FallbackWarning`, `fallback=True` on the record, and a reason
 naming the cause — never a guess, and never a silently wrong answer. A **route's own** failure
 is not absorbed this way: if the selected route itself raises (a network error, a rate limit),
-that propagates unchanged (C6) — only the strategy's own indecision falls back.
+that propagates unchanged — only the strategy's own indecision falls back.

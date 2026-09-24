@@ -20,7 +20,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 requires-python = ">=3.10"
-# R8: no runtime dependency beyond LangChain's core. C9: langchain-core 1.x.
+# No runtime dependency beyond LangChain's core; langchain-core 1.x.
 dependencies = ["langchain-core>=1.1,<2"]
 
 [project.urls]
@@ -35,7 +35,7 @@ dev = [
     "mypy>=2.0",
     # Pinned: new langchain-tests releases add standard tests that can break CI.
     "langchain-tests==1.1.9",
-    # Compatibility targets (C1): agents and graphs that use the router.
+    # Compatibility targets: agents and graphs that use the router.
     "langchain>=1.1",
     "langgraph>=1.0",
     # Loads .env for the requires_env-gated provider tests; never imported by src/.

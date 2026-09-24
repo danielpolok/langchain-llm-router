@@ -20,7 +20,7 @@ from langchain_core.tools import BaseTool
 
 
 class ScriptedToolChatModel(GenericFakeChatModel):
-    """`GenericFakeChatModel` with a working `bind_tools` (D5): it accepts the tools and
+    """`GenericFakeChatModel` with a working `bind_tools`: it accepts the tools and
     answers with whatever `messages` was given next, exactly as the base class already does.
     """
 
