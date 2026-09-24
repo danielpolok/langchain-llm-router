@@ -49,7 +49,7 @@ text has no word boundaries to match at, so a keyword in those scripts is a comp
 much it says. A `predicate` on `len(request.text)` is the way round both, and it is a rule like
 any other.
 
-**Three combinators, and no more.** `any_of` and `all_of` are what the §4 sentences say ("long
+**Three combinators, and no more.** `any_of` and `all_of` are what the use-case sentences say ("long
 *or* code-bearing"; an image *and* tools). `not_` is the one that could be left out — any use of
 it can be rewritten as a higher-priority rule — and it stays because it lets a rule be read
 without the rules above it: `not_(any_of(long_request, carries_code))` says "short and simple"

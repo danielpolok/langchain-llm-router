@@ -496,8 +496,8 @@ def test_the_interface_has_no_private_hooks() -> None:
 
 
 def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
-    """The fields, and their order, that docs/v1-requirements.md pins under
-    *Public API* — what the stability promise is a promise about."""
+    """The fields, and their order, that the public API pins — what the stability promise is a
+    promise about."""
     assert [f.name for f in fields(RoutingRequest)] == [
         "text",
         "content_blocks",

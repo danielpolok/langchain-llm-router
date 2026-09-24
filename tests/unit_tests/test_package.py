@@ -4,8 +4,7 @@ from importlib.metadata import requires, version
 
 from packaging.requirements import Requirement
 
-# The public API pinned in docs/v1-requirements.md. Tasks add their names as they land:
-# the remaining built-in strategy is still to come.
+# The public API this test pins: the names the package exports.
 PINNED_EXPORTS = {
     "ChatRouter",
     "KeywordStrategy",

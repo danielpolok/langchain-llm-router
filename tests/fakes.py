@@ -1,4 +1,4 @@
-"""Fake routes for offline tests — ported from `spike/fakes.py` (tests never import `spike/`).
+"""Fake routes for offline tests.
 
 ``GenericFakeChatModel`` drops ``usage_metadata`` and ``response_metadata`` when it streams,
 and no core fake implements ``bind_tools`` — both of which the router's tests need.

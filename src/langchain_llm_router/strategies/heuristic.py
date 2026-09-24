@@ -1,6 +1,6 @@
 """`HeuristicStrategy`: cost tiering from cheap local signals, with no extra call.
 
-The §4 "cost tiering" use case: simple questions to a small model, complex ones to a frontier
+The "cost tiering" use case: simple questions to a small model, complex ones to a frontier
 model. The request's difficulty is *scored* from signals computable on the spot — how much text
 there is, whether it carries code, how many things it asks for, whether it asks for reasoning,
 and whether it carries anything but text — and the score picks a tier. Nothing here calls a

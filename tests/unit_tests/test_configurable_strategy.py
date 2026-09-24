@@ -1,6 +1,6 @@
 """The configurable strategy: the headline use cases from configuration alone.
 
-The headline tests express both §4 use cases as configuration alone: `cost_tiering()` and
+The headline tests express both headline use cases as configuration alone: `cost_tiering()` and
 `domain_routing()` are module-level so the same two setups run on the strategy alone, through
 `ChatRouter` on every entry point, and in the order-independent spelling `not_` allows. Then the
 parts they are made of: each condition, priority and tie-breaking, everything that fails at
@@ -183,7 +183,7 @@ def _refuse(*args: object, **kwargs: object) -> NoReturn:
     raise AssertionError(msg)
 
 
-# The two §4 use cases, as configuration alone
+# The two headline use cases, as configuration alone
 
 
 def cost_tiering() -> ConfigurableStrategy:

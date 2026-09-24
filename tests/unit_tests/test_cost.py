@@ -4,7 +4,7 @@ Two things read a trace as a bill. `UsageMetadataCallbackHandler` (through
 `get_usage_metadata_callback`) adds up the `usage_metadata` of every chat-model run that ends,
 keyed by the model name on its message; LangSmith prices each LLM run from its own usage and
 `ls_model_name`. So a router is costed correctly when the trace holds exactly one model run per
-model call, and the router's own run — a chain — is never one of them (spike surprise 3: a second
+model call, and the router's own run — a chain — is never one of them (a second
 run bills the same tokens again, and nothing errors).
 
 `tests.tracing.priced_calls` mirrors what LangSmith would charge from the offline trace, and the
