@@ -1,4 +1,4 @@
-"""An offline stand-in for what LangSmith charges for a trace (ported from `spike/tracing.py`).
+"""An offline stand-in for what LangSmith charges for a trace.
 
 LangSmith prices a run from its `usage_metadata` plus the `ls_provider` / `ls_model_name` on
 its metadata (docs: *Cost tracking*). `LangChainTracer._on_llm_end` is what puts usage on a

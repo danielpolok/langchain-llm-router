@@ -60,7 +60,7 @@ def request_for(text: str, *, routes: tuple[str, ...] = ROUTES) -> RoutingReques
 
 
 def keyword_router() -> tuple[ChatRouter, dict[str, BaseChatModel]]:
-    """§4's domain routing, end to end: a code route, a default route, and one rule set."""
+    """Domain routing, end to end: a code route, a default route, and one rule set."""
     routes: dict[str, BaseChatModel] = {
         "coder": FakeChatModel(model_name="model-coder", reply="coder answer"),
         "small": FakeChatModel(model_name="model-small", reply="small answer"),

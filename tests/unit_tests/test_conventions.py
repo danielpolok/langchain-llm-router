@@ -566,7 +566,7 @@ def test_a_langgraph_node_streams_the_route_s_tokens_exactly_once() -> None:
     """With the router as a graph node, `stream_mode="messages"` yields the route's
     tokens once — not twice, not zero.
 
-    The spike's caveat 2: the router's run is a chain run, so `on_chat_model_start` registers
+    Because the router's run is a chain run, `on_chat_model_start` registers
     the *route*, and LangGraph's handler emits that one token stream. The finished message the
     node returns is deduplicated against it, because the record goes on a copy that keeps the
     route's message id.

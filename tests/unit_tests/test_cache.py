@@ -207,7 +207,7 @@ def test_the_same_tools_built_twice_are_still_a_hit() -> None:
     two structurally-identical-but-distinct `@tool` objects (a fresh `StructuredTool` each
     time, exactly as a second process re-importing the same `@tool`-decorated function would
     build one) bind to an equal cache key — if a raw object identity or memory address leaked
-    into it, this would be a miss every time, the spike's caveat."""
+    into it, this would be a miss every time."""
     set_llm_cache(InMemoryCache())
     cheap = ToolCallingFakeChatModel(model_name="cheap-1", reply="cheap answer")
     router = ChatRouter(routes={"cheap": cheap}, default_route="cheap")
@@ -235,7 +235,7 @@ def test_the_same_tools_built_twice_are_still_a_hit() -> None:
 
 def test_a_plain_callable_tool_converts_to_something_with_no_object_repr_in_it() -> None:
     """A bare function bound as a tool renders as `<function f at 0x...>` by
-    default, which would change every process and miss every time (spike caveat) — but that
+    default, which would change every process and miss every time — but that
     repr never gets near the cache key. `bind_tools` on the *route itself* (public API, the
     same conversion `_tools.bound_route` replays) is what actually runs at call time; its
     result is what `_get_llm_string` folds in, and it is a plain list of dicts, not the raw

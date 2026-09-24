@@ -4,7 +4,7 @@ r"""`ClassifierStrategy`, opt-in because it makes a call: ask a small model whic
 example set; `ClassifierStrategy` needs neither — it describes each route in plain language and
 lets a chat model read the request and pick one. It makes an extra model call every request, so
 — like `EmbeddingStrategy` — it is never on by default: construction takes the application's own
-chat model, with no default. This is also §4's "custom strategy" template: a reader
+chat model, with no default. This is also the "custom strategy" template: a reader
 who wants to plug in their own classifier can start from this module and change only the prompt
 and the model.
 

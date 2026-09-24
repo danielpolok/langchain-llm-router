@@ -1,7 +1,7 @@
 """`generate()` and `agenerate()` route, record and cost exactly as `invoke` does.
 
-The spike's design overrode only the public entry points a call *usually* takes, so these two
-went down the base class's path: a model run of the router's own, opened around a `_generate`
+A router that overrode only the public entry points a call *usually* takes would send these two
+down the base class's path: a model run of the router's own, opened around a `_generate`
 that delegates — the same tokens billed twice, with nothing to say so. The
 router now answers them by running `invoke` / `ainvoke` once per prompt, and this is what that
 has to keep from the base `generate` (`chat_models.py:1592`): the prompts and their runs, the
