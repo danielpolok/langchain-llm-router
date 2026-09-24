@@ -1,7 +1,7 @@
-"""Custom strategy (PRD §4): plug an existing classifier in as the routing policy.
+"""Custom strategy: plug an existing classifier in as the routing policy.
 
-R6's third level needs no subclassing at all for the common case — a plain function is coerced
-into a `RoutingStrategy` (REQ-R6-2). This is the shape a team's own classifier takes: something
+The third level needs no subclassing at all for the common case — a plain function is coerced
+into a `RoutingStrategy`. This is the shape a team's own classifier takes: something
 that already turns a request into a label, wrapped in a few lines that turn the label into a
 `RoutingChoice`.
 
@@ -42,7 +42,7 @@ def existing_classifier(text: str) -> str:
 
 
 def pick_route(request: RoutingRequest) -> RoutingChoice:
-    """The few lines REQ-R6-2 asks for: adapt the classifier's answer to `RoutingChoice`.
+    """The few lines it takes: adapt the classifier's answer to `RoutingChoice`.
 
     A bare route name (`return existing_classifier(request.text)`) works too — the router
     fills in a reason itself. Returning a `RoutingChoice` explicitly just lets the trace say

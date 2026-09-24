@@ -1,7 +1,7 @@
-"""Domain routing (PRD §4): code requests to a code-strong model, everything else to the
+"""Domain routing: code requests to a code-strong model, everything else to the
 general one.
 
-`KeywordStrategy` (R6, R7) matches whole words in the current request's text against rules you
+`KeywordStrategy` matches whole words in the current request's text against rules you
 write — no extra model or API call. See `docs/strategies.md` for the three strategy levels and
 `langchain_llm_router.strategies.keyword` for exactly how matching works (whole words, case
 folded; a compiled `re.Pattern` for anything a word list can't express).
@@ -37,7 +37,7 @@ def main() -> list[AIMessage]:
         default_route="general",
         strategy=KeywordStrategy(
             {
-                # Specific rules first (D1): a rule set is read top to bottom, route by route,
+                # Specific rules first: a rule set is read top to bottom, route by route,
                 # keyword by keyword — the first match wins.
                 "coder": ["python", "regex", "stack trace", "traceback"],
             }

@@ -2,12 +2,12 @@
 
 A **strategy** applies your routing policy to one request. `ChatRouter` calls it once per
 request — except when the route is [forced](../README.md#forcing-a-route), which skips the
-strategy entirely — and uses its answer to pick a route (R6).
+strategy entirely — and uses its answer to pick a route.
 
-R6 asks for one interface that works at three levels: ready-made strategies you configure and
+There is one interface, working at three levels: ready-made strategies you configure and
 nothing more, a configurable component for policies you assemble from rules, and a small
 interface for fully custom code. All three are the same `RoutingStrategy` — a ready-made
-strategy uses no private hooks the interface doesn't already offer (REQ-R6-1).
+strategy uses no private hooks the interface doesn't already offer.
 
 ## The three levels
 
@@ -21,9 +21,9 @@ All five built-ins are exported from `langchain_llm_router` directly.
 
 ### `KeywordStrategy`
 
-Matches whole words in the current request's text against rules you write (R7 — no model or API
+Matches whole words in the current request's text against rules you write (no model or API
 call). The first rule that matches wins, in declaration order; when nothing matches, the
-strategy abstains and the default route answers (R9).
+strategy abstains and the default route answers.
 
 ```python
 from langchain_llm_router import KeywordStrategy
@@ -47,7 +47,7 @@ Japanese, Thai), or a pattern like `re.compile(r"regexe?s?")`. See
 
 Scores each request from signals computable on the spot — length, code, how many things it asks
 for, whether it asks for reasoning, whether it carries anything but text — and the score picks a
-tier (R7 — no model or API call). This is the §4 "cost tiering" use case.
+tier (no model or API call). This is the "cost tiering" use case.
 
 ```python
 from langchain_llm_router import HeuristicStrategy
@@ -58,14 +58,14 @@ HeuristicStrategy("small", "mid", "frontier", thresholds=[1.0, 3.0])  # three ti
 
 Tiers are cheapest first; `thresholds` is one shorter than the tier list (ascending). `weights=`
 scales an individual signal (`0.0` silences it) and `signals=` replaces the whole set — both
-override module-level defaults that T-140's benchmark tunes, so a difficulty bar that feels wrong
+override module-level defaults that a benchmark tunes, so a difficulty bar that feels wrong
 today may simply not be tuned yet. See
 [`examples/cost_tiering.py`](../examples/cost_tiering.py) and
 `langchain_llm_router.strategies.heuristic` for the signal table and what the score can't see.
 
 ### `ConfigurableStrategy`
 
-R6's middle level: a strategy built from `Rule`s, without writing a class. Both of REQ-R6-3's use
+The middle level: a strategy built from `Rule`s, without writing a class. Both headline use
 cases — cost tiering and domain routing — are configuration here.
 
 ```python
@@ -93,7 +93,7 @@ one inherits from the request.
 ### Opt-in strategies: `EmbeddingStrategy`, `ClassifierStrategy`
 
 Both make an extra call every request (an embedding call, or a chat model call), so neither is
-ever on by default (R7, REQ-R7-2) — construction takes your own `Embeddings` or `BaseChatModel`
+ever on by default — construction takes your own `Embeddings` or `BaseChatModel`
 instance, with no default.
 
 ```python
@@ -119,7 +119,7 @@ ClassifierStrategy(
 right *idea*, not the right word. `ClassifierStrategy` asks a chat model to pick a route from a
 plain-language description of each one, through `with_structured_output`, the same mechanism the
 router itself uses for tool calls. `ClassifierStrategy` is also this project's own template for
-plugging in "an existing classifier" (§4): start from
+plugging in "an existing classifier": start from
 `langchain_llm_router/strategies/classifier.py` and change only the prompt and the model.
 
 ## Custom strategies
@@ -133,12 +133,12 @@ from langchain_llm_router import RoutingChoice, RoutingRequest, RoutingStrategy
 
 class MyStrategy(RoutingStrategy):
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
-        # your policy; None sends the request to the default route (R9)
+        # your policy; None sends the request to the default route
         ...
 ```
 
 The common case needs no subclass at all: a plain function is coerced into a strategy
-(REQ-R6-2).
+.
 
 ```python
 def pick(request: RoutingRequest) -> RoutingChoice | str | None:
@@ -161,15 +161,15 @@ What a strategy decides on — a frozen dataclass built fresh for every request:
 
 | Field | Type | Holds |
 | --- | --- | --- |
-| `text` | `str` | The current request's text (R4) — the most recent `HumanMessage`, ignoring trailing AI and tool messages. Never tool output, system prompts, or conversation length. |
-| `content_blocks` | `list[ContentBlock]` | The current request's content, as LangChain defines content blocks (C7). |
+| `text` | `str` | The current request's text — the most recent `HumanMessage`, ignoring trailing AI and tool messages. Never tool output, system prompts, or conversation length. |
+| `content_blocks` | `list[ContentBlock]` | The current request's content, as LangChain defines content blocks. |
 | `modalities` | `frozenset[str]` | What the request carries: `"text"`, `"image"`, `"audio"`, `"video"`, `"file"`, `"other"`. |
 | `routes` | `tuple[str, ...]` | The router's route names, in declaration order. |
 | `tools_bound` | `bool` | Whether tools or structured output are bound to this call. |
-| `messages` | `list[BaseMessage] \| None` | The whole transcript — `None` unless the strategy sets `wants_full_context = True` (R4). |
-| `config` | `RunnableConfig` | The strategy run's own child config (D9) — pass it to any model or embeddings call your strategy makes, so that call is traced and costed under the strategy's run, not the router's or the route's. Excluded from equality and repr: it identifies a run, not a request. |
+| `messages` | `list[BaseMessage] \| None` | The whole transcript — `None` unless the strategy sets `wants_full_context = True`. |
+| `config` | `RunnableConfig` | The strategy run's own child config — pass it to any model or embeddings call your strategy makes, so that call is traced and costed under the strategy's run, not the router's or the route's. Excluded from equality and repr: it identifies a run, not a request. |
 
-By default a strategy sees only the current request — R4 exists because routing on tool output,
+By default a strategy sees only the current request, because routing on tool output,
 system prompts or conversation length misroutes agent loops. Set `wants_full_context = True` on
 your `RoutingStrategy` subclass to receive the whole transcript when you genuinely need it.
 
@@ -193,19 +193,19 @@ class RoutingStrategy(ABC):
 `adecide` defaults to running `decide` in a worker thread, so `decide` must be thread-safe (one
 strategy instance can serve concurrent requests) — and a strategy that calls a model overrides
 `adecide` with a native async implementation, passing `request.config` along so the call nests
-under the strategy's own run (D9). `ClassifierStrategy` is a worked example of that override.
+under the strategy's own run. `ClassifierStrategy` is a worked example of that override.
 
 `None` from either method — or a raised exception, or a route name the router doesn't have —
 means "can't decide": the router falls back to the default route, with a `FallbackWarning` and
-the reason recorded (R9). See [`decision-record.md`](decision-record.md) for the full fallback,
+the reason recorded. See [`decision-record.md`](decision-record.md) for the full fallback,
 warning and error reference.
 
 ### `RoutingCallable`
 
 `Callable[[RoutingRequest], RoutingChoice | str | None]` — what a plain function passed as
-`strategy=` must look like. It is coerced into a `RoutingStrategy` at construction (REQ-R6-2).
+`strategy=` must look like. It is coerced into a `RoutingStrategy` at construction.
 
-## Stability promise (REQ-R6-4)
+## Stability promise
 
 The interface is the four names above — `RoutingStrategy`, `RoutingRequest`, `RoutingChoice` and
 `RoutingCallable` — their members and what each means. Until 1.0, the minor version stands in

@@ -1,12 +1,12 @@
-"""Turn recorded usage into dollars (T-140's "cost from recorded usage x price").
+"""Turn recorded usage into dollars: cost from recorded usage x price.
 
-Two sources, matching REQ-R3-2's two cases:
+Two sources, one per kind of call:
 
 - Chat-model calls (every route, and a `ClassifierStrategy`'s own call) report real
   `usage_metadata`, gathered by `langchain_core.callbacks.get_usage_metadata_callback` — the
   same mechanism `tests/unit_tests/test_cost.py` proves is exactly the routes' own usage,
   keyed by the model that ran, including a strategy's nested call (it inherits the router's
-  config per D9, so it is visible to the same callback without any special-casing here).
+  config, so it is visible to the same callback without any special-casing here).
 - `EmbeddingStrategy` calls report none (`Embeddings` is a plain ABC with no callback hook), so
   its cost is the same chars-per-token estimate `embedding.py` itself uses, applied to the
   current request's text — not a measurement, an estimate, and reported as one.
@@ -43,7 +43,7 @@ def chat_cost(usage_by_model: dict[str, UsageMetadata]) -> float:
 
     `usage_by_model` sums usage per model name across every chat-model call inside the
     callback's scope — the answering route and, if the strategy made one, its own call too,
-    since both inherit the same config (D9). A model this benchmark hasn't priced fails loudly
+    since both inherit the same config. A model this benchmark hasn't priced fails loudly
     (`price_for`) rather than silently costing $0.00.
     """
     prices = chat_prices()
@@ -54,7 +54,7 @@ def chat_cost(usage_by_model: dict[str, UsageMetadata]) -> float:
 
 
 def estimate_embedding_cost(text: str) -> float:
-    """The same chars-per-token estimate `EmbeddingStrategy` itself computes (T-133), priced.
+    """The same chars-per-token estimate `EmbeddingStrategy` itself computes, priced.
 
     Only the per-request query is estimated — the one-time route-example embedding is
     amortised construction-time work, not any one item's cost (embedding.py's own reasoning).

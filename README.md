@@ -9,10 +9,9 @@ In-process model routing for LangChain: `ChatRouter` is a chat model that, per r
 several candidate chat models and returns that model's response.
 
 > [!WARNING]
-> **Pre-alpha — nothing to install yet.** The design is settled and its riskiest parts have been
-> proven in a spike, but the package ships no implementation and is not on PyPI. The examples below
-> show the API as [the v1 requirements](docs/v1-requirements.md) pin it; nothing is a compatibility
-> guarantee until the first release. See [Project status](#-project-status).
+> **Pre-release — not on PyPI yet.** The router, its strategies and its benchmark are implemented
+> and merged, but nothing has been released, so nothing here is a compatibility guarantee until the
+> first release. See [Project status](#-project-status).
 
 ## Quick Install
 
@@ -46,20 +45,16 @@ back its response unchanged, plus a record of which route was taken and why.
 
 ## 📖 Documentation
 
-- [docs/strategies.md](docs/strategies.md) — the three strategy levels (R6) and the full strategy
+- [docs/strategies.md](docs/strategies.md) — the three strategy levels and the full strategy
   interface reference.
 - [docs/decision-record.md](docs/decision-record.md) — the decision record, and every warning and
-  error the router raises (R2, R9–R11).
-- [docs/scope.md](docs/scope.md) — when to use agent middleware instead (C8), what the router
-  deliberately doesn't do (§5), and the prompt-caching caveat (§8).
+  error the router raises.
+- [docs/scope.md](docs/scope.md) — when to use agent middleware instead, what the router
+  deliberately doesn't do, and the prompt-caching caveat.
 - [examples/](examples/) — one runnable script per use case, offline and tested in CI.
-- [PRD.md](PRD.md) — what the router is and the principles it holds to (C1–C10, R1–R11).
-- [docs/v1-requirements.md](docs/v1-requirements.md) — the public API, the decision record, and every
-  principle as a numbered, testable requirement.
-- [docs/spike-findings.md](docs/spike-findings.md) — what the v0 spike proved and the caveats carried
-  into v1.
-- [Issues](https://github.com/danielpolok/langchain-llm-router/issues?q=is%3Aissue+milestone%3Av1) — the open work; [tasks/](tasks/README.md) holds the
-  tracking rules and the archive of closed tasks.
+- [docs/design.md](docs/design.md) — why the router is built the way it is.
+- [benchmark/](benchmark/README.md) — the cost/quality benchmark, its results and how to rerun it.
+- [Issues](https://github.com/danielpolok/langchain-llm-router/issues) — the open work.
 - [LangChain docs](https://docs.langchain.com/oss/python/langchain/models) — chat models, tools,
   structured output and middleware.
 
@@ -209,14 +204,14 @@ agent.invoke({"messages": [{"role": "user", "content": "What's the weather in Wa
 
 To choose a model from agent **state** inside `create_agent`, use
 [`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware) instead —
-the two are complementary, and can be combined; see [docs/scope.md](docs/scope.md#when-to-use-agent-middleware-instead-c8).
+the two are complementary, and can be combined; see [docs/scope.md](docs/scope.md#when-to-use-agent-middleware-instead).
 
 ## Forcing a route
 
 Pin one call to a route through runtime config, e.g. to compare models on the same traffic. A forced
 route is never silently swapped: if it doesn't exist or can't serve the request, the call errors by
 default (falling back is an opt-in setting). See
-[docs/decision-record.md#forced-routes-r11](docs/decision-record.md#forced-routes-r11) for both paths.
+[docs/decision-record.md#forced-routes](docs/decision-record.md#forced-routes) for both paths.
 
 ```python
 router.invoke(messages, config={"configurable": {"route": "frontier"}})
@@ -249,34 +244,32 @@ version of both.
 
 ## 🚧 Project status
 
-**v0 is complete.** A spike tested the two riskiest principles against Gemini (cloud), Ollama
-(local) and a live LangSmith trace:
+**Pre-release.** The core router, the built-in strategies, the cost/quality benchmark and the
+documentation are all merged into `main`; nothing has been published to PyPI yet.
+
+Before building it, a spike tested the two riskiest ideas against Gemini (cloud), Ollama (local)
+and a live LangSmith trace:
 
 - Tool binding and structured output work through the router — with caveats.
 - Cost is counted exactly once while the real model call stays in the trace, once the router's own
-  run is a chain run rather than a model run.
+  run is a chain run rather than a model run. See [docs/design.md](docs/design.md).
 
-**v1 is merged into `main`, and not yet released.** [T-101](tasks/T-101-v1-requirements.md) turned
-the principles into 63 numbered requirements in [docs/v1-requirements.md](docs/v1-requirements.md)
-and settled the nine rules they left open (PRD §11). The core router
-([T-110](https://github.com/danielpolok/langchain-llm-router/issues/5) onward), the built-in
-strategies, the cost/quality benchmark ([findings](docs/benchmark-findings.md)) and the
-documentation are all in.
+The [benchmark](benchmark/README.md) measured 42–50% lower cost for the keyword and heuristic
+strategies at no loss of quality — on one 32-item workload and one model pair, so read it as a
+shape, not a guarantee.
 
 **Still open:**
 
-- [T-141](https://github.com/danielpolok/langchain-llm-router/issues/23) — measuring how much of the
+- [Measuring](https://github.com/danielpolok/langchain-llm-router/issues/23) how much of the
   saving provider-side prompt-caching loss from route switching gives back.
-- [T-151](https://github.com/danielpolok/langchain-llm-router/issues/25) — packaging and the first
-  PyPI release.
-- [T-160](https://github.com/danielpolok/langchain-llm-router/issues/26) — first adoption in a real
-  application.
+- [Packaging and the first PyPI release](https://github.com/danielpolok/langchain-llm-router/issues/25).
+- [First adoption in a real application](https://github.com/danielpolok/langchain-llm-router/issues/26).
 
 ## 📕 Releases & Versioning
 
 Unreleased — `pyproject.toml` pins the placeholder version `0.0.0`. There is no PyPI release, no
-changelog and no versioning policy yet; both are [T-151](https://github.com/danielpolok/langchain-llm-router/issues/25)'s job, including
-the stability promise for the strategy interface (R6). Until then, nothing here is a compatibility
+changelog and no versioning policy yet; both are tracked in [the packaging issue](https://github.com/danielpolok/langchain-llm-router/issues/25), including
+the stability promise for the strategy interface. Until then, nothing here is a compatibility
 guarantee.
 
 ## 💁 Contributing
@@ -299,8 +292,9 @@ Tests that call real providers skip unless their credentials or server are avail
 `GEMINI_API_KEY` for Gemini, a reachable local Ollama server for Ollama (a `.env` file is loaded).
 Offline tests use fake chat models.
 
-Work is tracked in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues) (rules in [tasks/](tasks/README.md)); reference principles by their PRD ID (e.g. `R4`, `C10`)
-in code, tests and commits.
+Work is tracked in [GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues). See
+[AGENTS.md](AGENTS.md) for the repository layout and conventions, and [docs/design.md](docs/design.md)
+for why the code is shaped the way it is.
 
 ## License
 

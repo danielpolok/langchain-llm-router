@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-AUTHORED = "author-written for T-140; original phrasing, no verbatim external source"
+AUTHORED = "author-written for this benchmark; original phrasing, no verbatim external source"
 
 ITEMS = [
     # --- support: customer-support policy and account questions ---

@@ -1,6 +1,6 @@
-"""Cost tiering (PRD §4): simple requests to a small model, hard ones to a frontier model.
+"""Cost tiering: simple requests to a small model, hard ones to a frontier model.
 
-`HeuristicStrategy` (R6, R7) scores each request from signals it can compute on the spot —
+`HeuristicStrategy` scores each request from signals it can compute on the spot —
 length, code, how many things it asks for, and so on — with no extra model or API call. See
 `docs/strategies.md` for the three strategy levels and `langchain_llm_router.strategies.heuristic`
 for what the score is built from.
@@ -38,7 +38,7 @@ def main() -> list[AIMessage]:
     router = ChatRouter(
         routes={"small": small, "frontier": frontier},
         default_route="small",
-        # Cheapest tier first (R6). The default threshold is tuned for the two-tier case;
+        # Cheapest tier first. The default threshold is tuned for the two-tier case;
         # HeuristicStrategy("small", "mid", "frontier", thresholds=[...]) adds a middle tier.
         strategy=HeuristicStrategy("small", "frontier"),
     )
