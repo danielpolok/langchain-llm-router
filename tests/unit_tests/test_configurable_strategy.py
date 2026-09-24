@@ -1,6 +1,6 @@
 """The configurable strategy: the headline use cases from configuration alone.
 
-The headline tests express both headline use cases as configuration alone: `cost_tiering()` and
+The tests express both headline use cases as configuration alone: `cost_tiering()` and
 `domain_routing()` are module-level so the same two setups run on the strategy alone, through
 `ChatRouter` on every entry point, and in the order-independent spelling `not_` allows. Then the
 parts they are made of: each condition, priority and tie-breaking, everything that fails at

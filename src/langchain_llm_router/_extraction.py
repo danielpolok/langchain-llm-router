@@ -2,8 +2,7 @@
 
 The router calls `build_request` and nothing else from here, after turning whatever it was
 invoked with into messages the way every chat model does (`_convert_input(...).to_messages()`),
-so a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue` all arrive the same way
-.
+so a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue` all arrive the same way.
 
 **Which message is the current request.** The most recent user message, by
 position. Trailing AI and tool messages are skipped, so every call in an agent's tool loop

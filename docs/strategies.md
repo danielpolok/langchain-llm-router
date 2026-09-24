@@ -137,8 +137,7 @@ class MyStrategy(RoutingStrategy):
         ...
 ```
 
-The common case needs no subclass at all: a plain function is coerced into a strategy
-.
+The common case needs no subclass at all: a plain function is coerced into a strategy.
 
 ```python
 def pick(request: RoutingRequest) -> RoutingChoice | str | None:
