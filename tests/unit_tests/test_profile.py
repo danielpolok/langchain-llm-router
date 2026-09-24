@@ -1,13 +1,13 @@
-"""T-121: the router's own `.profile` — the intersection of its routes' (C1, C3, R10).
+"""The router's own `.profile` — the intersection of its routes'.
 
 `_resolve_model_profile` (`router.py`) and the reduction it calls (`_profile.resolve_profile`)
-are tested per value kind first (REQ-C3-4's Check, one case per bullet), then end to end through
+are tested per value kind first (one case per bullet of the reduction rule), then end to end through
 `create_agent`, the real consumer `_supports_provider_strategy` (`langchain/agents/factory.py:560`)
 names in the issue: a router whose routes disagree on `structured_output` must not have
 `create_agent` pick a strategy only one of them can serve.
 
-Neighbours, not repeated here: tool capability detection reads `profile["tool_calling"]` too
-(D5, REQ-R10-1), but that is the other direction — what the router reads about a *route* — and
+Neighbours, not repeated here: tool capability detection reads `profile["tool_calling"]` too,
+but that is the other direction — what the router reads about a *route* — and
 lives in `test_tools.py`.
 """
 
@@ -33,11 +33,11 @@ def router_of(**profiles: dict[str, object] | None) -> ChatRouter:
     return ChatRouter(routes=routes, default_route=next(iter(routes)))
 
 
-# --- REQ-C3-4: the reduction, one value kind at a time ---
+# --- the reduction, one value kind at a time ---
 
 
 def test_booleans_are_anded() -> None:
-    """REQ-C3-4: a boolean key is kept only if every route says `True`."""
+    """A boolean key is kept only if every route says `True`."""
     both_true = router_of(a={"tool_calling": True}, b={"tool_calling": True})
     one_false = router_of(a={"tool_calling": True}, b={"tool_calling": False})
 
@@ -46,28 +46,28 @@ def test_booleans_are_anded() -> None:
 
 
 def test_ints_are_minimised() -> None:
-    """REQ-C3-4: a non-bool int key becomes the smallest of the routes' claims."""
+    """A non-bool int key becomes the smallest of the routes' claims."""
     router = router_of(a={"max_input_tokens": 128_000}, b={"max_input_tokens": 32_000})
 
     assert router.profile == {"max_input_tokens": 32_000}
 
 
 def test_equal_non_bool_non_int_values_are_kept() -> None:
-    """REQ-C3-4: a `str` (or other non-bool, non-int) key survives when every route agrees."""
+    """A `str` (or other non-bool, non-int) key survives when every route agrees."""
     router = router_of(a={"status": "active"}, b={"status": "active"})
 
     assert router.profile == {"status": "active"}
 
 
 def test_differing_non_bool_non_int_values_are_dropped() -> None:
-    """REQ-C3-4: the same key, disagreeing, is left out rather than guessed at."""
+    """The same key, disagreeing, is left out rather than guessed at."""
     router = router_of(a={"status": "active"}, b={"status": "deprecated"})
 
     assert router.profile == {}
 
 
 def test_a_key_only_some_routes_report_is_dropped_not_defaulted() -> None:
-    """REQ-C3-4: "the intersection of its routes' profiles" — a route silent on a key is not
+    """ "the intersection of its routes' profiles" — a route silent on a key is not
     treated as `False`/unlimited/absent-and-ignorable; the key just isn't shared."""
     router = router_of(a={"tool_calling": True, "attachment": True}, b={"tool_calling": True})
 
@@ -75,7 +75,7 @@ def test_a_key_only_some_routes_report_is_dropped_not_defaulted() -> None:
 
 
 def test_none_when_any_route_reports_no_profile_at_all() -> None:
-    """REQ-C3-4: `None` when *any* route has no profile — not only when all of them don't."""
+    """`None` when *any* route has no profile — not only when all of them don't."""
     router = router_of(a={"tool_calling": True}, b=None)
 
     assert router.profile is None
@@ -88,7 +88,7 @@ def test_none_when_every_route_reports_no_profile() -> None:
 
 
 def test_a_single_route_router_reports_that_route_s_profile_unchanged() -> None:
-    """REQ-C3-4 acceptance criterion: the one-route case falls out of the algorithm for free."""
+    """The one-route case falls out of the algorithm for free."""
     profile = {"tool_calling": True, "max_input_tokens": 128_000, "status": "active"}
     router = ChatRouter(routes={"a": route(profile)}, default_route="a")
 
@@ -96,7 +96,7 @@ def test_a_single_route_router_reports_that_route_s_profile_unchanged() -> None:
 
 
 def test_bool_and_falsy_int_keys_are_reduced_separately_and_correctly() -> None:
-    """REQ-C3-4: `bool` is a subclass of `int` in Python, so a reduction that checked `int`
+    """`bool` is a subclass of `int` in Python, so a reduction that checked `int`
     before `bool` (or dropped the distinction) risks running a genuine boolean pair through
     `min()` instead of `all()`, or a genuine (non-bool) int pair through boolean logic. Both are
     exercised together, with values chosen to be truthy/falsy either way (`0`/`1` for the int
@@ -145,7 +145,7 @@ def test_explicit_profile_wins_over_the_intersection() -> None:
 def test_empty_routes_is_rejected_before_profile_resolution_would_run() -> None:
     """The issue's "exact handling of an empty `routes` mapping": `resolve_profile` guards
     against it defensively, but it is unreachable through `ChatRouter` — `_check_routes` (a
-    *field* validator, REQ-R5-2) raises before any `model_validator(mode="after")`, the base
+    *field* validator) raises before any `model_validator(mode="after")`, the base
     class's `_set_model_profile` among them, gets a chance to call `_resolve_model_profile` on
     an empty `routes` (pydantic v2 runs field validation first; confirmed here, not assumed)."""
     with pytest.raises(ValidationError) as caught:
@@ -168,7 +168,7 @@ ANSWER_CALL = ToolCall(name="Answer", args={"answer": "42"}, id="call_1", type="
 
 
 def test_create_agent_settles_on_a_strategy_every_route_can_serve() -> None:
-    """REQ-C3-4's acceptance criterion: two routes agree on `tool_calling` but disagree on
+    """Two routes agree on `tool_calling` but disagree on
     `structured_output`. The router's own profile (AND-ed) reports `structured_output: False`,
     so `create_agent`'s auto-detection (`_supports_provider_strategy`,
     `langchain/agents/factory.py:560`, reads `model.profile.get("structured_output")`) must not
@@ -195,7 +195,7 @@ def test_create_agent_settles_on_a_strategy_every_route_can_serve() -> None:
     out = agent.invoke({"messages": [{"role": "user", "content": "what is the answer?"}]})
 
     assert out["structured_response"] == Answer(answer="42")
-    # ToolStrategy's signature (REQ-C3-4's Check names it: "a strategy every route can serve") —
+    # ToolStrategy's signature (the check being "a strategy every route can serve") —
     # ProviderStrategy binds no tools at all, so a bound "Answer" tool with tool_choice="any"
     # is exactly the evidence that the fallback, not the provider strategy, ran.
     assert capable.bind_calls[-1]["tool_choice"] == "any"

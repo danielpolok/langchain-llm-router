@@ -28,9 +28,9 @@ class GenerateOnlyFakeChatModel(BaseChatModel):
 
     Providers without a streaming endpoint look like this, and LangChain covers for them —
     `BaseChatModel.stream` falls back to `invoke` and yields the whole message as the single
-    chunk. The router has to preserve that (REQ-C2-4), so tests need a route that has it.
+    chunk. The router has to preserve that, so tests need a route that has it.
 
-    Cannot use tools: it keeps `BaseChatModel`'s `bind_tools`, which raises at call time (R10).
+    Cannot use tools: it keeps `BaseChatModel`'s `bind_tools`, which raises at call time.
     """
 
     model_config = ConfigDict(protected_namespaces=())
@@ -51,7 +51,7 @@ class GenerateOnlyFakeChatModel(BaseChatModel):
 
     @property
     def _identifying_params(self) -> Mapping[str, Any]:
-        """What a cache lookup's `_get_llm_string` folds in (T-119, REQ-C10-1).
+        """What a cache lookup's `_get_llm_string` folds in.
 
         `BaseChatModel._identifying_params` defaults to `{}` (`language_models/base.py:430`),
         so two fakes with different names would otherwise be indistinguishable to a cache that
@@ -201,8 +201,8 @@ class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
     """A route whose structured output streams progressively, as a real provider's does.
 
     `NativeStructuredFakeChatModel._stream` (inherited from `FakeChatModel`) hands over a tool
-    call's arguments in one final chunk — enough for most tests, but not for T-115's structured
-    streaming (C1, C2), which needs a route that answers the way `ChatOllama` or `ChatOpenAI`
+    call's arguments in one final chunk — enough for most tests, but not for structured
+    streaming, which needs a route that answers the way `ChatOllama` or `ChatOpenAI`
     do: a growing JSON string, several chunks wide, that the route's own parser turns into
     progressively more complete partials. `piece_size` controls how many chunks that takes.
 
@@ -210,7 +210,7 @@ class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
     the other native structured mode a provider offers, parsed by `JsonOutputParser` rather
     than a tool-call parser — because that path takes a different shape through
     `with_structured_output` (`llm | JsonOutputParser()` instead of `bind_tools(...) | parser`)
-    and T-115's tests check both.
+    and the tool tests check both.
     """
 
     piece_size: int = 6
@@ -293,7 +293,7 @@ class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
             )
         # The other native mode: the model answers with JSON text, not a tool call, so it is
         # bound with `json_mode=True` rather than through `bind_tools` — `_generate` and
-        # `_stream` read it back off the call kwargs, exactly where a bound kwarg lands (C3).
+        # `_stream` read it back off the call kwargs, exactly where a bound kwarg lands.
         from langchain_core.output_parsers import JsonOutputParser
         from langchain_core.runnables import RunnableMap, RunnablePassthrough
 
@@ -308,7 +308,7 @@ class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
 
 
 class FailingChatModel(ToolCallingFakeChatModel):
-    """A route whose every call raises — for a strategy's own call-failure tests (R9).
+    """A route whose every call raises — for a strategy's own call-failure tests.
 
     Extends `ToolCallingFakeChatModel`, not the plainer `GenerateOnlyFakeChatModel`, so it still
     answers `bind_tools`/`with_structured_output` the way a real, capable provider would; only

@@ -1,21 +1,22 @@
-"""T-131: the ready-made heuristic strategy — REQ-R7-1 and REQ-R6-1.
+"""The ready-made heuristic strategy: no extra calls, and only the public surface.
 
-Cost tiering without extra calls (PRD §4): each signal is checked on its own, then the score's
+Cost tiering without extra calls: each signal is checked on its own, then the score's
 tier boundaries, then a corpus of realistic requests, then the whole thing through `ChatRouter`.
 
 Two threads run through the module:
 
-- **REQ-R7-1** — `model_calls` is autouse, so *every* test here runs with a counter on every
+- **No extra calls** — `model_calls` is autouse, so *every* test here runs with a counter on every
   LLM start in the process. A call the strategy made would sit under the strategy's run, or
   under no run at all; only a call the router made on a route's behalf is allowed, and the
   teardown of each test asserts as much. `test_the_no_call_check_catches_a_call` shows the
   check is not vacuous.
-- **REQ-R6-1** — nothing below reaches into the package: the strategy is built, configured and
+- **Public surface only** — nothing below reaches into the package: the strategy is built,
+configured and
   routed with names `langchain_llm_router` exports. (`_extraction.build_request` is the one
   exception, and it is the *router's* work, done here so the requests under test are the ones a
   router would really hand over.)
 
-The corpus in `REALISTIC` is what T-140 will argue with: it names, per request, the signals that
+The corpus in `REALISTIC` is what a benchmark argues with: it names, per request, the signals that
 fired and the tier they add up to.
 """
 
@@ -66,7 +67,7 @@ from tests.tracing import model_runs, priced_calls, walk
 TIERS = ("small", "frontier")
 IMAGE: dict[str, Any] = {"type": "image", "url": "https://example.com/diagram.png"}
 MODALITIES = frozenset({"text", "image", "audio", "video", "file", "other"})
-"""`RoutingRequest.modalities`' closed vocabulary (C7), which `modality_signal` reads."""
+"""`RoutingRequest.modalities`' closed vocabulary, which `modality_signal` reads."""
 
 
 def make_request(
@@ -75,7 +76,7 @@ def make_request(
     blocks: Sequence[str | dict[Any, Any]] | None = None,
     routes: tuple[str, ...] = TIERS,
 ) -> RoutingRequest:
-    """The request the router would build from a one-turn conversation (R4)."""
+    """The request the router would build from a one-turn conversation."""
     message = HumanMessage(content=list(blocks)) if blocks is not None else HumanMessage(text)
     request = build_request(
         [message],
@@ -108,15 +109,16 @@ def fixed(strength: float) -> Signal:
     return lambda request: strength
 
 
-# --- REQ-R7-1 · no model, embedding or API call, in any test in this module ---
+# --- no model, embedding or API call, in any test in this module ---
 
 
 class ModelCallCounter(BaseCallbackHandler):
     """Every LLM start in the process, and the chain runs that surround it.
 
-    A route's call is the router's own: its parent run is the router's chain run (D9). Anything
+    A route's call is the router's own: its parent run is the router's chain run. Anything
     else — a call under the strategy's child run, or one with no run around it at all, as a
-    direct `decide` in a test would make — is a call the *strategy* made, which R7 forbids.
+    direct `decide` in a test would make — is a call the *strategy* made, which a strategy with no
+    extra calls must never do.
     """
 
     def __init__(self) -> None:
@@ -166,7 +168,8 @@ class ModelCallCounter(BaseCallbackHandler):
 
     @property
     def outside_a_route(self) -> list[str]:
-        """Where every call that isn't a route's was made — empty is REQ-R7-1 holding."""
+        """Where every call that isn't a route's was made — empty is the no-extra-calls rule
+        holding."""
         return [
             "/".join(reversed(self.opened_by(parent))) or "(no run)"
             for parent in self.starts
@@ -186,7 +189,7 @@ register_configure_hook(_counter, inheritable=True)
 
 @pytest.fixture(autouse=True)
 def model_calls() -> Iterator[ModelCallCounter]:
-    """REQ-R7-1: count every LLM start any test in this module causes, and require that the
+    """Count every LLM start any test in this module causes, and require that the
     only ones are the route calls the router itself made."""
     counter = ModelCallCounter()
     token = _counter.set(counter)
@@ -205,7 +208,7 @@ def model_calls() -> Iterator[ModelCallCounter]:
     [(0, 0.0), (1, 0.0), (20, 0.0), (65, 0.25), (110, 0.5), (200, 1.0), (600, 1.0)],
 )
 def test_the_length_signal_ramps_between_its_bounds(words: int, strength: float) -> None:
-    """REQ-R7-1: length is a word count — no call — rising from `DEFAULT_LENGTH_RANGE[0]`
+    """Length is a word count — no call — rising from `DEFAULT_LENGTH_RANGE[0]`
     words to `[1]`, silent below and capped above."""
     request = make_request(" ".join(["word"] * words))
 
@@ -214,7 +217,7 @@ def test_the_length_signal_ramps_between_its_bounds(words: int, strength: float)
 
 
 def test_the_length_bounds_are_overridable() -> None:
-    """REQ-R7-1: the ramp is a factory, so T-140 retunes it with two numbers through
+    """The ramp is a factory, so a benchmark retunes it with two numbers through
     `signals=` rather than by editing the strategy."""
     assert length_signal(0, 10)(make_request("one two three four five")) == 0.5
 
@@ -246,7 +249,7 @@ TRACEBACK = "ValueError: Expecting value"
     ],
 )
 def test_the_code_signal_counts_marker_families(text: str, strength: float) -> None:
-    """REQ-R7-1: code is spotted by family — a fence, code syntax, a traceback — so one long
+    """Code is spotted by family — a fence, code syntax, a traceback — so one long
     paste doesn't outweigh a short snippet with an error. Prose that merely says "class" or
     "import" is not code."""
     assert code_signal(make_request(text)) == strength
@@ -266,9 +269,9 @@ def test_the_code_signal_counts_marker_families(text: str, strength: float) -> N
     ],
 )
 def test_the_parts_signal_counts_questions_or_enumerated_items(text: str, strength: float) -> None:
-    """REQ-R7-1: the larger of the two counts, not their sum — a numbered list of questions is
+    """The larger of the two counts, not their sum — a numbered list of questions is
     one list of two parts, not four — and the first part is free. Punctuation is all it has:
-    two questions sharing one question mark read as one part (a limit T-140 may weigh)."""
+    two questions sharing one question mark read as one part (a limit a benchmark may weigh)."""
     assert parts_signal(make_request(text)) == strength
 
 
@@ -283,21 +286,21 @@ def test_the_parts_signal_counts_questions_or_enumerated_items(text: str, streng
     ],
 )
 def test_the_analysis_signal_counts_distinct_terms(text: str, strength: float) -> None:
-    """REQ-R7-1: words that ask for reasoning rather than recall, counted once each —
+    """Words that ask for reasoning rather than recall, counted once each —
     repetition is emphasis, not a second thing to reason about."""
     assert analysis_signal(make_request(text)) == strength
 
 
 @pytest.mark.parametrize("modality", sorted(MODALITIES))
 def test_the_modality_signal_fires_on_anything_but_text(modality: str) -> None:
-    """REQ-R7-1: every modality but `"text"` needs a model that can read it, so the signal is
-    binary over the closed vocabulary (C7)."""
+    """Every modality but `"text"` needs a model that can read it, so the signal is
+    binary over the closed vocabulary."""
     assert modality_signal(carrying(modality)) == (0.0 if modality == "text" else 1.0)
     assert modality_signal(carrying("text", modality)) == (0.0 if modality == "text" else 1.0)
 
 
 def test_a_real_image_request_scores_the_image() -> None:
-    """REQ-R7-1: the signal reads what extraction really produces — an image beside no text is
+    """The signal reads what extraction really produces — an image beside no text is
     an image-only request, which on the default threshold is exactly the frontier tier's bar."""
     request = make_request(blocks=[IMAGE])
 
@@ -308,7 +311,7 @@ def test_a_real_image_request_scores_the_image() -> None:
 
 
 def test_the_default_signals_are_the_five_documented_ones() -> None:
-    """REQ-R7-1: the set T-140 retunes — and every one of them weighs the same until it has
+    """The set a benchmark retunes — and every one of them weighs the same until it has
     evidence for anything else."""
     assert list(DEFAULT_SIGNALS) == ["length", "code", "parts", "analysis", "modalities"]
     assert dict(DEFAULT_WEIGHTS) == dict.fromkeys(DEFAULT_SIGNALS, 1.0)
@@ -330,7 +333,7 @@ def test_the_default_signals_are_the_five_documented_ones() -> None:
 def test_a_score_on_the_threshold_takes_the_upper_tier(
     strength: float, route: str, reason: str
 ) -> None:
-    """REQ-R7-1, R2: the threshold is the price of admission to the tier above it, and the
+    """The threshold is the price of admission to the tier above it, and the
     reason says which side of it the score fell on."""
     strategy = HeuristicStrategy(*TIERS, signals={"stub": fixed(strength)})
 
@@ -341,8 +344,8 @@ def test_a_score_on_the_threshold_takes_the_upper_tier(
     ("strength", "route"), [(1.99, "small"), (2.0, "frontier"), (3.0, "frontier")]
 )
 def test_an_overridden_threshold_moves_the_boundary(strength: float, route: str) -> None:
-    """REQ-R7-1: `thresholds=` is how an application raises the bar for its expensive tier —
-    and how T-140's number reaches a live router."""
+    """`thresholds=` is how an application raises the bar for its expensive tier —
+    and how a benchmark's number reaches a live router."""
     strategy = HeuristicStrategy(*TIERS, thresholds=[2.0], signals={"stub": fixed(strength)})
 
     assert strategy.decide(make_request("anything")).route == route  # type: ignore[union-attr]
@@ -358,7 +361,7 @@ def test_an_overridden_threshold_moves_the_boundary(strength: float, route: str)
     ],
 )
 def test_more_than_two_tiers_use_ascending_bands(strength: float, route: str, reason: str) -> None:
-    """REQ-R7-1: the two-tier case generalises — n tiers, n-1 thresholds, each tier taking the
+    """The two-tier case generalises — n tiers, n-1 thresholds, each tier taking the
     band below the next, and the reason naming the band."""
     strategy = HeuristicStrategy(
         "small", "mid", "frontier", thresholds=[1.0, 3.0], signals={"stub": fixed(strength)}
@@ -368,7 +371,7 @@ def test_more_than_two_tiers_use_ascending_bands(strength: float, route: str, re
 
 
 def test_a_weight_scales_one_signals_contribution() -> None:
-    """REQ-R7-1: `weights=` retunes a signal without replacing any — here analysis alone,
+    """`weights=` retunes a signal without replacing any — here analysis alone,
     half on, is tripled past the bar a request it half-fires would not reach."""
     request = make_request("Explain why this happens.")
     weighted = HeuristicStrategy(*TIERS, weights={"analysis": 3.0})
@@ -382,7 +385,7 @@ def test_a_weight_scales_one_signals_contribution() -> None:
 
 
 def test_a_weight_of_zero_silences_a_signal() -> None:
-    """REQ-R7-1: an application that routes images itself can turn that signal off without
+    """An application that routes images itself can turn that signal off without
     touching the others."""
     request = make_request(blocks=[IMAGE])
     strategy = HeuristicStrategy(*TIERS, weights={"modalities": 0.0})
@@ -393,7 +396,7 @@ def test_a_weight_of_zero_silences_a_signal() -> None:
 
 
 def test_a_custom_signal_set_replaces_the_defaults() -> None:
-    """REQ-R7-1: `signals=` is how T-140 tries a set that isn't in the module; a signal with no
+    """`signals=` is how a benchmark tries a set that isn't in the module; a signal with no
     entry in `DEFAULT_WEIGHTS` weighs 1.0 unless `weights=` says otherwise."""
     strategy = HeuristicStrategy(*TIERS, thresholds=[0.5], signals={"words": length_signal(0, 10)})
 
@@ -406,7 +409,7 @@ def test_a_custom_signal_set_replaces_the_defaults() -> None:
 
 
 def test_the_reason_leads_with_the_signal_that_drove_the_score() -> None:
-    """R2: a human reading a trace sees the score, the band and what made it — largest
+    """A human reading a trace sees the score, the band and what made it — largest
     contribution first, and only the signals that fired."""
     strategy = HeuristicStrategy(
         *TIERS, signals={"minor": fixed(0.25), "major": fixed(1.0), "silent": fixed(0.0)}
@@ -417,7 +420,7 @@ def test_the_reason_leads_with_the_signal_that_drove_the_score() -> None:
     assert choice == RoutingChoice("frontier", "difficulty 1.25 >= 1.00 (major 1.00, minor 0.25)")
 
 
-# --- Realistic requests: the corpus T-140 argues with ---
+# --- Realistic requests: the corpus a benchmark argues with ---
 
 ONE_LINE_QUESTION = "What's the capital of France?"
 SHORT_CREATIVE = "Write a haiku about autumn rain."
@@ -458,8 +461,8 @@ REALISTIC = [
 def test_realistic_requests_land_in_the_tier_they_look_like(
     text: str, fired: dict[str, float], tier: str
 ) -> None:
-    """REQ-R7-1: the defaults, on requests of the kind PRD §4 is about. The signals each
-    request fires are spelled out so T-140 can see exactly what it is retuning."""
+    """The defaults, on requests of the kind the router is meant for. The signals each
+    request fires are spelled out so a benchmark can see exactly what it is retuning."""
     request = make_request(text)
 
     scored = {
@@ -472,18 +475,18 @@ def test_realistic_requests_land_in_the_tier_they_look_like(
     assert HeuristicStrategy(*TIERS).decide(request).route == tier  # type: ignore[union-attr]
 
 
-# --- Not deciding, and not swapping (R9) ---
+# --- Not deciding, and not swapping ---
 
 
 @pytest.mark.parametrize("text", ["", "   \n  "])
 def test_a_request_with_nothing_to_score_abstains(text: str) -> None:
-    """REQ-R7-1, R9: no text and no other modality is nothing to judge, so the strategy returns
+    """No text and no other modality is nothing to judge, so the strategy returns
     `None` and leaves the default route — and the one warning — to the router."""
     assert HeuristicStrategy(*TIERS).decide(make_request(text)) is None
 
 
 def test_a_tier_that_is_not_a_route_is_named_not_swapped() -> None:
-    """R9, REQ-R9-2: the strategy names the tier its policy chose even when the router has no
+    """The strategy names the tier its policy chose even when the router has no
     such route. Quietly falling to a neighbouring tier would route on a misconfiguration; the
     router reports it instead, once, with the missing name in the record."""
     strategy = HeuristicStrategy(*TIERS)
@@ -493,7 +496,7 @@ def test_a_tier_that_is_not_a_route_is_named_not_swapped() -> None:
 
 
 def test_the_router_reports_a_tier_it_has_no_route_for() -> None:
-    """R9, REQ-R9-2: end to end — one `FallbackWarning`, the default route, and a record
+    """End to end — one `FallbackWarning`, the default route, and a record
     naming the tier that doesn't exist."""
     router = ChatRouter(
         routes={"small": FakeChatModel(reply="small"), "huge": FakeChatModel(reply="huge")},
@@ -566,18 +569,18 @@ def test_the_router_reports_a_tier_it_has_no_route_for() -> None:
 def test_configuration_that_could_never_route_fails_at_construction(
     kwargs: dict[str, Any], tiers: tuple[str, ...], message: str
 ) -> None:
-    """REQ-R6-1: a built-in fails like the rest of the package — a `RoutingError` when it is
+    """A built-in fails like the rest of the package — a `RoutingError` when it is
     built, not a surprise on the first request."""
     with pytest.raises(RoutingError, match=message):
         HeuristicStrategy(*tiers, **kwargs)
 
 
-# --- REQ-R6-1 · an ordinary public strategy ---
+# --- an ordinary public strategy ---
 
 
 def test_the_builtin_is_an_ordinary_public_strategy() -> None:
-    """REQ-R6-1: one interface serves all three levels — the built-in is a concrete
-    `RoutingStrategy` exported from the package, on the interface's defaults (R4, C2)."""
+    """One interface serves all three levels — the built-in is a concrete
+    `RoutingStrategy` exported from the package, on the interface's defaults."""
     strategy = HeuristicStrategy(*TIERS)
 
     assert isinstance(strategy, RoutingStrategy)
@@ -587,7 +590,7 @@ def test_the_builtin_is_an_ordinary_public_strategy() -> None:
 
 
 async def test_the_async_path_decides_the_same(model_calls: ModelCallCounter) -> None:
-    """REQ-R6-1, C2: `adecide` is the interface's default — `decide` in a worker thread — and
+    """`adecide` is the interface's default — `decide` in a worker thread — and
     the strategy is thread-safe, so both paths give the same choice."""
     strategy = HeuristicStrategy(*TIERS)
     request = make_request(MULTI_PART_ANALYSIS)
@@ -630,7 +633,7 @@ def make_router(strategy: RoutingStrategy | None = None) -> ChatRouter:
 async def test_the_router_answers_from_the_tier_the_score_picked(
     convention: Convention, text: str, route: str, reason: str
 ) -> None:
-    """REQ-R6-1, R2: the strategy plugged into `ChatRouter` through `strategy=` alone — the
+    """The strategy plugged into `ChatRouter` through `strategy=` alone — the
     scored tier answers, on every entry point, and its reason is what the record carries."""
     router = make_router()
     other = "frontier" if route == "small" else "small"
@@ -651,7 +654,7 @@ async def test_the_router_answers_from_the_tier_the_score_picked(
 
 
 def test_an_empty_request_falls_back_through_the_router() -> None:
-    """R9: the strategy's `None` becomes the router's one `FallbackWarning` and a record
+    """The strategy's `None` becomes the router's one `FallbackWarning` and a record
     saying it could not decide — the strategy neither warns nor raises itself."""
     router = make_router()
 
@@ -665,14 +668,14 @@ def test_an_empty_request_falls_back_through_the_router() -> None:
     assert [type(warning.message) for warning in caught] == [FallbackWarning]
 
 
-# --- REQ-R7-1 · the check itself ---
+# --- the check itself ---
 
 
 def test_the_strategy_adds_no_run_of_its_own_to_the_trace(
     model_calls: ModelCallCounter,
 ) -> None:
-    """REQ-R7-1: the trace is the visible half of the counter — the strategy's run has no
-    children, and the only priced call is the route's (R3)."""
+    """The trace is the visible half of the counter — the strategy's run has no
+    children, and the only priced call is the route's."""
     collector = RunCollectorCallbackHandler()
 
     make_router().invoke(MULTI_PART_ANALYSIS, {"callbacks": [collector]})
@@ -686,7 +689,7 @@ def test_the_strategy_adds_no_run_of_its_own_to_the_trace(
 
 
 class CallsAModel(RoutingStrategy):
-    """What REQ-R7-1 forbids: a strategy that asks a model, as T-134's will (REQ-R7-2)."""
+    """What the no-extra-calls rule forbids: a strategy that asks a model, as a classifier does."""
 
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
@@ -697,7 +700,7 @@ class CallsAModel(RoutingStrategy):
 
 
 def test_the_no_call_check_catches_a_call(model_calls: ModelCallCounter) -> None:
-    """REQ-R7-1: the autouse counter is not vacuous — a strategy that does call a model is
+    """The autouse counter is not vacuous — a strategy that does call a model is
     caught, under its own run and with no run at all."""
     strategy = CallsAModel(FakeChatModel())
 
@@ -710,10 +713,10 @@ def test_the_no_call_check_catches_a_call(model_calls: ModelCallCounter) -> None
 
 
 def test_the_defaults_blind_spots_are_the_ones_we_know_of() -> None:
-    """R7, T-140: what local signals cannot see, pinned so the benchmark argues with numbers.
+    """What local signals cannot see, pinned so the benchmark argues with numbers.
 
     Not a specification of good routing — the opposite. Each case is a request the defaults
-    score wrongly, kept here so T-140 can measure whether retuning fixes it.
+    score wrongly, kept here so a benchmark can measure whether retuning fixes it.
     """
     strategy = HeuristicStrategy("small", "frontier")
 

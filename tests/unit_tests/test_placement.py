@@ -1,10 +1,10 @@
-"""T-120: the router works everywhere a chat model goes (REQ-C1-2), and coexists with agent
-middleware rather than being bypassed by it (REQ-C8-1).
+"""The router works everywhere a chat model goes, and coexists with agent
+middleware rather than being bypassed by it.
 
 Four placements, offline with fake routes: an LCEL chain (`prompt | router`), the "agent
-backbone" use case (PRD §4) — `create_agent(model=router)`, unbound, letting `create_agent`
+backbone" use case — `create_agent(model=router)`, unbound, letting `create_agent`
 call `router.bind_tools` itself, the way it would on a bare model (the *pre-bound* form,
-`create_agent(model=router.bind_tools(...))`, is REQ-C3-2's own placement test,
+`create_agent(model=router.bind_tools(...))`, is the placement test for a pre-bound router,
 `tests/unit_tests/test_tools.py::test_create_agent_builds_and_answers_with_a_pre_bound_router`) —
 a LangGraph node, and a message-history wrapper.
 
@@ -42,7 +42,7 @@ from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 
 
 class ByKeyword(RoutingStrategy):
-    """Names `match` when `keyword` is in the request's text, `other` otherwise (R4, R6)."""
+    """Names `match` when `keyword` is in the request's text, `other` otherwise."""
 
     def __init__(self, keyword: str, match: str, other: str) -> None:
         self.keyword = keyword
@@ -77,7 +77,7 @@ def _graph_with(router: BaseChatModel, **compile_kwargs: Any) -> Any:
     """A one-node graph that answers with `router` — `Any`, not `CompiledStateGraph[...]`: its
     generic `invoke`/`stream` overloads reject the informal message shapes (`("human", ...)`
     tuples, a bare `dict`) every test below uses, the same way `tests/unit_tests/test_
-    conventions.py`'s own `graph_with` sidesteps it for REQ-C5-3's tests."""
+    conventions.py`'s own `graph_with` sidesteps it for the streaming tests."""
 
     def answer(state: _GraphState) -> dict[str, list[AnyMessage]]:
         return {"messages": [router.invoke(state["messages"])]}
@@ -92,7 +92,7 @@ def _graph_with(router: BaseChatModel, **compile_kwargs: Any) -> Any:
 
 
 def test_prompt_pipe_router_is_an_ordinary_lcel_chain() -> None:
-    """REQ-C1-2: `prompt | router` works as `prompt | any_chat_model` does — an LCEL chain that
+    """`prompt | router` works as `prompt | any_chat_model` does — an LCEL chain that
     formats a prompt and hands it to the router, whose own answer (record included) comes back
     unchanged through the pipe."""
     router = ChatRouter(
@@ -110,7 +110,7 @@ def test_prompt_pipe_router_is_an_ordinary_lcel_chain() -> None:
     assert routing_decision(answer) == RoutingDecision(route="a", reason="no strategy configured")
 
 
-# --- 2. `create_agent(model=router)`, unbound: the agent backbone (PRD §4) ---
+# --- 2. `create_agent(model=router)`, unbound: the agent backbone ---
 
 
 @tool
@@ -120,9 +120,9 @@ def lookup(city: str) -> str:
 
 
 def test_create_agent_with_an_unbound_router_completes_its_tool_loop() -> None:
-    """REQ-C1-2: `create_agent(model=router)` — the router passed as given, not pre-bound —
+    """`create_agent(model=router)` — the router passed as given, not pre-bound —
     builds and completes a real tool loop, with `create_agent` calling `router.bind_tools`
-    itself exactly as it would on a bare model (C3)."""
+    itself exactly as it would on a bare model."""
     from langchain.agents import create_agent
 
     route = ToolCallingFakeChatModel(
@@ -151,7 +151,7 @@ def test_create_agent_with_an_unbound_router_completes_its_tool_loop() -> None:
 
 
 def test_a_langgraph_node_routes_and_returns_the_record() -> None:
-    """REQ-C1-2: the router works as an ordinary LangGraph node — a plain function that calls
+    """The router works as an ordinary LangGraph node — a plain function that calls
     it and puts its answer into the graph's state, record included."""
     routes: dict[str, BaseChatModel] = {
         "a": FakeChatModel(model_name="a", reply="a answers"),
@@ -173,7 +173,7 @@ def test_a_langgraph_node_routes_and_returns_the_record() -> None:
 
 
 def test_a_checkpointed_graph_persists_the_conversation_across_turns() -> None:
-    """REQ-C1-2: the current message-history idiom — a checkpointer, not the deprecated
+    """The current message-history idiom — a checkpointer, not the deprecated
     `RunnableWithMessageHistory` — works with the router as the graph's model. The second turn's
     route call sees both the first turn's messages and the second's, proving the history
     persisted across two separate `graph.invoke` calls on the same thread, through the router."""
@@ -201,11 +201,11 @@ def test_a_checkpointed_graph_persists_the_conversation_across_turns() -> None:
     assert len(second_call) == 3  # first human + first AI + second human
 
 
-# --- 5. C8: `@wrap_model_call` middleware coexists with routing, inside `create_agent` ---
+# --- 5. `@wrap_model_call` middleware coexists with routing, inside `create_agent` ---
 
 
 def test_wrap_model_call_middleware_coexists_with_routing() -> None:
-    """REQ-C8-1: an agent with both the router as its model and `@wrap_model_call` middleware
+    """An agent with both the router as its model and `@wrap_model_call` middleware
     runs to completion — the middleware sees the router itself as `request.model` (not
     bypassed, and not some inner route), and routing still happens: the decision record is on
     the final answer, naming the route `ByKeyword` picked."""

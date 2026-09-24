@@ -1,4 +1,4 @@
-"""T-113: every way of calling a chat model works on the router, and only those (C2, R1).
+"""Every way of calling a chat model works on the router, and only those.
 
 `invoke`, `ainvoke`, `stream` and `astream` are the router's own; `batch`, `abatch` and
 `astream_events` come from `Runnable` and reach the route through them. The streaming protocol
@@ -102,14 +102,14 @@ def fields_of(message: AIMessage) -> dict[str, Any]:
     }
 
 
-# --- Every convention returns the route's output (REQ-C2-1) ---
+# --- Every convention returns the route's output ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_every_calling_convention_returns_the_selected_route_s_output(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C2-1: `invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and
+    """`invoke`, `ainvoke`, `stream`, `astream`, `batch`, `abatch` and
     `astream_events` all answer with the selected route's own message and its record — there is
     no extra call form to learn, and no convention that routes differently."""
     routes = fake_routes("cheap", "frontier")
@@ -125,8 +125,8 @@ async def test_every_calling_convention_returns_the_selected_route_s_output(
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_the_router_answers_exactly_as_the_route_would(convention: AnyConvention) -> None:
-    """REQ-C2-1: "no router-specific call form" cuts both ways — the same call on the route
-    itself gives the same answer, bar the record the router adds (R1, C1)."""
+    """ "no router-specific call form" cuts both ways — the same call on the route
+    itself gives the same answer, bar the record the router adds."""
     router = by_text("frontier")
     direct = FakeChatModel(model_name="model-frontier", reply="frontier answer here")
 
@@ -144,7 +144,7 @@ async def test_the_router_answers_exactly_as_the_route_would(convention: AnyConv
 
 @pytest.mark.parametrize("convention", STREAMING)
 async def test_merged_stream_chunks_equal_the_invoke_output(convention: AnyConvention) -> None:
-    """REQ-C2-1: merging what a deterministic route streams rebuilds what `invoke` returned —
+    """Merging what a deterministic route streams rebuilds what `invoke` returned —
     every field of it, not only the text."""
     router = by_text("frontier")
 
@@ -158,8 +158,8 @@ async def test_merged_stream_chunks_equal_the_invoke_output(convention: AnyConve
 async def test_streaming_differs_from_invoke_only_where_langchain_makes_it_differ(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C2-1: `id` and `type` are the two fields `fields_of` leaves out. They differ for a
-    bare chat model too, so the router adds no difference of its own (C1)."""
+    """`id` and `type` are the two fields `fields_of` leaves out. They differ for a
+    bare chat model too, so the router adds no difference of its own."""
     direct = FakeChatModel(model_name="model-frontier", reply="frontier answer here")
     router = by_text("frontier")
 
@@ -173,7 +173,7 @@ async def test_streaming_differs_from_invoke_only_where_langchain_makes_it_diffe
 
 
 async def test_v2_events_show_the_router_s_chain_run_around_one_model_run() -> None:
-    """REQ-C2-1, C5: an event stream reports what the trace does — the router's chain run
+    """An event stream reports what the trace does — the router's chain run
     around the strategy's, and the route's call as the only model run in the call."""
     router = by_text("cheap", "frontier")
 
@@ -191,12 +191,12 @@ async def test_v2_events_show_the_router_s_chain_run_around_one_model_run() -> N
     ]
 
 
-# --- A route that cannot stream (REQ-C2-4) ---
+# --- A route that cannot stream ---
 
 
 @pytest.mark.parametrize("convention", ["stream", "astream"])
 async def test_a_route_without_native_streaming_still_streams(convention: AnyConvention) -> None:
-    """REQ-C2-4: a route that implements only `_generate` yields one chunk, equal to its whole
+    """A route that implements only `_generate` yields one chunk, equal to its whole
     message — LangChain's own fallback, which the router passes through rather than replaces."""
     route = GenerateOnlyFakeChatModel(model_name="model-only", reply="one shot answer")
     router = ChatRouter(routes={"only": route}, default_route="only")
@@ -213,8 +213,8 @@ async def test_a_route_without_native_streaming_still_streams(convention: AnyCon
 
 
 async def test_a_route_without_native_streaming_streams_what_it_would_have_returned() -> None:
-    """REQ-C2-4: the single chunk is the route's message with the record added, and nothing
-    else about it changed (R1)."""
+    """The single chunk is the route's message with the record added, and nothing
+    else about it changed."""
     answered = AIMessage(content="one shot answer", id="route-message")
     route = GenerateOnlyFakeChatModel(model_name="model-only", script=[answered])
     router = ChatRouter(routes={"only": route}, default_route="only")
@@ -224,15 +224,15 @@ async def test_a_route_without_native_streaming_streams_what_it_would_have_retur
 
     assert (only.content, only.id) == ("one shot answer", "route-message")
     assert only.response_metadata == {"model_name": "model-only", ROUTING_KEY: record}
-    assert ROUTING_KEY not in answered.response_metadata  # the record went on a copy (C10)
+    assert ROUTING_KEY not in answered.response_metadata  # the record went on a copy
 
 
-# --- One record, however many chunks (REQ-R2-3) ---
+# --- One record, however many chunks ---
 
 
 @pytest.mark.parametrize("convention", STREAMING)
 async def test_merging_every_chunk_yields_one_decision_record(convention: AnyConvention) -> None:
-    """REQ-R2-3, D8: exactly one chunk carries the record, so merging the stream leaves the
+    """Exactly one chunk carries the record, so merging the stream leaves the
     record itself — `merge_dicts` concatenates a string repeated across chunks, and a record on
     every chunk would come out as `'frontierfrontier…'`."""
     router = by_text("cheap", "frontier")
@@ -247,8 +247,8 @@ async def test_merging_every_chunk_yields_one_decision_record(convention: AnyCon
 
 @pytest.mark.parametrize("convention", ["stream", "astream"])
 async def test_only_one_streamed_chunk_carries_the_record(convention: AnyConvention) -> None:
-    """REQ-R2-3: the first chunk carries it and the rest carry nothing — what makes merging
-    above come out as one record rather than a concatenation (D8)."""
+    """The first chunk carries it and the rest carry nothing — what makes merging
+    above come out as one record rather than a concatenation."""
     router = by_text("cheap", "frontier")
 
     if convention == "stream":
@@ -262,7 +262,7 @@ async def test_only_one_streamed_chunk_carries_the_record(convention: AnyConvent
     assert len(chunks) > 1  # otherwise there is nothing for merging to concatenate
 
 
-# --- Nothing blocks the event loop (REQ-C2-3) ---
+# --- Nothing blocks the event loop ---
 
 
 class Parked(RoutingStrategy):
@@ -314,7 +314,7 @@ async def ticks(count: int = _TICKS) -> int:
 
 
 async def test_an_async_strategy_that_waits_does_not_stall_a_concurrent_task() -> None:
-    """REQ-C2-3: while `adecide` is parked, another task runs to completion and the routed
+    """While `adecide` is parked, another task runs to completion and the routed
     call is still pending — the router awaited the strategy rather than blocking on it."""
     strategy = Parked()
     router = ChatRouter(
@@ -334,8 +334,8 @@ async def test_an_async_strategy_that_waits_does_not_stall_a_concurrent_task() -
 
 
 async def test_a_blocking_strategy_runs_off_the_event_loop() -> None:
-    """REQ-C2-3: a strategy with only a synchronous `decide` blocks a worker thread, not the
-    loop — the default `adecide` puts it in an executor (D6), and a concurrent task keeps
+    """A strategy with only a synchronous `decide` blocks a worker thread, not the
+    loop — the default `adecide` puts it in an executor, and a concurrent task keeps
     running while it sits there."""
     strategy = Blocking()
     router = ChatRouter(
@@ -408,7 +408,7 @@ class GatedRoute(FakeChatModel):
 
 
 async def test_abatch_runs_its_requests_at_the_same_time() -> None:
-    """REQ-C2-3: `abatch` of N overlaps — the gate opens only when all N are in flight, so a
+    """`abatch` of N overlaps — the gate opens only when all N are in flight, so a
     batch that awaited one request after another would never get past it."""
     gate = Gate(width=_BATCH)
     route = GatedRoute(model_name="gated", reply="an answer", gate=gate)
@@ -421,7 +421,7 @@ async def test_abatch_runs_its_requests_at_the_same_time() -> None:
 
 
 async def test_abatch_honours_max_concurrency() -> None:
-    """C2: the caller's `max_concurrency` still caps a routed batch. The gate would open at
+    """The caller's `max_concurrency` still caps a routed batch. The gate would open at
     four, so it stays shut, and exactly two requests sit against it."""
     gate = Gate(width=_BATCH)
     route = GatedRoute(model_name="gated", reply="an answer", gate=gate)
@@ -436,12 +436,12 @@ async def test_abatch_honours_max_concurrency() -> None:
     assert [message.content for message in messages] == ["an answer"] * _BATCH
 
 
-# --- batch and abatch (REQ-C2-1) ---
+# --- batch and abatch ---
 
 
 @pytest.mark.parametrize("convention", ["batch", "abatch"])
 async def test_every_input_in_a_batch_gets_its_own_decision(convention: AnyConvention) -> None:
-    """REQ-C2-1: a batch is N routed calls, not one — each input is decided on its own and
+    """A batch is N routed calls, not one — each input is decided on its own and
     answered by the route its own text names."""
     routes = fake_routes("cheap", "frontier", "local")
     router = ChatRouter(routes=routes, default_route="cheap", strategy=ByText())
@@ -461,7 +461,7 @@ async def test_every_input_in_a_batch_gets_its_own_decision(convention: AnyConve
 
 
 class FailingRoute(FakeChatModel):
-    """A route whose provider is down (C6: its error surfaces unchanged)."""
+    """A route whose provider is down (its error surfaces unchanged)."""
 
     def _generate(
         self,
@@ -478,7 +478,7 @@ class FailingRoute(FakeChatModel):
 async def test_a_batch_returns_exceptions_when_asked_and_raises_when_not(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C2-1: `return_exceptions` behaves as it does on any Runnable — the failed input's
+    """`return_exceptions` behaves as it does on any Runnable — the failed input's
     error takes its place in the results, and the ones that worked keep their records."""
     router = ChatRouter(
         routes={"good": FakeChatModel(reply="good answer"), "bad": FailingRoute()},
@@ -523,7 +523,7 @@ class Meeting(FakeChatModel):
 
 
 def test_batch_runs_its_inputs_in_parallel_and_honours_max_concurrency() -> None:
-    """C2: a routed `batch` parallelises like any Runnable's — four inputs meet at a barrier of
+    """A routed `batch` parallelises like any Runnable's — four inputs meet at a barrier of
     four — and `max_concurrency=1` serialises them, so a barrier of two is never met."""
     barrier = threading.Barrier(_BATCH)
     router = ChatRouter(
@@ -541,7 +541,7 @@ def test_batch_runs_its_inputs_in_parallel_and_honours_max_concurrency() -> None
         alone.batch(["hello"] * _BATCH, {"max_concurrency": 1})
 
 
-# --- LangGraph's messages stream (REQ-C5-3) ---
+# --- LangGraph's messages stream ---
 
 
 class GraphState(TypedDict):
@@ -563,7 +563,7 @@ def graph_with(model: BaseChatModel) -> Any:
 
 
 def test_a_langgraph_node_streams_the_route_s_tokens_exactly_once() -> None:
-    """REQ-C5-3: with the router as a graph node, `stream_mode="messages"` yields the route's
+    """With the router as a graph node, `stream_mode="messages"` yields the route's
     tokens once — not twice, not zero.
 
     The spike's caveat 2: the router's run is a chain run, so `on_chat_model_start` registers
@@ -591,8 +591,8 @@ def test_a_langgraph_node_streams_the_route_s_tokens_exactly_once() -> None:
 
 
 def test_a_langgraph_node_puts_the_record_on_the_message_it_returns() -> None:
-    """REQ-C5-3, R2: streaming tokens is not the only thing a graph run yields — the message
-    that lands in the state still carries the decision (D8)."""
+    """Streaming tokens is not the only thing a graph run yields — the message
+    that lands in the state still carries the decision."""
     router = by_text("cheap", "frontier")
 
     state = graph_with(router).invoke({"messages": [("human", "frontier")]})
@@ -606,7 +606,7 @@ def test_a_langgraph_node_puts_the_record_on_the_message_it_returns() -> None:
 
 @pytest.mark.parametrize("entry", ["stream_events", "astream_events"])
 def test_the_v3_streaming_protocol_is_refused(entry: str) -> None:
-    """REQ-C2-1: `stream_events(version="v3")` drives a model through `_stream` / `_generate`
+    """`stream_events(version="v3")` drives a model through `_stream` / `_generate`
     directly (`language_models/chat_models.py:995`), which a delegating router does not
     implement — so routing, the record and the run shape would all be skipped. The router says
     so at the call, before any run opens or any route is touched."""
@@ -623,8 +623,8 @@ def test_the_v3_streaming_protocol_is_refused(entry: str) -> None:
 
 
 async def test_refusing_v3_leaves_the_v2_events_routed() -> None:
-    """REQ-C2-1: the override forwards every version it does support, so v2 events still come
-    from the routed `astream` (C2)."""
+    """The override forwards every version it does support, so v2 events still come
+    from the routed `astream`."""
     routes = fake_routes("cheap", "frontier")
     router = ChatRouter(routes=routes, default_route="cheap", strategy=ByText())
 
@@ -634,12 +634,12 @@ async def test_refusing_v3_leaves_the_v2_events_routed() -> None:
     assert (len(call_log(routes["cheap"])), len(call_log(routes["frontier"]))) == (0, 1)
 
 
-# --- No stray warnings on any of it (R9) ---
+# --- No stray warnings on any of it ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_no_convention_warns_about_routing_on_its_own(convention: AnyConvention) -> None:
-    """R9: a strategy that decides leaves nothing to fall back to — no convention may raise a
+    """A strategy that decides leaves nothing to fall back to — no convention may raise a
     routing warning of its own just by being the one used."""
     router = by_text("cheap", "frontier")
 
@@ -654,9 +654,9 @@ async def test_no_convention_warns_about_routing_on_its_own(convention: AnyConve
 async def test_every_convention_opens_one_router_run_around_one_model_run(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C2-1, D9: the conventions `Runnable` gives the router for free go through the ones
+    """The conventions `Runnable` gives the router for free go through the ones
     it overrides, so each of them puts the same shape on the trace — the router's chain run,
-    the strategy's, and the route's call as the only model run (REQ-C5-2 is T-117's)."""
+    the strategy's, and the route's call as the only model run."""
     router = by_text("cheap", "frontier")
     collector = RunCollectorCallbackHandler()
 

@@ -1,18 +1,18 @@
-"""T-117: what one routed call puts on the trace, for every way of calling the router (C5, D9).
+"""What one routed call puts on the trace, for every way of calling the router.
 
-The shape D9 settled: the router's run is a *chain* run whose output carries the decision; a
+The settled shape: the router's run is a *chain* run whose output carries the decision; a
 strategy, when there is one, decides in a child chain run of its own; and the selected route's
 call is the only chat-model run outside the strategy's. That is what makes the trace show the
-decision *and* the real call (C5) while a model is billed once (R3, `test_cost.py`).
+decision *and* the real call while a model is billed once (`test_cost.py`).
 
 The shape used to be asserted call by call, in the tests of whichever task first needed it —
 `test_routes.py` for the four entry points the router overrides, `test_conventions.py` for the
 ones `Runnable` builds on them. This module is where it is one guarantee, over every convention
-a chat model has (`ALL_CONVENTIONS`): REQ-C5-1 and REQ-C5-2 for the shape itself, REQ-C5-5 for
+a chat model has (`ALL_CONVENTIONS`): the shape itself first, then, separately,
 what a strategy's own model call does to it.
 
 Nesting is measured two ways, because they fail differently: a `StartLog` says which callback
-announced each run and under which parent (`on_chat_model_start` is what REQ-C5-1 counts), and
+announced each run and under which parent (`on_chat_model_start` is what gets counted), and
 the offline tracer's tree says where each run ended up and what it carried.
 """
 
@@ -65,10 +65,10 @@ def fake_routes(*names: str) -> dict[str, BaseChatModel]:
 async def async_calls_inherit_the_context() -> bool:
     """Whether a coroutine awaited through `coro_with_context` runs in the context it was given.
 
-    This is what D9 leans on for a strategy that omits `request.config`, and it is not the same
-    everywhere. `asyncio.create_task` takes a `context` only from Python 3.11; below that,
-    `langchain-core` 1.6 creates the task *inside* the context (`runnables/utils.py:157`), which
-    has the same effect, while 1.1 hands back the bare coroutine (`create_task=False`) and the
+    This is what the tracing design leans on for a strategy that omits `request.config`, and it is
+    not the same everywhere. `asyncio.create_task` takes a `context` only from Python 3.11; below
+    that, `langchain-core` 1.6 creates the task *inside* the context (`runnables/utils.py:157`),
+    which has the same effect, while 1.1 hands back the bare coroutine (`create_task=False`) and the
     call runs in the caller's context instead. LangChain documents the consequence: there, an
     async call has to be handed its config. Asking the mechanism, rather than the version
     numbers, keeps the skip below true.
@@ -83,14 +83,14 @@ async def async_calls_inherit_the_context() -> bool:
     return await coro_with_context(read(), context)
 
 
-# --- The shape, for every convention (REQ-C5-1, REQ-C5-2) ---
+# --- The shape, for every convention ---
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 async def test_every_convention_puts_one_chat_model_run_under_the_router_s_chain_run(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C5-1, REQ-C5-2: with a strategy that makes no call, a call through any convention
+    """With a strategy that makes no call, a call through any convention
     announces exactly one `on_chat_model_start` — the route's — and its parent is the router's
     chain run, which is the root. The router's run carries the decision in its outputs, and the
     route's run in its metadata."""
@@ -127,7 +127,7 @@ async def test_every_convention_puts_one_chat_model_run_under_the_router_s_chain
 async def test_without_a_strategy_the_router_run_holds_the_route_s_call_alone(
     convention: AnyConvention,
 ) -> None:
-    """REQ-C5-1, REQ-C5-2, D9: nothing decides, so there is no strategy run — the router's chain
+    """Nothing decides, so there is no strategy run — the router's chain
     run wraps the route's chat-model run and nothing else, and both carry the record."""
     router = ChatRouter(routes=fake_routes("cheap", "frontier"), default_route="frontier")
     starts, collector = StartLog(), RunCollectorCallbackHandler()
@@ -146,7 +146,7 @@ async def test_without_a_strategy_the_router_run_holds_the_route_s_call_alone(
     assert (route_run.extra or {})["metadata"][ROUTING_KEY] == record
 
 
-# --- A strategy's own model call nests under the strategy's run (REQ-C5-5) ---
+# --- A strategy's own model call nests under the strategy's run ---
 
 
 @pytest.mark.parametrize("pass_config", [True, False], ids=["config passed", "config omitted"])
@@ -154,7 +154,7 @@ async def test_without_a_strategy_the_router_run_holds_the_route_s_call_alone(
 async def test_a_model_the_strategy_calls_nests_under_the_strategy_s_run(
     convention: AnyConvention, pass_config: bool
 ) -> None:
-    """REQ-C5-5, D9: router run → strategy run → the strategy's model run, and router run → the
+    """Router run → strategy run → the strategy's model run, and router run → the
     route's model run — through every convention, sync and async.
 
     A strategy that passes `request.config` nests everywhere, Python 3.10 included, where an
@@ -164,7 +164,7 @@ async def test_a_model_the_strategy_calls_nests_under_the_strategy_s_run(
     versions that arrange it — which is the documented limit the skip below names.
     """
     if convention in ASYNC and not pass_config and not await async_calls_inherit_the_context():
-        pytest.skip("here an async call must be handed its config to nest (D9)")
+        pytest.skip("here an async call must be handed its config to nest")
     classifier = FakeChatModel(model_name="model-classifier", reply="frontier")
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"),

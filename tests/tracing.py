@@ -3,7 +3,7 @@
 LangSmith prices a run from its `usage_metadata` plus the `ls_provider` / `ls_model_name` on
 its metadata (docs: *Cost tracking*). `LangChainTracer._on_llm_end` is what puts usage on a
 run: it reads the run's *own* outputs (`tracers/langchain.py:395`). So every LLM run in a trace
-that carries usage and a model name is a separate charge — which is the whole R3 versus C5
+that carries usage and a model name is a separate charge — which is the whole cost-versus-trace
 question when a chat model calls a chat model.
 
 These helpers walk collected runs the same way, so tests can check the trace's shape and
@@ -69,7 +69,7 @@ def model_name_of(run: Run) -> str | None:
 def priced_calls(runs: Iterable[Run]) -> list[PricedCall]:
     """Every charge in the trace: one per model run that reports usage.
 
-    More than one entry for a single request is R3 broken — the same tokens billed twice.
+    More than one entry for a single request is cost counting broken — the same tokens billed twice.
     """
     calls = []
     for run in model_runs(runs):
@@ -97,7 +97,7 @@ class StartLog(BaseCallbackHandler):
     """Records every run's start by the callback that announced it.
 
     The offline tracer files a chat model's run and a text LLM's under the same `run_type`; the
-    callbacks don't, and REQ-C5-1 is about `on_chat_model_start` — the one a chat model reports
+    callbacks don't, and what matters is `on_chat_model_start` — the one a chat model reports
     — so this keeps the three apart. `on_llm_start` should stay empty for a router.
     """
 
@@ -143,11 +143,11 @@ class StartLog(BaseCallbackHandler):
 
 
 class ConsultingStrategy(RoutingStrategy):
-    """A strategy that asks a model before it decides, as an opt-in classifier does (R7, D9).
+    """A strategy that asks a model before it decides, as an opt-in classifier does.
 
     It always answers with `route`: what these tests are about is the call it makes on the way,
     and where that call lands in the trace and on the bill. `pass_config=False` is the custom
-    strategy that forgets `request.config`, which D9 still nests wherever context propagates.
+    strategy that forgets `request.config`, which still nests wherever context propagates.
     """
 
     def __init__(self, model: BaseChatModel, route: str, *, pass_config: bool = True) -> None:

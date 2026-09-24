@@ -1,6 +1,6 @@
-"""T-110: named routes, the default route, and the shape one routed call takes (R5, R9, D9).
+"""Named routes, the default route, and the shape one routed call takes.
 
-The fallback paths of R9 are in `test_fallback.py`; here are the routes themselves, what the
+The fallback paths are in `test_fallback.py`; here are the routes themselves, what the
 constructor accepts, and the runs one call opens.
 """
 
@@ -47,7 +47,7 @@ class ByText(RoutingStrategy):
 
 
 class Consulting(RoutingStrategy):
-    """Asks a model before deciding, as an opt-in classifier strategy does (R7)."""
+    """Asks a model before deciding, as an opt-in classifier strategy does."""
 
     def __init__(self, model: BaseChatModel, *, pass_config: bool) -> None:
         self.model = model
@@ -89,11 +89,11 @@ def failures(**kwargs: Any) -> list[tuple[tuple[int | str, ...], Any]]:
     ]
 
 
-# --- The constructor (REQ-R5-2, REQ-R9-1) ---
+# --- The constructor ---
 
 
 def test_a_router_needs_at_least_one_route() -> None:
-    """REQ-R5-2: empty `routes` fails at construction, with a message naming the offender."""
+    """Empty `routes` fails at construction, with a message naming the offender."""
     [(loc, error)] = failures(routes={}, default_route="cheap")
 
     assert loc == ("routes",)
@@ -102,12 +102,12 @@ def test_a_router_needs_at_least_one_route() -> None:
 
 
 def test_a_default_route_is_mandatory() -> None:
-    """REQ-R9-1: a router without a default route cannot be built at all."""
+    """A router without a default route cannot be built at all."""
     assert failures(routes=fake_routes("cheap")) == [(("default_route",), "missing")]
 
 
 def test_the_default_route_must_name_a_route() -> None:
-    """REQ-R5-2, REQ-R9-1: a default route that names none of the routes fails, naming it."""
+    """A default route that names none of the routes fails, naming it."""
     [(loc, error)] = failures(routes=fake_routes("cheap", "frontier"), default_route="nope")
 
     assert loc == ()
@@ -117,7 +117,7 @@ def test_the_default_route_must_name_a_route() -> None:
 
 @pytest.mark.parametrize("blank", ["", "   "], ids=["empty", "whitespace"])
 def test_a_route_name_may_not_be_blank(blank: str) -> None:
-    """REQ-R5-2: names identify routes in records, configuration and warnings — so each route
+    """Names identify routes in records, configuration and warnings — so each route
     needs one."""
     [(loc, error)] = failures(
         routes={blank: FakeChatModel(), "cheap": FakeChatModel()}, default_route="cheap"
@@ -128,8 +128,8 @@ def test_a_route_name_may_not_be_blank(blank: str) -> None:
 
 
 def test_tool_support_overrides_must_name_routes() -> None:
-    """REQ-R5-2: an override for a route that doesn't exist is a typo, caught at construction
-    rather than silently ignored when tools are bound (D5)."""
+    """An override for a route that doesn't exist is a typo, caught at construction
+    rather than silently ignored when tools are bound."""
     [(loc, error)] = failures(
         routes=fake_routes("cheap", "frontier"),
         default_route="cheap",
@@ -153,7 +153,7 @@ def test_the_pinned_fields_have_their_pinned_defaults() -> None:
 
 
 def test_on_unavailable_forced_route_takes_only_the_two_settings() -> None:
-    """R11: the setting is `error` or `fallback`; anything else is a construction error."""
+    """The setting is `error` or `fallback`; anything else is a construction error."""
     [(loc, _)] = failures(
         routes=fake_routes("cheap"), default_route="cheap", on_unavailable_forced_route="maybe"
     )
@@ -162,7 +162,7 @@ def test_on_unavailable_forced_route_takes_only_the_two_settings() -> None:
 
 
 def test_a_strategy_is_coerced_once_and_left_out_of_serialization() -> None:
-    """D6: the router holds one interface, whether it was given a callable or a strategy."""
+    """The router holds one interface, whether it was given a callable or a strategy."""
     given = ByText()
     routes = fake_routes("cheap")
 
@@ -174,7 +174,7 @@ def test_a_strategy_is_coerced_once_and_left_out_of_serialization() -> None:
 
 
 def test_something_that_is_not_a_strategy_is_refused_at_construction() -> None:
-    """D6: `as_strategy` is the one gate on what may be a strategy (T-111's), so what it
+    """`as_strategy` is the one gate on what may be a strategy, so what it
     refuses is its own `TypeError` — pydantic wraps a validator's `ValueError`, not a
     `TypeError`, so this is not a `ValidationError` like the route-name failures above."""
     kwargs: dict[str, Any] = {
@@ -187,12 +187,12 @@ def test_something_that_is_not_a_strategy_is_refused_at_construction() -> None:
         ChatRouter(**kwargs)
 
 
-# --- Routes are used as given (REQ-R5-1) ---
+# --- Routes are used as given ---
 
 
 @pytest.mark.parametrize("count", [1, 2, 12], ids=["one", "two", "many"])
 async def test_any_number_of_named_routes_answer_their_own_requests(count: int) -> None:
-    """REQ-R5-1: one, two or many ordinary chat models, each answering the requests the
+    """One, two or many ordinary chat models, each answering the requests the
     strategy sends it, through every calling convention."""
     names = [f"route-{index}" for index in range(count)]
     routes = fake_routes(*names)
@@ -214,7 +214,7 @@ async def test_any_number_of_named_routes_answer_their_own_requests(count: int) 
 
 @pytest.mark.parametrize("count", [1, 2, 12], ids=["one", "two", "many"])
 async def test_a_route_is_the_object_it_was_given_and_is_never_reconfigured(count: int) -> None:
-    """REQ-R5-1: the router holds each route object itself, in declaration order (D1), and
+    """The router holds each route object itself, in declaration order, and
     calling it changes nothing about it."""
     names = [f"route-{index}" for index in range(count)]
     routes = fake_routes(*names)
@@ -231,7 +231,7 @@ async def test_a_route_is_the_object_it_was_given_and_is_never_reconfigured(coun
 
 
 def test_batch_routes_each_input_on_its_own() -> None:
-    """C2: `batch` goes through the routed `invoke`, so every input gets its own decision."""
+    """`batch` goes through the routed `invoke`, so every input gets its own decision."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
     )
@@ -246,7 +246,7 @@ def test_batch_routes_each_input_on_its_own() -> None:
 
 
 def test_the_record_is_added_to_a_copy_of_the_route_s_message() -> None:
-    """R1, C10: the route may keep the object it returned — its response cache does — so the
+    """The route may keep the object it returned — its response cache does — so the
     record goes on a copy, and nothing else about the message changes."""
     answered = AIMessage(content="kept", id="route-message")
     route = FakeChatModel(script=[answered])
@@ -263,16 +263,16 @@ def test_the_record_is_added_to_a_copy_of_the_route_s_message() -> None:
     assert message.usage_metadata == answered.usage_metadata
 
 
-# --- What one call puts on the trace (D9) ---
+# --- What one call puts on the trace ---
 
 
 @pytest.mark.parametrize("convention", CONVENTIONS)
 async def test_the_router_run_wraps_the_strategy_run_and_the_route_s_call(
     convention: Convention,
 ) -> None:
-    """D9: the router's own run is a chain run; the strategy decides in a child chain run of
+    """The router's own run is a chain run; the strategy decides in a child chain run of
     its own whose output is the decision; the selected route's call is the only model run,
-    also a child of the router's run, and carries the record in its metadata (R3, C5)."""
+    also a child of the router's run, and carries the record in its metadata."""
     routes = fake_routes("cheap", "frontier")
     strategy = ByText()
     router = ChatRouter(routes=routes, default_route="cheap", strategy=strategy)
@@ -309,7 +309,7 @@ async def test_the_router_run_wraps_the_strategy_run_and_the_route_s_call(
 async def test_without_a_strategy_the_default_route_answers_and_no_strategy_run_opens(
     convention: Convention,
 ) -> None:
-    """D9, R9: with no strategy there is nothing to run and nothing to warn about — the
+    """With no strategy there is nothing to run and nothing to warn about — the
     default route answers, and the record says so."""
     routes = fake_routes("cheap", "frontier")
     router = ChatRouter(routes=routes, default_route="frontier")
@@ -333,11 +333,11 @@ async def test_without_a_strategy_the_default_route_answers_and_no_strategy_run_
 async def test_a_model_the_strategy_calls_nests_under_the_strategy_s_run(
     convention: Convention, pass_config: bool
 ) -> None:
-    """D9: a strategy that calls a model has a parent run to nest under, so that call is
-    traced and costed as the strategy's, not the router's or the route's (R3). Passing
+    """A strategy that calls a model has a parent run to nest under, so that call is
+    traced and costed as the strategy's, not the router's or the route's. Passing
     `request.config` works everywhere; the context config covers a strategy that omits it."""
     if convention == "ainvoke" and not pass_config and sys.version_info < (3, 11):
-        pytest.skip("below Python 3.11 an async call must be handed its config (D9)")
+        pytest.skip("below Python 3.11 an async call must be handed its config")
     classifier = FakeChatModel(model_name="classifier", reply="frontier")
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"),
@@ -361,7 +361,7 @@ async def test_a_model_the_strategy_calls_nests_under_the_strategy_s_run(
 
 @pytest.mark.parametrize("convention", ["stream", "astream"])
 async def test_exactly_one_streamed_chunk_carries_the_record(convention: Convention) -> None:
-    """D8: the route is chosen before the first chunk, and only that chunk carries the record
+    """The route is chosen before the first chunk, and only that chunk carries the record
     — a record on every chunk would merge into `'frontierfrontier…'`."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
@@ -380,8 +380,8 @@ async def test_exactly_one_streamed_chunk_carries_the_record(convention: Convent
 
 
 def test_the_caller_s_configuration_reaches_the_route() -> None:
-    """C4: the router replaces the callbacks and adds the decision to the metadata; the rest
-    of the caller's config — tags, metadata, run name — travels on (REQ-C4-2 is T-116's)."""
+    """The router replaces the callbacks and adds the decision to the metadata; the rest
+    of the caller's config — tags, metadata, run name — travels on."""
     router = ChatRouter(
         routes=fake_routes("cheap", "frontier"), default_route="cheap", strategy=ByText()
     )
@@ -428,7 +428,7 @@ class Recording(FakeChatModel):
 async def test_the_route_is_called_as_given_with_the_whole_transcript(
     convention: Convention,
 ) -> None:
-    """REQ-R5-1: "used as given" covers the call, not only the stored mapping — the route
+    """ "used as given" covers the call, not only the stored mapping — the route
     object itself is invoked, with the caller's whole transcript, through every convention."""
     route = Recording(model_name="model-only", reply="an answer")
     Recording.calls_seen.clear()
@@ -449,7 +449,7 @@ async def test_the_route_is_called_as_given_with_the_whole_transcript(
 
 
 def test_the_route_is_given_the_call_arguments_and_nothing_else() -> None:
-    """REQ-R5-1: `stop` and the caller's kwargs reach the route, and the router adds none."""
+    """`stop` and the caller's kwargs reach the route, and the router adds none."""
     route = Recording(model_name="model-only")
     Recording.calls_seen.clear()
     router = ChatRouter(routes={"only": route}, default_route="only")
@@ -461,7 +461,7 @@ def test_the_route_is_given_the_call_arguments_and_nothing_else() -> None:
 
 
 def test_the_routers_own_callbacks_tags_and_metadata_stay_on_its_own_run() -> None:
-    """C1: a chat model's constructor-level callbacks, tags and metadata are local to its own
+    """A chat model's constructor-level callbacks, tags and metadata are local to its own
     run — the router's behave the same way, so the route's run doesn't inherit them."""
     local = RunCollectorCallbackHandler()
     inherited = RunCollectorCallbackHandler()
@@ -486,7 +486,7 @@ def test_the_routers_own_callbacks_tags_and_metadata_stay_on_its_own_run() -> No
 
 
 def test_a_fallback_warning_escalated_to_an_error_leaves_no_run_open() -> None:
-    """R9, C5: an application may turn warnings into errors; the strategy's run closes anyway."""
+    """An application may turn warnings into errors; the strategy's run closes anyway."""
     collector = RunCollectorCallbackHandler()
     router = ChatRouter(
         routes=fake_routes("cheap"), default_route="cheap", strategy=lambda request: None

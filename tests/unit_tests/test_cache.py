@@ -1,4 +1,4 @@
-"""T-119: response-cache correctness — the route owns caching, not the router (C10, D4).
+"""Response-cache correctness — the route owns caching, not the router.
 
 `ChatRouter` delegates from `invoke` / `ainvoke` to the selected route's own `invoke` /
 `ainvoke` rather than running `_generate_with_cache` itself (the module docstring's pipeline in
@@ -7,10 +7,10 @@ route's own `cache=` field, or the process-global cache `set_llm_cache` installs
 exactly where it would be on that route called bare — keyed by `_get_llm_string`
 (`chat_models.py:1578`), the route's own serialized identity plus its call kwargs, looked up
 before `_generate` runs (`:1899`). This module proves that structural claim empirically rather
-than building any caching mechanism of its own (REQ-C10-1), and closes the two gaps D4 leaves
-open: the router's own `cache=` must not silently no-op (REQ-C10-2), and a bound tool's
-converted form must not carry a process-unstable repr into the route's own cache key
-(REQ-C10-3). REQ-C10-4 checks that a cache hit still carries *this* call's decision record, not
+than building any caching mechanism of its own, and closes the two gaps route-owned caching leaves
+open: the router's own `cache=` must not silently no-op, and a bound tool's
+converted form must not carry a process-unstable repr into the route's own cache key.
+The last group checks that a cache hit still carries *this* call's decision record, not
 whatever decision filled the cache.
 
 `stream()` / `astream()` are not exercised here: `BaseChatModel.stream` calls `_stream` directly
@@ -18,8 +18,8 @@ and never reaches `_generate_with_cache` at all (`chat_models.py:727`, confirmed
 installed source) — true of any chat model, not something the router changes, so there is
 nothing route-cache-shaped to prove on that path.
 
-`tests/fakes.py`'s routes now override `_identifying_params` with their own `model_name`
-(T-119): the base fake, like the base `BaseChatModel`, defaults `_identifying_params` to `{}`
+`tests/fakes.py`'s routes now override `_identifying_params` with their own `model_name`:
+the base fake, like the base `BaseChatModel`, defaults `_identifying_params` to `{}`
 and is not `is_lc_serializable`, so two same-shaped fakes would otherwise be indistinguishable
 to a cache lookup where two real provider routes never are (a real provider's `model` rides
 along through its own `_identifying_params`, or through `is_lc_serializable`'s full
@@ -46,7 +46,7 @@ from tests.fakes import FakeChatModel, ToolCallingFakeChatModel, call_log
 
 @pytest.fixture(autouse=True)
 def _clean_global_cache() -> Iterator[None]:
-    """No test leaks a process-global cache to the next one (D4's `set_llm_cache` case).
+    """No test leaks a process-global cache to the next one (the `set_llm_cache` case).
 
     `langchain_core.globals` holds it in a module-level variable that pytest does not reset on
     its own, and it is the one piece of process-wide state this module's tests touch.
@@ -61,11 +61,11 @@ def routing(message: AIMessage) -> dict[str, object]:
     return dict(message.response_metadata["routing"])
 
 
-# --- REQ-C10-2: the router's own `cache=` is rejected, not silently ignored (D4) ---
+# --- the router's own `cache=` is rejected, not silently ignored ---
 
 
 def test_the_routers_own_cache_is_rejected_at_construction() -> None:
-    """REQ-C10-2: `ChatRouter(cache=...)` raises, and the message points at per-route caching."""
+    """`ChatRouter(cache=...)` raises, and the message points at per-route caching."""
     with pytest.raises(ValidationError) as caught:
         ChatRouter(routes={"cheap": FakeChatModel()}, default_route="cheap", cache=InMemoryCache())
     [error] = caught.value.errors()
@@ -81,14 +81,14 @@ def test_the_routers_own_cache_is_rejected_at_construction() -> None:
 
 @pytest.mark.parametrize("cache", [True, False], ids=["true", "false"])
 def test_the_routers_own_cache_is_rejected_for_the_boolean_forms_too(cache: bool) -> None:
-    """REQ-C10-2: `cache=True` / `cache=False` would no-op exactly as an explicit cache would —
+    """`cache=True` / `cache=False` would no-op exactly as an explicit cache would —
     `BaseChatModel.cache` accepts all three, so all three are rejected the same way."""
     with pytest.raises(ValidationError):
         ChatRouter(routes={"cheap": FakeChatModel()}, default_route="cheap", cache=cache)
 
 
 def test_leaving_cache_unset_builds_fine() -> None:
-    """The field's own default (`None`) is not what REQ-C10-2 rejects — only an explicit value
+    """The field's own default (`None`) is not what the check rejects — only an explicit value
     is: pydantic does not validate an unset field's default (`validate_default` is off), and
     `None` on this field means "not set" either way, so a router built without `cache=` at all
     never reaches the validator."""
@@ -96,11 +96,11 @@ def test_leaving_cache_unset_builds_fine() -> None:
     assert router.cache is None
 
 
-# --- REQ-C10-1: a hit for the identical request, a miss for anything that changes the route ---
+# --- a hit for the identical request, a miss for anything that changes the route ---
 
 
 def test_an_identical_request_is_a_hit_under_a_global_cache() -> None:
-    """REQ-C10-1: `set_llm_cache` (D4's global case) makes the second identical call skip the
+    """`set_llm_cache` (the global case) makes the second identical call skip the
     route's own `_generate` — the fake's call log stays at one entry."""
     set_llm_cache(InMemoryCache())
     cheap = FakeChatModel(model_name="cheap-1", reply="cheap answer")
@@ -113,7 +113,7 @@ def test_an_identical_request_is_a_hit_under_a_global_cache() -> None:
 
 
 async def test_an_identical_request_is_a_hit_under_a_global_cache_async() -> None:
-    """REQ-C10-1, async: `ainvoke` goes through `_agenerate_with_cache` the same way."""
+    """Async: `ainvoke` goes through `_agenerate_with_cache` the same way."""
     set_llm_cache(InMemoryCache())
     cheap = FakeChatModel(model_name="cheap-1", reply="cheap answer")
     router = ChatRouter(routes={"cheap": cheap}, default_route="cheap")
@@ -125,8 +125,8 @@ async def test_an_identical_request_is_a_hit_under_a_global_cache_async() -> Non
 
 
 def test_an_identical_request_is_a_hit_under_a_routes_own_cache() -> None:
-    """REQ-C10-1, D4: a route's own `cache=` field is consulted exactly as `set_llm_cache`'s
-    global cache is — D4's other in-scope case, no `set_llm_cache` involved at all."""
+    """A route's own `cache=` field is consulted exactly as `set_llm_cache`'s
+    global cache is — the other in-scope case, no `set_llm_cache` involved at all."""
     cheap = FakeChatModel(model_name="cheap-1", reply="cheap answer", cache=InMemoryCache())
     router = ChatRouter(routes={"cheap": cheap}, default_route="cheap")
 
@@ -137,7 +137,7 @@ def test_an_identical_request_is_a_hit_under_a_routes_own_cache() -> None:
 
 
 def test_forcing_the_same_prompt_to_a_different_route_is_a_miss() -> None:
-    """REQ-C10-1: forced via `config={"configurable": {"route": ...}}` (T-116) is the clean way
+    """Forced via `config={"configurable": {"route": ...}}` is the clean way
     to change which route answers without a non-deterministic strategy. One shared global cache
     — so a false hit across routes would show up if the route weren't part of the key."""
     set_llm_cache(InMemoryCache())
@@ -153,7 +153,7 @@ def test_forcing_the_same_prompt_to_a_different_route_is_a_miss() -> None:
 
 
 def test_a_changed_strategy_configuration_is_a_miss() -> None:
-    """REQ-C10-1: two routers over the same routes and cache, differing only in which route
+    """Two routers over the same routes and cache, differing only in which route
     their `KeywordStrategy` sends the same word to — a real (not forced) decision that changes
     under a changed configuration, exactly the case the requirement names."""
     set_llm_cache(InMemoryCache())
@@ -175,8 +175,8 @@ def test_a_changed_strategy_configuration_is_a_miss() -> None:
 
 
 def test_different_bound_tools_is_a_miss() -> None:
-    """REQ-C10-1: the route's own cache key includes its call kwargs, and a replayed tool
-    binding is one (D4) — two different tool sets bound to the same router and route miss each
+    """The route's own cache key includes its call kwargs, and a replayed tool
+    binding is one — two different tool sets bound to the same router and route miss each
     other, and re-binding the first set again is a hit."""
     set_llm_cache(InMemoryCache())
     cheap = ToolCallingFakeChatModel(model_name="cheap-1", reply="cheap answer")
@@ -199,11 +199,11 @@ def test_different_bound_tools_is_a_miss() -> None:
     assert len(call_log(cheap)) == 2
 
 
-# --- REQ-C10-3: a bound tool contributes nothing process-unstable to the cache key ---
+# --- a bound tool contributes nothing process-unstable to the cache key ---
 
 
 def test_the_same_tools_built_twice_are_still_a_hit() -> None:
-    """REQ-C10-3, the standard trick for "equal across two processes" inside one test process:
+    """The standard trick for "equal across two processes" inside one test process:
     two structurally-identical-but-distinct `@tool` objects (a fresh `StructuredTool` each
     time, exactly as a second process re-importing the same `@tool`-decorated function would
     build one) bind to an equal cache key — if a raw object identity or memory address leaked
@@ -234,7 +234,7 @@ def test_the_same_tools_built_twice_are_still_a_hit() -> None:
 
 
 def test_a_plain_callable_tool_converts_to_something_with_no_object_repr_in_it() -> None:
-    """REQ-C10-3: a bare function bound as a tool renders as `<function f at 0x...>` by
+    """A bare function bound as a tool renders as `<function f at 0x...>` by
     default, which would change every process and miss every time (spike caveat) — but that
     repr never gets near the cache key. `bind_tools` on the *route itself* (public API, the
     same conversion `_tools.bound_route` replays) is what actually runs at call time; its
@@ -268,11 +268,11 @@ def test_a_plain_callable_tool_converts_to_something_with_no_object_repr_in_it()
     ]
 
 
-# --- REQ-C10-4: a cache hit still carries the current call's own decision record ---
+# --- a cache hit still carries the current call's own decision record ---
 
 
 def test_a_cache_hit_carries_the_same_record_the_miss_that_filled_it_recorded() -> None:
-    """REQ-C10-4: two identical calls take the identical decision (no strategy, same default
+    """Two identical calls take the identical decision (no strategy, same default
     route), so the hit's record and the miss's record are not just present but equal."""
     set_llm_cache(InMemoryCache())
     cheap = FakeChatModel(model_name="cheap-1", reply="cheap answer")
@@ -286,9 +286,9 @@ def test_a_cache_hit_carries_the_same_record_the_miss_that_filled_it_recorded() 
 
 
 def test_two_different_decisions_landing_on_the_same_route_each_keep_their_own_record() -> None:
-    """REQ-C10-4's sharpest case: the cache key is the route's own identity and call kwargs —
+    """The sharpest case: the cache key is the route's own identity and call kwargs —
     not the decision — so two *different* decisions that both settle on the same route (here:
-    the unforced default, then the same route forced via T-116's runtime config) do reach the
+    the unforced default, then the same route forced via runtime config) do reach the
     same cache entry. The second call is still a hit (the route's own `_generate` runs once),
     but its `response_metadata["routing"]` is its own decision, not the first's — `_with_record`
     (`router.py`) applies after the route's cache lookup returns, on every call, hit or miss."""
@@ -309,7 +309,7 @@ def test_two_different_decisions_landing_on_the_same_route_each_keep_their_own_r
 
 
 def test_a_cache_hit_via_a_strategy_still_gets_its_own_strategy_named_on_the_record() -> None:
-    """REQ-C10-4, one more shape of the same guarantee: a strategy-driven decision reaching a
+    """One more shape of the same guarantee: a strategy-driven decision reaching a
     cache filled by an unrelated (forced) call to the same route still names the strategy that
     actually ran this call, not "forced via runtime config"."""
     set_llm_cache(InMemoryCache())

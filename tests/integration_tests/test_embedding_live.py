@@ -1,4 +1,4 @@
-"""T-133: the embedding-similarity strategy against a real embeddings provider (acceptance
+"""The embedding-similarity strategy against a real embeddings provider (acceptance
 criterion 3 — "one integration test with real embeddings").
 
 Gemini, not Ollama: the local Ollama server this suite's other live tests use answers chat

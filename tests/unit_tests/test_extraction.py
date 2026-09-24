@@ -1,9 +1,9 @@
-"""Current-request extraction: R4 (route on the current request) and C7 (messages as LangChain
-defines them).
+"""Current-request extraction: routing on the current request, with messages as LangChain
+defines them.
 
-The fixture transcripts are the ones REQ-R4-1 names — single turn, multi-turn, agent tool loop,
+The fixture transcripts are the standard ones — single turn, multi-turn, agent tool loop,
 multimodal, system prompt only. The agent-loop fixtures are built so the end-to-end version of
-REQ-R4-2 through `ChatRouter` is a small addition: swap the model in
+the same check through `ChatRouter` is a small addition: swap the model in
 `test_create_agent_calls_all_route_on_the_originating_request` for a router over
 `ToolCallingFakeChatModel(script=agent_loop_replies())` with a strategy that records requests.
 """
@@ -50,14 +50,14 @@ SYSTEM = SystemMessage(SYSTEM_PROMPT)
 QUESTION = "What's the weather in Paris and in Berlin today?"
 
 # A tool result long enough that routing on the last message, or on length, would pick the
-# frontier route — the misroute R4 exists to prevent.
+# frontier route — the misroute that current-request routing exists to prevent.
 FORECAST = "Hourly forecast for {city}: " + "; ".join(
     f"{hour:02d}:00 14C, light wind from the south-west, 10% chance of rain" for hour in range(24)
 )
 
 
 def by_length(request: RoutingRequest) -> str:
-    """A length heuristic of the kind the PRD's survey found misroutes agent loops."""
+    """A length heuristic of the kind that misroutes agent loops."""
     return "frontier" if len(request.text) > 200 else "small"
 
 
@@ -79,7 +79,7 @@ def extract(
 
 def extract_input(model_input: LanguageModelInput, **kwargs: Any) -> RoutingRequest | None:
     """Extract from any chat model input, through the path every chat model converts it on."""
-    # private API: `_convert_input` is the conversion REQ-C7-2 is about — what every chat
+    # private API: `_convert_input` is the conversion that matters here — what every chat
     # model does to its input before `_generate` sees it. The router calls it the same way.
     messages = FakeChatModel()._convert_input(model_input).to_messages()
     return extract(messages, **kwargs)
@@ -143,7 +143,7 @@ THIRD_CALL: list[BaseMessage] = [
 ]
 TOOL_LOOP_CALLS = [FIRST_CALL, SECOND_CALL, THIRD_CALL]
 
-# The fixture transcripts REQ-R4-1 names.
+# The standard fixture transcripts.
 
 SINGLE_TURN: list[BaseMessage] = [SYSTEM, HumanMessage("Summarise the plot of Hamlet.")]
 MULTI_TURN: list[BaseMessage] = [
@@ -166,7 +166,7 @@ MULTIMODAL: list[BaseMessage] = [
 SYSTEM_PROMPT_ONLY: list[BaseMessage] = [SYSTEM]
 
 
-# REQ-R4-1 — which message is the current request.
+# which message is the current request.
 
 
 @pytest.mark.parametrize(
@@ -193,14 +193,14 @@ SYSTEM_PROMPT_ONLY: list[BaseMessage] = [SYSTEM]
 def test_fixture_transcripts_route_on_the_most_recent_human_message(
     transcript: list[BaseMessage], expected: RoutingRequest | None
 ) -> None:
-    """REQ-R4-1: the current request is the most recent `HumanMessage` — earlier turns,
+    """The current request is the most recent `HumanMessage` — earlier turns,
     trailing AI and tool messages and the system prompt take no part in it, and a system
     prompt alone is no request at all."""
     assert extract(transcript) == expected
 
 
 def test_trailing_ai_and_tool_messages_are_skipped() -> None:
-    """REQ-R4-1: a transcript ending in tool output still routes on the user's request, even
+    """A transcript ending in tool output still routes on the user's request, even
     though routing on that last message would pick a different route."""
     request = extract(THIRD_CALL)
 
@@ -211,7 +211,7 @@ def test_trailing_ai_and_tool_messages_are_skipped() -> None:
 
 
 def test_a_system_prompt_never_defines_the_request_wherever_it_sits() -> None:
-    """REQ-R4-1: system prompts are not the request — neither before it nor after it (some
+    """System prompts are not the request — neither before it nor after it (some
     applications append a reminder as a trailing system message)."""
     reminder = SystemMessage("Reminder: answer in under 50 words, and in French.")
 
@@ -219,7 +219,7 @@ def test_a_system_prompt_never_defines_the_request_wherever_it_sits() -> None:
 
 
 def test_conversation_length_never_defines_the_request() -> None:
-    """REQ-R4-1: the same current request after no history and after forty turns of it is the
+    """The same current request after no history and after forty turns of it is the
     same request — nothing about the history's length reaches the strategy."""
     history: list[BaseMessage] = []
     for turn in range(20):
@@ -233,14 +233,14 @@ def test_conversation_length_never_defines_the_request() -> None:
 
 
 def test_a_human_message_chunk_is_a_human_message() -> None:
-    """REQ-R4-1: `HumanMessageChunk` subclasses `HumanMessage`, and counts as one."""
+    """`HumanMessageChunk` subclasses `HumanMessage`, and counts as one."""
     transcript = [HumanMessage("old"), AIMessage("reply"), HumanMessageChunk(content="new")]
 
     assert extract(transcript) == request_for("new")
 
 
 def test_a_chat_message_with_a_user_role_is_a_human_message() -> None:
-    """REQ-R4-1: `ChatMessage(role="user" | "human")` is a user turn — the roles LangChain
+    """`ChatMessage(role="user" | "human")` is a user turn — the roles LangChain
     converts to a `HumanMessage` — while any other role is not."""
     transcript: list[BaseMessage] = [
         HumanMessage("old"),
@@ -258,18 +258,18 @@ def test_a_chat_message_with_a_user_role_is_a_human_message() -> None:
 
 @pytest.mark.parametrize("content", ["", []], ids=["empty-string", "empty-list"])
 def test_an_empty_human_message_is_still_the_current_request(content: str | list[Any]) -> None:
-    """REQ-R4-1: position alone decides. An empty current message is not skipped in favour of
+    """Position alone decides. An empty current message is not skipped in favour of
     an earlier, stale request; it is a request with no text and no modalities."""
     transcript = [HumanMessage("an earlier request"), AIMessage("reply"), HumanMessage(content)]
 
     assert extract(transcript) == request_for("", content_blocks=[], modalities=frozenset())
 
 
-# REQ-R4-2 — agent loops.
+# agent loops.
 
 
 def test_every_call_in_a_three_iteration_tool_loop_routes_on_the_originating_request() -> None:
-    """REQ-R4-2: the loop's three model calls — after zero, one and two tool results — all see
+    """The loop's three model calls — after zero, one and two tool results — all see
     the request that started the loop, so a strategy routes them identically."""
     requests = [extract(call) for call in TOOL_LOOP_CALLS]
 
@@ -297,7 +297,7 @@ class _ModelInputs(BaseCallbackHandler):
 
 
 def test_create_agent_calls_all_route_on_the_originating_request() -> None:
-    """REQ-R4-2: the transcripts a real `create_agent` tool loop hands its model — system
+    """The transcripts a real `create_agent` tool loop hands its model — system
     prompt, tool calls, tool results and all — each extract the originating request."""
     model = ToolCallingFakeChatModel(script=agent_loop_replies())
     agent = create_agent(model=model, tools=[get_weather], system_prompt=SYSTEM_PROMPT)
@@ -320,7 +320,7 @@ def test_create_agent_calls_all_route_on_the_originating_request() -> None:
     ] * 3
 
 
-# REQ-R4-4 — no user message.
+# no user message.
 
 
 @pytest.mark.parametrize(
@@ -341,12 +341,12 @@ def test_create_agent_calls_all_route_on_the_originating_request() -> None:
 def test_no_user_message_means_the_strategy_cannot_decide(
     transcript: list[BaseMessage],
 ) -> None:
-    """REQ-R4-4: with no user message at all there is no request, which the router treats as
-    "can't decide" and sends to the default route (the warning is the router's, T-110)."""
+    """With no user message at all there is no request, which the router treats as
+    "can't decide" and sends to the default route (the warning is the router's)."""
     assert extract(transcript) is None
 
 
-# REQ-C7-1 — content read as LangChain defines it.
+# content read as LangChain defines it.
 
 TEXT_BLOCK: dict[str, Any] = {"type": "text", "text": "Describe this image."}
 
@@ -382,7 +382,7 @@ TEXT_BLOCK: dict[str, Any] = {"type": "text", "text": "Describe this image."}
 def test_a_text_and_image_request_exposes_its_text_and_the_image(
     image_block: dict[str, Any], expected_block: dict[str, Any]
 ) -> None:
-    """REQ-C7-1: a text+image request yields its text in `text` and `"image"` in
+    """A text+image request yields its text in `text` and `"image"` in
     `modalities`, whichever format — standard or provider-native — the image is in."""
     request = extract([SYSTEM, HumanMessage(content=[TEXT_BLOCK, image_block])])
 
@@ -437,7 +437,7 @@ def test_a_text_and_image_request_exposes_its_text_and_the_image(
     ],
 )
 def test_modalities_come_from_a_fixed_vocabulary(block: dict[str, Any], modality: str) -> None:
-    """REQ-C7-1: every block maps to one of text, image, audio, video, file or other. A
+    """Every block maps to one of text, image, audio, video, file or other. A
     plain-text document is a file, and its text is not the request's text."""
     request = extract([HumanMessage(content=[{"type": "text", "text": "Look:"}, block])])
 
@@ -447,7 +447,7 @@ def test_modalities_come_from_a_fixed_vocabulary(block: dict[str, Any], modality
 
 
 def test_a_request_with_no_text_has_no_text_modality() -> None:
-    """REQ-C7-1: `"text"` is present exactly when there is text — an image alone, or beside an
+    """`"text"` is present exactly when there is text — an image alone, or beside an
     empty text block, is an image-only request."""
     request = extract(
         [HumanMessage(content=[{"type": "text", "text": ""}, {"type": "image", "url": IMAGE_URL}])]
@@ -459,7 +459,7 @@ def test_a_request_with_no_text_has_no_text_modality() -> None:
 
 
 def test_text_joins_every_text_block_with_newlines() -> None:
-    """REQ-C7-1: text is joined across blocks — plain strings, standard text blocks and the
+    """Text is joined across blocks — plain strings, standard text blocks and the
     untyped text blocks of Google GenAI content, which `BaseMessage.text` doesn't read — with a
     newline, so words in separate blocks don't fuse."""
     message = HumanMessage(
@@ -480,7 +480,7 @@ def test_text_joins_every_text_block_with_newlines() -> None:
 
 
 def test_string_content_text_is_the_messages_own_text() -> None:
-    """REQ-C7-1: for string content, the common case, `text` is exactly `message.text`."""
+    """For string content, the common case, `text` is exactly `message.text`."""
     message = HumanMessage("  Keep the whitespace\nand the newline.  ")
 
     request = extract([message])
@@ -490,7 +490,7 @@ def test_string_content_text_is_the_messages_own_text() -> None:
 
 
 def test_reading_a_provider_native_block_twice_gives_equal_requests() -> None:
-    """REQ-C7-1, REQ-C7-2: LangChain mints a fresh `lc_` id each time it translates an OpenAI
+    """LangChain mints a fresh `lc_` id each time it translates an OpenAI
     image block; extraction drops every id LangChain generated, so a message reads the same
     whether it arrives provider-native or already stored as content blocks."""
     minted = HumanMessage(content=[{"type": "image_url", "image_url": {"url": IMAGE_URL}}])
@@ -506,7 +506,7 @@ def test_reading_a_provider_native_block_twice_gives_equal_requests() -> None:
 
 
 def test_an_id_the_provider_gave_a_block_is_kept() -> None:
-    """REQ-C7-1: only LangChain's own `lc_` ids are dropped — a provider's id is content."""
+    """Only LangChain's own `lc_` ids are dropped — a provider's id is content."""
     message = HumanMessage(content=[{"type": "image", "url": IMAGE_URL, "id": "provider-1"}])
 
     request = extract([message])
@@ -516,7 +516,7 @@ def test_an_id_the_provider_gave_a_block_is_kept() -> None:
 
 
 def test_the_strategy_cannot_edit_the_callers_messages_through_the_request() -> None:
-    """REQ-C7-1, R4: the request's blocks and transcript are copies — changing them leaves the
+    """The request's blocks and transcript are copies — changing them leaves the
     caller's message and list as they were."""
     message = HumanMessage(content=[{"type": "text", "text": "original"}])
     transcript: list[BaseMessage] = [SYSTEM, message]
@@ -532,7 +532,7 @@ def test_the_strategy_cannot_edit_the_callers_messages_through_the_request() -> 
 
 
 def test_the_transcript_is_included_only_when_the_strategy_wants_it() -> None:
-    """R4: `messages` is the whole transcript under `wants_full_context`, and `None` otherwise;
+    """`messages` is the whole transcript under `wants_full_context`, and `None` otherwise;
     `config` passes through untouched."""
     config = RunnableConfig(tags=["strategy-run"])
 
@@ -548,14 +548,14 @@ def test_the_transcript_is_included_only_when_the_strategy_wants_it() -> None:
     assert narrow.config is config
 
 
-# REQ-C7-2 — every input form a chat model accepts.
+# every input form a chat model accepts.
 
 HAIKU_REQUEST = "Write a haiku about the sea."
 
 
 @pytest.mark.parametrize("wants_full_context", [False, True], ids=["current", "full-context"])
 def test_every_input_form_produces_the_same_request(wants_full_context: bool) -> None:
-    """REQ-C7-2: a string, a list of dicts, `BaseMessage` objects and a `ChatPromptValue`,
+    """A string, a list of dicts, `BaseMessage` objects and a `ChatPromptValue`,
     converted the way a chat model converts them, produce the same `RoutingRequest`."""
     forms: dict[str, LanguageModelInput] = {
         "string": HAIKU_REQUEST,
@@ -577,7 +577,7 @@ def test_every_input_form_produces_the_same_request(wants_full_context: bool) ->
 
 
 def test_every_input_form_of_a_multimodal_conversation_produces_the_same_request() -> None:
-    """REQ-C7-2: the forms that can carry a system prompt, history and an OpenAI-format image —
+    """The forms that can carry a system prompt, history and an OpenAI-format image —
     dicts, messages and a prompt template's `ChatPromptValue` — agree too."""
     content: list[str | dict[str, Any]] = [
         {"type": "text", "text": "What breed is this cat?"},
