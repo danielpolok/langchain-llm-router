@@ -29,7 +29,6 @@ from benchmark.runner import ItemResult, run_arm
 from langchain_llm_router import RoutingDecision
 
 RESULTS_DIR = Path(__file__).parent / "results"
-REPORT_PATH = Path(__file__).parents[1] / "docs" / "benchmark-findings.md"
 
 
 def _to_raw(result: ItemResult) -> dict[str, object]:
@@ -66,7 +65,7 @@ def _from_raw(raw: dict[str, Any]) -> ItemResult:
 
 def _run(
     arm_names: list[str] | None, limit: int | None, pause: float
-) -> dict[str, list[ItemResult]]:
+) -> tuple[dict[str, list[ItemResult]], Path]:
     items = list(load_dataset())
     if limit:
         items = items[:limit]
@@ -92,7 +91,7 @@ def _run(
     raw = {arm: [_to_raw(r) for r in results] for arm, results in by_arm.items()}
     raw_path.write_text(json.dumps(raw, indent=2))
     print(f"raw results: {raw_path}", file=sys.stderr)
-    return by_arm
+    return by_arm, raw_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,23 +105,25 @@ def main(argv: list[str] | None = None) -> int:
         "--report-only",
         type=Path,
         default=None,
-        help="Skip running: re-render docs/benchmark-findings.md from a saved raw-results JSON.",
+        help="Skip running: re-render the report beside a saved raw-results JSON.",
     )
     args = parser.parse_args(argv)
 
     load_dotenv()
 
     if args.report_only:
-        raw = json.loads(args.report_only.read_text())
+        raw_path = args.report_only
+        raw = json.loads(raw_path.read_text())
         by_arm = {arm: [_from_raw(r) for r in results] for arm, results in raw.items()}
     else:
-        by_arm = _run(args.arms, args.limit, args.pause)
+        by_arm, raw_path = _run(args.arms, args.limit, args.pause)
 
     summaries = summarize(by_arm)
     report = render_markdown(summaries)
-    REPORT_PATH.write_text(report)
+    report_path = raw_path.with_suffix(".md")
+    report_path.write_text(report)
     print(report)
-    print(f"report written to {REPORT_PATH}", file=sys.stderr)
+    print(f"report written to {report_path}", file=sys.stderr)
     return 0
 
 
