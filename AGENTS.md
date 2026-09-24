@@ -70,8 +70,7 @@ such as `GenericFakeChatModel`.
   ([docs/strategies.md](docs/strategies.md#stability-promise)). Changing a dataclass field, its
   order or a method signature needs a version bump the promise names.
 - **Tests** exercise behaviour through the public API and every calling convention
-  (`tests/conventions.py`), not internals. A test that pins a decision from `docs/design.md`
-  should say so in its docstring.
+  (`tests/conventions.py`), not internals.
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are
   counted once. Any change to how the router calls a route must keep
   `tests/unit_tests/test_cost.py` and `test_tracing.py` passing.
