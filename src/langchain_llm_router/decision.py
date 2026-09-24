@@ -33,7 +33,23 @@ ROUTING_KEY = "routing"
 
 @dataclass(frozen=True)
 class RoutingDecision:
-    """Which route ran, and why. These six fields are the whole schema."""
+    """Which route ran, and why. These six fields are the whole schema.
+
+    Attributes:
+        route: The route that ran.
+        reason: Why, in words, for a human reading a trace.
+        strategy: The strategy's name, or `None` when no strategy ran.
+        fallback: Whether the default route ran because the strategy could not decide.
+        forced: Whether the route came from runtime config.
+        diverted_from: The tool-incapable route the request was diverted from, if any.
+
+    Example:
+        ```python
+        response = router.invoke("Write a regex for ISO dates")
+        decision = routing_decision(response)
+        print(decision.route, decision.reason)
+        ```
+    """
 
     route: str
     """The route that ran."""
@@ -55,12 +71,23 @@ class RoutingDecision:
     """The tool-incapable route the request was diverted from."""
 
     def as_dict(self) -> dict[str, Any]:
-        """The record as it rides under `response_metadata["routing"]` and on the trace."""
+        """The record as it rides under `response_metadata["routing"]` and on the trace.
+
+        Returns:
+            A plain dict of the six fields, safe to serialize.
+        """
         return asdict(self)
 
     @classmethod
     def from_dict(cls, record: Mapping[str, Any]) -> RoutingDecision:
-        """Rebuild a record from `as_dict()` output. Unknown keys are ignored."""
+        """Rebuild a record from `as_dict()` output. Unknown keys are ignored.
+
+        Args:
+            record: A mapping holding at least `route` and `reason`.
+
+        Returns:
+            The rebuilt record.
+        """
         names = {f.name for f in fields(cls)}
         return cls(**{key: value for key, value in record.items() if key in names})
 
@@ -76,7 +103,19 @@ taken as they come: past those two, what is under this key is a record we wrote.
 
 
 def routing_decision(message: BaseMessage) -> RoutingDecision | None:
-    """Read the decision record back off a response, or `None` if it carries none."""
+    """Read the decision record back off a response, or `None` if it carries none.
+
+    Args:
+        message: A response from a `ChatRouter`.
+
+    Returns:
+        The decision it carries, or `None` if the message has no routing record.
+
+    Example:
+        ```python
+        decision = routing_decision(router.invoke("Hello"))
+        ```
+    """
     record = message.response_metadata.get(ROUTING_KEY)
     if not isinstance(record, Mapping):
         return None
@@ -194,6 +233,15 @@ def last_routing_decision() -> RoutingDecision | None:
     Read the record off the response with `routing_decision`, or ask for `include_raw=True` and
     read it off the raw message, whenever calls can overlap like that. This is for one call at
     a time, and it is exact there.
+
+    Returns:
+        The decision, or `None` if no routed call is visible from here.
+
+    Example:
+        ```python
+        parsed = router.with_structured_output(Answer).invoke("Q?")
+        decision = last_routing_decision()
+        ```
     """
     own = _in_context.get()
     on_thread: _Published | None = getattr(_on_thread, "published", None)

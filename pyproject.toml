@@ -71,7 +71,14 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "PT"]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "PT", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# Docstring rules apply to the package only: tests, examples and the benchmark are not API.
+[tool.ruff.lint.per-file-ignores]
+"!src/**" = ["D"]
 
 [tool.mypy]
 strict = true

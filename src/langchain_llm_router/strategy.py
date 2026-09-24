@@ -64,6 +64,23 @@ class RoutingRequest:
 
     Frozen but not hashable: `content_blocks` and `messages` are lists, so a generated hash
     would fail on them anyway. To cache decisions, key on a hashable part such as `text`.
+
+    Attributes:
+        text: The current request's text.
+        content_blocks: The current request's content, as LangChain defines content blocks.
+        modalities: The modalities present, from a closed vocabulary.
+        routes: The available route names, in declaration order.
+        tools_bound: Whether tools or structured output are bound to this call.
+        messages: The whole transcript, or `None` unless the strategy opts in.
+        config: The strategy run's child config, to pass on to any model call.
+
+    Example:
+        ```python
+        def pick(request: RoutingRequest) -> str | None:
+            if "image" in request.modalities:
+                return "vision"
+            return "small" if len(request.text) < 200 else None
+        ```
     """
 
     text: str
@@ -101,7 +118,18 @@ class RoutingRequest:
 
 @dataclass(frozen=True)
 class RoutingChoice:
-    """A strategy's answer: the route to take, and why."""
+    """A strategy's answer: the route to take, and why.
+
+    Args:
+        route: The name of the route to take. It should be one of `RoutingRequest.routes`; a
+            name the router doesn't have is a fallback to the default route.
+        reason: Why, in words, for a human reading a trace. It is recorded on the decision.
+
+    Example:
+        ```python
+        RoutingChoice(route="coder", reason="mentions a stack trace")
+        ```
+    """
 
     route: str
     reason: str
@@ -112,6 +140,15 @@ class RoutingStrategy(ABC):
 
     Subclass it and implement `decide`. The router calls it once per request, and not at all
     when the route is forced.
+
+    Example:
+        ```python
+        class ByLength(RoutingStrategy):
+            def decide(self, request: RoutingRequest) -> RoutingChoice | None:
+                if len(request.text) > 2000:
+                    return RoutingChoice("large", "long request")
+                return None  # abstain: the default route answers
+        ```
     """
 
     wants_full_context: ClassVar[bool] = False
@@ -123,6 +160,12 @@ class RoutingStrategy(ABC):
 
         `None` sends the request to the default route, with a warning and the reason
         recorded — better than a guess.
+
+        Args:
+            request: The current request and the context the strategy may use.
+
+        Returns:
+            The route to take and why, or `None` to abstain.
         """
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
@@ -130,6 +173,12 @@ class RoutingStrategy(ABC):
 
         `decide` therefore has to be thread-safe. Strategies that call models override this
         with a native async implementation, passing `request.config` to their calls.
+
+        Args:
+            request: The current request and the context the strategy may use.
+
+        Returns:
+            The route to take and why, or `None` to abstain.
         """
         # A config sends `run_in_executor` down the same path as no executor at all: the loop's
         # default one, running `decide` in a copy of the *current* context
@@ -144,7 +193,16 @@ RoutingCallable: TypeAlias = Callable[[RoutingRequest], RoutingChoice | str | No
 """A plain function accepted as `strategy=` and coerced to a `RoutingStrategy`.
 
 It returns a `RoutingChoice`, a bare route name (the reason is then written for it), or `None`
-to abstain. It must be synchronous, and it sees only the current request."""
+to abstain. It must be synchronous, and it sees only the current request.
+
+Example:
+    ```python
+    def pick(request: RoutingRequest) -> str | None:
+        return "coder" if "def " in request.text else None
+
+    router = ChatRouter(routes=routes, default_route="small", strategy=pick)
+    ```
+"""
 
 
 class _CallableStrategy(RoutingStrategy):
@@ -203,9 +261,17 @@ def _is_async(func: object) -> bool:
 def as_strategy(strategy: RoutingStrategy | RoutingCallable) -> RoutingStrategy:
     """Coerce what `strategy=` accepts into a `RoutingStrategy`.
 
-    Raises `TypeError` for anything else — including two near misses that would otherwise fail
-    on every request rather than once, here: a strategy class passed without instantiating it,
-    and an `async def` function, which `RoutingCallable` (synchronous) doesn't cover.
+    Args:
+        strategy: A strategy instance, or a synchronous function of a `RoutingRequest`.
+
+    Returns:
+        The strategy itself, or the function wrapped in the `RoutingStrategy` interface.
+
+    Raises:
+        TypeError: for anything else — including two near misses that would otherwise fail
+            on every request rather than once, here: a strategy class passed without
+            instantiating it, and an `async def` function, which `RoutingCallable`
+            (synchronous) doesn't cover.
     """
     if isinstance(strategy, RoutingStrategy):
         return strategy

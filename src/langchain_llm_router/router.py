@@ -121,8 +121,9 @@ def _is_library_frame(frame: types.FrameType) -> bool:
 
 
 def _stacklevel() -> int:
-    """The `stacklevel` for a `warnings.warn` call made from the router's own caller's frame,
-    pointing at the first frame outside the library — the application's own code.
+    """The `stacklevel` that points a warning at the application's own code.
+
+    That is the first frame outside the library, above the router's own caller's frame.
 
     A hand-counted constant breaks whenever a frame is added or removed between the router and
     its caller: bound through `bind_tools` versus called bare, `StructuredRouter.stream`
@@ -179,6 +180,50 @@ class ChatRouter(BaseChatModel):
     govern a call are the *route's*: its `cache`, `rate_limiter` and `disable_streaming` apply,
     and the router's own would never be consulted (the same reasoning that makes the router
     reject a `cache=` of its own outright rather than let it look effective).
+
+    Args:
+        routes: Named routes, any number of them; declaration order is significant. Each is an
+            ordinary chat model, used as given. A runnable that wraps one, such as
+            `model.with_retry()`, is not a route.
+        default_route: The route that answers when no strategy is set or the strategy can't
+            decide. Must name one of `routes`.
+        strategy: A `RoutingStrategy`, or a plain function of a `RoutingRequest`. `None`
+            always uses the default route.
+        on_unavailable_forced_route: What happens when a route forced through runtime config
+            is unknown or can't use bound tools: `"error"` (the default) raises, `"fallback"`
+            warns and uses the default route.
+        tool_support_overrides: Per-route override of tool-capability detection, by route
+            name; it always wins.
+
+    Returns:
+        The router is itself a chat model: `invoke`, `stream`, `batch` and their async
+        forms return the selected route's own answer, with the decision under
+        `response_metadata["routing"]`.
+
+    Raises:
+        RoutingError: at construction, for no routes, a blank route name, a `default_route` or
+            `tool_support_overrides` key that isn't a route, a route wrapped in another
+            runnable, or a `cache=` on the router. Constructing inside a pydantic validator
+            surfaces it as `pydantic.ValidationError`.
+        TypeError: for a `strategy` that is neither a strategy instance nor a synchronous
+            callable.
+        ForcedRouteError: at call time, for a forced route that doesn't exist or can't use the
+            bound tools.
+        NoToolCapableRouteError: from `bind_tools` / `with_structured_output`, or at call
+            time, when no route can use the bound tools.
+
+    Example:
+        ```python
+        from langchain_llm_router import ChatRouter, KeywordStrategy, routing_decision
+
+        router = ChatRouter(
+            routes={"small": small_model, "coder": coder_model},
+            default_route="small",
+            strategy=KeywordStrategy({"coder": ["python", "stack trace"]}),
+        )
+        response = router.invoke("Why does this Python stack trace happen?")
+        print(routing_decision(response).route)  # "coder"
+        ```
     """
 
     routes: dict[str, BaseChatModel]
@@ -381,7 +426,20 @@ class ChatRouter(BaseChatModel):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> AIMessage:
-        """The selected route's own answer, with the decision record added."""
+        """The selected route's own answer, with the decision record added.
+
+        Args:
+            input: A string, a list of messages or a prompt value, as any chat model takes.
+            config: The run's config; `configurable["route"]` forces a route.
+            stop: Stop sequences, passed to the route.
+            **kwargs: Passed to the route's own `invoke`.
+
+        Returns:
+            The route's message, with the decision under `response_metadata["routing"]`.
+
+        Raises:
+            ForcedRouteError: if a forced route doesn't exist or can't use the bound tools.
+        """
         config = ensure_config(config)
         # private API: `_convert_input` is how every chat model turns its input into messages.
         # Calling it keeps a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue`
@@ -655,8 +713,9 @@ class ChatRouter(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """Refuses: the router has no model call of its own, and a call that reaches this went
-        around the routed entry points.
+        """Refuse: the router has no model call of its own.
+
+        A call that reaches this went around the routed entry points.
 
         `invoke`, `ainvoke`, `stream`, `astream`, `generate` and `agenerate` all hand the request
         to a route, and nothing reachable through them comes here. What could is a door left
@@ -718,6 +777,17 @@ class ChatRouter(BaseChatModel):
 
         `tool_choice` is typed wider than `BaseChatModel.bind_tools` types it: providers take
         dicts and booleans too, and whatever a route accepts has to reach it unchanged.
+
+        Args:
+            tools: The tools to bind, in any form a route's own `bind_tools` accepts.
+            tool_choice: Passed to the route's `bind_tools` unchanged.
+            **kwargs: Also passed to the route's `bind_tools`.
+
+        Returns:
+            A runnable that replays the binding on whichever route answers.
+
+        Raises:
+            NoToolCapableRouteError: if no route can use tools.
         """
         self._check_tool_support()
         binding = ToolBinding(tools=tuple(tools), tool_choice=tool_choice, kwargs=dict(kwargs))
@@ -749,6 +819,18 @@ class ChatRouter(BaseChatModel):
         trace and `last_routing_decision()`; with `include_raw=True` the raw message carries
         it too. Streamed progressively — the route's own parser runs — as it is
         on a plain chat model: `stream` and `astream` delegate to the router's own.
+
+        Args:
+            schema: A Pydantic class, a `TypedDict` or a JSON schema dict.
+            include_raw: Also return the raw message, which carries the decision record.
+            **kwargs: Passed to the selected route's own `with_structured_output`.
+
+        Returns:
+            A runnable whose output is the route's parsed answer — or, with `include_raw=True`,
+            a dict of `raw`, `parsed` and `parsing_error`.
+
+        Raises:
+            NoToolCapableRouteError: if no route can use tools.
         """
         self._check_tool_support()
         binding = StructuredOutputBinding(
@@ -834,8 +916,10 @@ class ChatRouter(BaseChatModel):
         return _StrategyCall(strategy, strategy_name(strategy), request)
 
     def _forced_decision(self, route: str, kwargs: dict[str, Any]) -> RoutingDecision:
-        """What a forced route resolves to: itself, when it can serve this call, or
-        whatever `on_unavailable_forced_route` says to do when it can't.
+        """What a forced route resolves to.
+
+        Itself, when it can serve this call, or whatever `on_unavailable_forced_route` says to
+        do when it can't.
 
         Never runs the strategy — this is `_plan`'s other way of settling the
         decision outright, taken before a `_StrategyCall` would even be built. Whatever comes
@@ -985,7 +1069,9 @@ class ChatRouter(BaseChatModel):
         )
 
     def _forced_fallback(self, cause: str) -> RoutingDecision:
-        """The forced-route fallback: the default route stands in for a forced route that can't be
+        """The forced-route fallback.
+
+        The default route stands in for a forced route that can't be
         used, with one `ForcedRouteWarning` — not `FallbackWarning`, which is for a
         strategy that failed rather than a forced route that was refused — and both
         `forced=True` and `fallback=True` recorded. `strategy` stays unset: no
@@ -1161,8 +1247,9 @@ def _with_record(answer: AnswerT, decision: RoutingDecision) -> AnswerT:
 
 
 def _merge(output: Any, item: Any) -> Any:
-    """Fold `item` into the running `output` the router keeps for its own run's outputs —
-    not what the caller sees, which is `item` itself, unchanged.
+    """Fold `item` into the running `output` the router keeps for its own run's outputs.
+
+    Not what the caller sees, which is `item` itself, unchanged.
 
     `AIMessageChunk`s merge with `+`, and so do `include_raw=True`'s `AddableDict` deltas. A
     structured parser's own partial — a Pydantic object, or a plain dict from a JSON-schema or
@@ -1177,8 +1264,9 @@ def _merge(output: Any, item: Any) -> Any:
 
 
 def _recorded_on(answer: object, decision: RoutingDecision) -> object:
-    """The record put wherever this answer can hold one — the same rule for a whole
-    answer and for the one streamed item that carries it.
+    """The record put wherever this answer can hold one.
+
+    The same rule serves a whole answer and the one streamed item that carries it.
 
     A message holds it in `response_metadata`. `with_structured_output(include_raw=True)`
     answers with `{"raw", "parsed", "parsing_error"}`, and the raw message holds it there

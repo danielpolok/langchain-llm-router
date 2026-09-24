@@ -178,7 +178,9 @@ class StructuredRouter(Runnable[LanguageModelInput, Any]):
 
     @property
     def config_specs(self) -> list[ConfigurableFieldSpec]:
-        """The router's own: a `Runnable`'s default is `[]`, which would hide the
+        """The router's own config specs.
+
+        A `Runnable`'s default is `[]`, which would hide the
         `"route"` configurable key the router declares — and anything else the router comes to
         declare — from `with_config`, `config={"configurable": …}` and config-schema
         introspection run on the structured-output runnable rather than the router itself.

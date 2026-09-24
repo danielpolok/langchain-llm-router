@@ -135,21 +135,6 @@ _RouteVectors = dict[str, list[tuple[str, Vector]]]
 class EmbeddingStrategy(RoutingStrategy):
     """Routes on semantic similarity to example requests per route.
 
-    ```python
-    ChatRouter(
-        routes={"support": support_model, "coder": coder_model},
-        default_route="support",
-        strategy=EmbeddingStrategy(
-            my_embeddings,
-            {
-                "support": ["reset my password", "cancel my subscription"],
-                "coder": ["why does this stack trace happen", "refactor this function"],
-            },
-            threshold=0.75,
-        ),
-    )
-    ```
-
     The module docstring has the reasoning behind every choice below: examples embedded once
     and lazily, the per-request embedding call traced as its own run, maximum similarity per
     route, one global threshold with no default, and an embedding failure left to propagate so
@@ -169,6 +154,22 @@ class EmbeddingStrategy(RoutingStrategy):
         RoutingError: for configuration that could never route — no routes, a route with no
             examples, a blank route or example, a non-numeric threshold. Raised here, at
             construction, not once per request.
+
+    Example:
+        ```python
+        ChatRouter(
+            routes={"support": support_model, "coder": coder_model},
+            default_route="support",
+            strategy=EmbeddingStrategy(
+                my_embeddings,
+                {
+                    "support": ["reset my password", "cancel my subscription"],
+                    "coder": ["why does this stack trace happen", "refactor this function"],
+                },
+                threshold=0.75,
+            ),
+        )
+        ```
     """
 
     def __init__(
@@ -178,6 +179,16 @@ class EmbeddingStrategy(RoutingStrategy):
         *,
         threshold: float,
     ) -> None:
+        """Check the configuration and keep the embeddings; nothing is embedded yet.
+
+        Args:
+            embeddings: The application's own `Embeddings` instance.
+            examples: Each route's example utterances.
+            threshold: The similarity a route's best example must clear.
+
+        Raises:
+            RoutingError: for configuration that could never route.
+        """
         self.embeddings = embeddings
         self.examples = _checked_examples(examples)
         self.threshold = _checked_threshold(threshold)
@@ -198,9 +209,19 @@ class EmbeddingStrategy(RoutingStrategy):
         return _choose(vector, route_vectors, self.threshold)
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
-        """Async `decide`: a native implementation, as the interface asks of a strategy that
-        calls something — `embed_query`/`embed_documents` take no `config` for a thread's
-        context to ride along on, so the config has to be threaded through explicitly here.
+        """Async `decide`: a native implementation, as the interface asks of a strategy that calls.
+
+        `embed_query`/`embed_documents` take no `config` for a thread's context to ride along
+        on, so the config has to be threaded through explicitly here.
+
+        Args:
+            request: The current request; only its text is embedded.
+
+        Returns:
+            The best route's choice if it clears `threshold`, otherwise `None`.
+
+        Raises:
+            RoutingError: if no route in `examples` is one the router has.
         """
         self._check_it_can_decide(request.routes)
         if not request.text.strip():
@@ -210,8 +231,10 @@ class EmbeddingStrategy(RoutingStrategy):
         return _choose(vector, route_vectors, self.threshold)
 
     def _check_it_can_decide(self, routes: tuple[str, ...]) -> None:
-        """At least one route in `examples` is one the router has — the check only a request can
-        make, same precedent as `KeywordStrategy`/`ConfigurableStrategy`.
+        """At least one route in `examples` is one the router has.
+
+        The check only a request can make, same precedent as
+        `KeywordStrategy`/`ConfigurableStrategy`.
         """
         if any(route in routes for route in self.examples):
             return
@@ -236,8 +259,11 @@ class EmbeddingStrategy(RoutingStrategy):
             return vectors
 
     async def _aensure_route_vectors(self) -> _RouteVectors:
-        """Async `_ensure_route_vectors`: the embed call itself runs outside the lock, so it
-        never holds a plain `threading.Lock` across an `await` (module doc)."""
+        """Async `_ensure_route_vectors`.
+
+        The embed call itself runs outside the lock, so it never holds a plain `threading.Lock`
+        across an `await` (module doc).
+        """
         vectors = self._route_vectors
         if vectors is not None:
             return vectors
@@ -310,8 +336,11 @@ def _names(names: Sequence[str] | Mapping[str, object]) -> str:
 
 
 def _flattened(examples: Mapping[str, tuple[str, ...]]) -> list[str]:
-    """Every example, in route-then-declaration order — what one batched `embed_documents` call
-    takes, and the order `_grouped` splits its answer back up by."""
+    """Every example, in route-then-declaration order.
+
+    What one batched `embed_documents` call takes, and the order `_grouped` splits its answer
+    back up by.
+    """
     return [text for texts in examples.values() for text in texts]
 
 
@@ -368,8 +397,10 @@ def _choose(vector: Vector, route_vectors: _RouteVectors, threshold: float) -> R
 
 
 def _embed_outputs(text: str) -> dict[str, object]:
-    """What a per-request embedding run records: the input length, and a cost *estimate* from
-    it — `Embeddings` reports no usage, so there is nothing to measure."""
+    """What a per-request embedding run records: the input length and a cost estimate.
+
+    It is an estimate because `Embeddings` reports no usage, so there is nothing to measure.
+    """
     return {
         "input_length": len(text),
         "estimated_tokens": max(1, math.ceil(len(text) / _CHARS_PER_TOKEN)),
@@ -378,9 +409,12 @@ def _embed_outputs(text: str) -> dict[str, object]:
 
 
 def _start_embed_run(config: RunnableConfig, text: str) -> CallbackManagerForChainRun:
-    """Open a run for one embedding call, nested under `config`'s callback manager — the
-    strategy's run — the same manual pattern `ChatRouter._start_run` uses for its own,
-    needed because `Embeddings.embed_query` takes no `config` of its own to do this for."""
+    """Open a run for one embedding call, nested under `config`'s callback manager.
+
+    That manager is the strategy's run. It is the same manual pattern `ChatRouter._start_run`
+    uses for its own, needed because `Embeddings.embed_query` takes no `config` of its own to
+    do this for.
+    """
     manager = CallbackManager.configure(
         config.get("callbacks"),
         None,
@@ -410,9 +444,12 @@ async def _astart_embed_run(config: RunnableConfig, text: str) -> AsyncCallbackM
 def _traced_embed(
     config: RunnableConfig, text: str, embed_query: Callable[[str], Vector]
 ) -> Vector:
-    """`embed_query(text)`, as its own child run of the strategy's; the exception it might
-    raise propagates unchanged, so the router's own machinery is what turns it into a
-    default-route fallback (module doc) — this only makes sure the run closes either way."""
+    """Call `embed_query(text)` as its own child run of the strategy's.
+
+    The exception it might raise propagates unchanged, so the router's own machinery is what
+    turns it into a default-route fallback (module doc) — this only makes sure the run closes
+    either way.
+    """
     run_manager = _start_embed_run(config, text)
     try:
         vector = embed_query(text)
