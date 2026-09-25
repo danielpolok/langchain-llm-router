@@ -22,9 +22,8 @@ Whatever the policy, the router behaves the same way:
 
 - **Nothing else to change.** It is a chat model, so `invoke`, `stream`, `batch`, tools, structured
   output, agents and LangGraph all work unchanged.
-- **Routing you can read.** Every response records the route and the reason, such as
-  `matched keyword 'regex'` or `difficulty 1.50 >= 1.00 (code 1.00, analysis 0.50)`. The same
-  record appears in your LangSmith trace.
+- **Routing you can read.** Every response says which model answered and why, and your
+  LangSmith trace shows the same.
 - **Always answers.** If the strategy can't decide, the default model answers and you get a
   warning.
 - **Nothing extra to run.** No proxy, no service and no API key of its own. It needs only
@@ -38,9 +37,8 @@ pip install langchain-llm-router
 
 A route can be any LangChain chat model (a `BaseChatModel`) from any
 [provider](https://docs.langchain.com/oss/python/integrations/chat), hosted or local. This first
-router routes on difficulty, with two routes: a small model and a frontier one. Its
-`HeuristicStrategy` scores how hard each request looks. Requests that score low go to the first
-tier, and the rest go to the second.
+router has two routes, a small model and a frontier one, and sends each question to one of them
+depending on how hard it looks.
 
 ```python
 from langchain.chat_models import init_chat_model
@@ -53,7 +51,7 @@ router = ChatRouter(
         "frontier": init_chat_model("google_genai:gemini-3.8-flash"),
     },
     default_route="small",
-    strategy=HeuristicStrategy("small", "frontier"),  # tiers, cheapest first
+    strategy=HeuristicStrategy("small", "frontier"),  # cheapest first
 )
 
 for question in [
@@ -61,22 +59,20 @@ for question in [
     "Compare the trade-offs of quicksort and mergesort on linked lists.",
 ]:
     response = router.invoke(question)
-    decision = routing_decision(response)
-    print(f"{decision.route:<8} {decision.reason}")
+    print(f"{routing_decision(response).route:<8} {question}")
 ```
 
 ```text
-small    difficulty 0.00 < 1.00 (no signal fired)
-frontier difficulty 1.00 >= 1.00 (analysis 1.00)
+small    What's the capital of France?
+frontier Compare the trade-offs of quicksort and mergesort on linked lists.
 ```
 
-The first question shows no sign of difficulty, so the small model answered it. The second asks
-for a comparison and its trade-offs. Those are two reasoning words, which gives a score of 1.00,
-the default bar for the frontier tier.
+The simple fact question went to the small model. Comparing trade-offs takes reasoning, so that
+question went to the frontier model. [Routing strategies](docs/strategies.md#heuristicstrategy-route-on-difficulty)
+explains how the difficulty is judged.
 
-`response` is the chosen model's own `AIMessage`, so `response.text`, `response.tool_calls` and
-`response.usage_metadata` are exactly what that model returned. The routing decision is in
-`response.response_metadata["routing"]`, and `routing_decision(response)` reads it for you.
+`response` is the chosen model's own answer, unchanged, so you read its text, tool calls and token
+usage as usual. `routing_decision(response)` tells you which route answered and why.
 
 ## How it works
 
