@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![LangChain](https://img.shields.io/badge/langchain--core-1.x-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
+[![LangChain](https://img.shields.io/badge/langchain--core-%E2%89%A51.2.21%2C%20%3C2-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
 
 **Send each request to the right model, by rules you control, from one LangChain chat model.**
 
@@ -34,6 +34,8 @@ Whatever the policy, the router behaves the same way:
 ```bash
 pip install langchain-llm-router
 ```
+
+It needs Python 3.10 or later and `langchain-core` 1.2.21 or later within 1.x (`>=1.2.21,<2`).
 
 A route can be any LangChain chat model (a `BaseChatModel`) from any
 [provider](https://docs.langchain.com/oss/python/integrations/chat), hosted or local. This first

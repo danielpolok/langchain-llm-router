@@ -635,7 +635,7 @@ def test_a_wrapped_route_is_refused_with_both_alternatives_named(label: str) -> 
     `label` (`wrapped_routes`' dict key, kept as a stable, readable test id): what `.bind(...)`
     actually returns is `langchain-core`'s own private wrapper class, and its exact name has
     already changed across supported versions (`_ChatModelBinding` at 1.6.3, plain
-    `RunnableBinding` at the 1.1 floor — bisected directly, not assumed) — a name this router
+    `RunnableBinding` at the 1.2.21 floor — checked directly, not assumed) — a name this router
     reads off the object rather than choosing, so the test must too."""
     route = wrapped_routes()[label]
     loc, error = refusal_of(route)
