@@ -77,7 +77,9 @@ such as `GenericFakeChatModel`.
   linked from `README.md` and every name in `__all__` is documented;
   `tests/integration_tests/test_docs_live.py` runs every block against the real models, and fails
   on a router warning the block's output doesn't show. Rerun it and refresh the outputs when an
-  example changes. A new public name or page needs its docs.
+  example changes. A new public name or page needs its docs. Diagrams are Excalidraw drawings in
+  `docs/images/`: edit the `.excalidraw` source at excalidraw.com and export it again as the light
+  and dark SVGs, with fonts embedded.
 - **Tests** exercise behaviour through the public API and every calling convention
   (`tests/conventions.py`), not internals.
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are

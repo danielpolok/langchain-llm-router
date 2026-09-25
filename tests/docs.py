@@ -19,7 +19,8 @@ README = ROOT / "README.md"
 PAGES = [README, *sorted((ROOT / "docs").rglob("*.md"))]
 
 FENCE = re.compile(r"^```(?P<info>[^\n]*)\n(?P<body>.*?)^```[ \t]*$", re.DOTALL | re.MULTILINE)
-LINK = re.compile(r"(?<!!)\[[^\]]*\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+LINK = re.compile(r"!?\[[^\]]*\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+SOURCE = re.compile(r"\b(?:src|srcset)=\"(?P<target>[^\"]+)\"")  # <img> and <picture> images
 HEADING = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
 URL = re.compile(r"[a-z][a-z0-9+.-]*:")
 
@@ -69,9 +70,9 @@ def python_blocks(page: Path) -> list[Block]:
 
 
 def links(page: Path) -> list[str]:
-    """Every link target on the page, outside code blocks."""
+    """Every link and image target on the page, outside code blocks."""
     text = FENCE.sub("", page.read_text(encoding="utf-8"))
-    return [match.group("target") for match in LINK.finditer(text)]
+    return [match.group("target") for pattern in (LINK, SOURCE) for match in pattern.finditer(text)]
 
 
 def slug(title: str) -> str:
