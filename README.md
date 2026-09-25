@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
-[![LangChain](https://img.shields.io/badge/langchain--core-1.x-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
+[![LangChain](https://img.shields.io/badge/langchain--core-%E2%89%A51.2.21%2C%20%3C2-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange)](#-project-status)
 
 In-process model routing for LangChain: `ChatRouter` is a chat model that, per request, picks one of
@@ -93,6 +93,8 @@ pip install -U langchain-llm-router
 # or
 uv add langchain-llm-router
 ```
+
+It needs Python 3.10 or later and `langchain-core` 1.2.21 or later within 1.x (`>=1.2.21,<2`).
 
 ### Tracing
 
