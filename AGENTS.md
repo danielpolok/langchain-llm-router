@@ -16,8 +16,8 @@ work identically on the router. Errors, retries and fallbacks stay LangChain's j
 `with_fallbacks`); the selected model's errors surface unchanged.
 
 Explicit non-goals: learning from traffic, cascades or escalation, cost-budget optimisation, a
-hosted proxy, and replacing `@wrap_model_call` agent middleware. See
-[docs/scope.md](docs/scope.md).
+hosted proxy, and replacing `@wrap_model_call` agent middleware. See the
+[README's scope](README.md#scope).
 
 ## Layout
 
@@ -36,7 +36,7 @@ hosted proxy, and replacing `@wrap_model_call` agent middleware. See
 | `tests/conventions.py` | parametrises tests over the calling conventions (`invoke`, `stream`, `batch`, async…) |
 | `examples/` | one runnable, offline script per use case; `tests/unit_tests/test_examples.py` runs each in CI |
 | `benchmark/` | the cost/quality benchmark — a versioned harness and dataset; see its README |
-| `docs/` | user documentation (`index.md`, `get-started.md`, `capabilities/`, `stories/`, and the reference pages `strategies.md`, `decision-record.md`, `scope.md`) and `design.md` |
+| `docs/` | user documentation — `strategies.md` (every strategy, and writing your own) and `guide.md` (everything else) — and `design.md`; `README.md` is the landing page and the index |
 
 ## Commands
 
@@ -69,11 +69,15 @@ such as `GenericFakeChatModel`.
 - **Public API stability:** the strategy interface carries a stability promise
   ([docs/strategies.md](docs/strategies.md#stability-promise)). Changing a dataclass field, its
   order or a method signature needs a version bump the promise names.
-- **Documentation** is plain Markdown that `tests/unit_tests/test_docs.py` holds to account: every
-  ```` ```python ```` block runs (offline, against fakes) and only a block that needs a real provider
-  is fenced ```` ```python skip ````, every relative link and anchor resolves, every page is linked
-  from `docs/index.md`, and every name in `__all__` appears in `docs/`. A new public name or page
-  needs its docs.
+- **Documentation** is plain Markdown, written for a newcomer: real models (never fakes), the value
+  first, and each example followed by a ```` ```text ```` block showing what it prints, with no
+  assertions. A page's ```` ```python ```` blocks run top to bottom in one namespace, so shared
+  setup is written once per page. `tests/unit_tests/test_docs.py` checks offline that every block
+  compiles and its imports resolve, every relative link and anchor resolves, every `docs/` page is
+  linked from `README.md` and every name in `__all__` is documented;
+  `tests/integration_tests/test_docs_live.py` runs every block against the real models, and fails
+  on a router warning the block's output doesn't show. Rerun it and refresh the outputs when an
+  example changes. A new public name or page needs its docs.
 - **Tests** exercise behaviour through the public API and every calling convention
   (`tests/conventions.py`), not internals.
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are

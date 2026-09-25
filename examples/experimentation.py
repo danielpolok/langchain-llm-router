@@ -3,7 +3,7 @@
 Runtime config pins one call to a named route — the strategy is skipped
 entirely, and a forced route is never silently swapped: an unknown or tool-incapable
 forced route raises `ForcedRouteError` by default, and only falls back when the router is built
-with `on_unavailable_forced_route="fallback"`. See `docs/decision-record.md` for the full
+with `on_unavailable_forced_route="fallback"`. See `docs/guide.md` for the full
 warning and error reference.
 
 Run it:

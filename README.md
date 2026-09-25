@@ -4,74 +4,138 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![LangChain](https://img.shields.io/badge/langchain--core-1.x-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
 
-In-process model routing for LangChain: `ChatRouter` is a chat model that, per request, picks one of
-several candidate chat models and returns that model's response — with a record of which one ran
-and why.
+**Send each request to the right model.** Easy questions go to a cheap, fast model, and hard ones
+to a frontier model, all behind one LangChain chat model.
 
-> [!NOTE]
-> **Not on PyPI yet.** The router, its strategies and its benchmark are implemented and merged,
-> but nothing has been released, so nothing here is a compatibility guarantee until the first
-> release.
+`ChatRouter` is a drop-in LangChain chat model. You give it a few named models and a **strategy**.
+For each request, the strategy picks one of the models. The router returns that model's own
+response, along with a note of which model answered and why.
 
-## Install
+- **Cut cost without cutting quality.** On [our benchmark](benchmark/README.md), routing on a
+  simple difficulty score cost 50% less than always using the frontier model, and answers scored
+  no worse.
+- **Nothing else to change.** It is a chat model, so `invoke`, `stream`, `batch`, tools, structured
+  output, agents and LangGraph all work unchanged.
+- **Routing you can read.** Every response records the route and the reason, such as
+  `difficulty 1.50 >= 1.00 (code 1.00, analysis 0.50)`. The same record appears in your
+  LangSmith trace.
+- **Always answers.** If the strategy can't decide, the default model answers and you get a
+  warning.
+- **Nothing extra to run.** No proxy, no service and no API key of its own. It needs only
+  `langchain-core`.
 
-Once published:
+## Get started
+
+Install the router and a provider. These examples use Google Gemini, but any
+[LangChain chat model](https://docs.langchain.com/oss/python/integrations/chat) works.
 
 ```bash
-pip install langchain-llm-router
+pip install "langchain-llm-router @ git+https://github.com/danielpolok/langchain-llm-router" "langchain[google-genai]"
+export GOOGLE_API_KEY="..."
 ```
 
-## Quickstart
+> [!NOTE]
+> **Not on PyPI yet**, so for now it installs from GitHub. After the first release, this becomes
+> `pip install langchain-llm-router`.
 
-Give the router named routes — ordinary chat models — and a strategy that applies your routing
-policy. It is a chat model itself, so it goes anywhere one does: chains, agents, LangGraph nodes.
+Build a router with two routes: a cheap model and a strong one. `HeuristicStrategy` scores how
+hard each request looks. Requests that score low go to the first tier, and the rest go to the
+second.
 
-```python skip
+```python
 from langchain.chat_models import init_chat_model
 
 from langchain_llm_router import ChatRouter, HeuristicStrategy, routing_decision
 
 router = ChatRouter(
     routes={
-        "small": init_chat_model("ollama:qwen3:8b"),
-        "frontier": init_chat_model("google_genai:gemini-3-flash-preview"),
+        "small": init_chat_model("google_genai:gemini-3.5-flash-lite"),
+        "frontier": init_chat_model("google_genai:gemini-3.8-flash"),
     },
     default_route="small",
-    strategy=HeuristicStrategy("small", "frontier"),  # cheap first
+    strategy=HeuristicStrategy("small", "frontier"),  # tiers, cheapest first
 )
 
-response = router.invoke("Prove that there are infinitely many primes.")
-print(response.text)  # the selected model's own answer
-print(routing_decision(response))  # which route ran, and why
+for question in [
+    "What's the capital of France?",
+    "Compare the trade-offs of quicksort and mergesort on linked lists.",
+]:
+    response = router.invoke(question)
+    decision = routing_decision(response)
+    print(f"{decision.route:<8} {decision.reason}")
 ```
 
-The response is the selected model's own `AIMessage`, with the routing decision added under
-`response_metadata["routing"]`. To try it without a provider, use the offline fakes in
-[Get started](docs/get-started.md).
+```text
+small    difficulty 0.00 < 1.00 (no signal fired)
+frontier difficulty 1.00 >= 1.00 (analysis 1.00)
+```
 
-## Why
+The first question shows no sign of difficulty, so the small model answered it. The second asks
+for a comparison and its trade-offs. Those are two reasoning words, which gives a score of 1.00,
+the default bar for the frontier tier.
 
-- **Works with LangChain, not around it.** `invoke`, `stream`, `batch`, the async forms,
-  `bind_tools`, `with_structured_output`, `with_retry` and `with_fallbacks` behave as on any chat
-  model.
-- **One trace, priced once.** LangSmith shows the routing decision wrapping the real model call,
-  and token cost is attributed to the model that ran.
-- **Always answers.** The default route is mandatory; when a strategy can't decide, the request
-  goes there, with a warning and the reason recorded.
-- **No extra infrastructure.** No proxy, no service, no credentials of its own; it depends only on
-  `langchain-core`.
+`response` is the chosen model's own `AIMessage`, so `response.text`, `response.tool_calls` and
+`response.usage_metadata` are exactly what that model returned. The routing decision is in
+`response.response_metadata["routing"]`, and `routing_decision(response)` reads it for you.
+
+## How it works
+
+```mermaid
+flowchart LR
+    request([request]) --> strategy{strategy}
+    strategy -- "small" --> small[small model]
+    strategy -- "frontier" --> frontier[frontier model]
+    strategy -. "can't decide" .-> default[default route]
+    small --> response([response + routing decision])
+    frontier --> response
+    default --> response
+```
+
+1. The strategy looks at the **current request**, meaning the user's latest message. It ignores
+   tool output and the rest of the conversation, so an agent's tool loop can't change the route.
+2. It names a route and gives a reason, or it abstains. If it abstains, the default route answers.
+3. The router calls that one model and returns its response, with the routing decision attached.
+
+## Choose a strategy
+
+| Strategy | Decides by | Extra cost per request | Good for |
+| --- | --- | --- | --- |
+| [`HeuristicStrategy`](docs/strategies.md#heuristicstrategy-route-on-difficulty) | A difficulty score: length, code, several questions, reasoning words, images | None | Cheap model for easy requests, strong model for hard ones |
+| [`KeywordStrategy`](docs/strategies.md#keywordstrategy-route-on-words) | Words in the request | None | Topics with telltale words, such as "SQL" or "invoice" |
+| [`ConfigurableStrategy`](docs/strategies.md#configurablestrategy-combine-rules) | Your rules, combining keywords, scores, media and tools | None | A policy with several conditions |
+| [`EmbeddingStrategy`](docs/strategies.md#embeddingstrategy-route-on-meaning) | Similarity to example requests | One embedding call | Topics without telltale words |
+| [`ClassifierStrategy`](docs/strategies.md#classifierstrategy-let-a-small-model-choose) | A small model reads route descriptions and picks one | One small-model call | Subtle distinctions, when accuracy matters most |
+| [Your own function](docs/strategies.md#your-own-strategy) | Your code | Whatever your code costs | Business rules, an existing classifier |
+
+Start with a free strategy. The benchmark found that `HeuristicStrategy` and `KeywordStrategy`
+already reach the cost target. The embedding and classifier strategies route more precisely, but
+they pay for an extra call on every request.
 
 ## Documentation
 
-- [Documentation index](docs/index.md) — start here.
-- [Get started](docs/get-started.md) — a first router, choosing a strategy, reading the decision.
-- [Capabilities](docs/index.md#where-to-go-next) — strategies, tools and structured output,
-  streaming and batch, forced routes, fallbacks, caching, tracing and cost.
-- [User stories](docs/index.md#where-to-go-next) — cost tiering, domain routing, experimentation,
-  a custom strategy, and use as an agent's model.
-- [Examples](examples/README.md) — one runnable, offline script per use case.
-- [Benchmark](benchmark/README.md) — what routing saved on one workload, and how to rerun it.
-- [Scope](docs/scope.md) — what the router doesn't do, and when agent middleware fits better.
+- **[Routing strategies](docs/strategies.md)** covers how each strategy decides, with examples,
+  tuning and how to write your own.
+- **[Using the router](docs/guide.md)** covers reading the decision, streaming, tools, structured
+  output, agents, forcing a route for A/B tests, tracing and cost, retries and caching.
+- **[Examples](examples/README.md)** has one runnable script per use case. They use fake models,
+  so they run offline.
+- **[Benchmark](benchmark/README.md)** shows what routing saved on a mixed workload, and how to
+  rerun it with your own models.
+- **[Design notes](docs/design.md)** explain why the router is built the way it is. Read these
+  before contributing.
+
+## Scope
+
+The router picks one model **before** the call, using a policy you define. It doesn't learn from
+traffic, retry a weak answer on a stronger model, spend against a budget, or run as a proxy.
+Inside `create_agent`, a choice that depends on agent state belongs in
+[`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware), which
+can use the router as its model.
+
+> [!TIP]
+> **Provider prompt caching.** Moving a conversation between models loses the prompt prefix that
+> the provider has cached. For long conversations, you can
+> [keep each conversation on one route](docs/strategies.md#a-strategy-class).
 
 ## Contributing
 
@@ -83,9 +147,8 @@ uv run pytest
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-See [AGENTS.md](AGENTS.md) for the repository layout and conventions,
-[docs/design.md](docs/design.md) for why the code is shaped the way it is, and
-[GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues) for the open work.
+See [AGENTS.md](AGENTS.md) for the repository layout and conventions, and
+[GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues) for open work.
 
 ## License
 
