@@ -4,21 +4,27 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![LangChain](https://img.shields.io/badge/langchain--core-1.x-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
 
-**Send each request to the right model.** Easy questions go to a cheap, fast model, and hard ones
-to a frontier model, all behind one LangChain chat model.
+**Send each request to the right model, by rules you control, from one LangChain chat model.**
 
 `ChatRouter` is a drop-in LangChain chat model. You give it a few named models and a **strategy**.
 For each request, the strategy picks one of the models. The router returns that model's own
 response, along with a note of which model answered and why.
 
-- **Cut cost without cutting quality.** On [our benchmark](benchmark/README.md), routing on a
-  simple difficulty score cost 50% less than always using the frontier model, and answers scored
-  no worse.
+What "the right model" means is up to you:
+
+- **Difficulty:** a fast model for easy requests and a frontier model for hard ones.
+- **Topic:** code questions to a coding model, and legal questions to a model tuned for them.
+- **Content:** requests with images or documents to a model that can read them.
+- **Data:** requests that touch sensitive data to a model you host yourself.
+- **Customer or experiment:** each plan or A/B test group to its own model.
+
+Whatever the policy, the router behaves the same way:
+
 - **Nothing else to change.** It is a chat model, so `invoke`, `stream`, `batch`, tools, structured
   output, agents and LangGraph all work unchanged.
 - **Routing you can read.** Every response records the route and the reason, such as
-  `difficulty 1.50 >= 1.00 (code 1.00, analysis 0.50)`. The same record appears in your
-  LangSmith trace.
+  `matched keyword 'regex'` or `difficulty 1.50 >= 1.00 (code 1.00, analysis 0.50)`. The same
+  record appears in your LangSmith trace.
 - **Always answers.** If the strategy can't decide, the default model answers and you get a
   warning.
 - **Nothing extra to run.** No proxy, no service and no API key of its own. It needs only
@@ -30,10 +36,11 @@ response, along with a note of which model answered and why.
 pip install langchain-llm-router
 ```
 
-Build a router with two routes: a cheap model and a strong one. A route can be any LangChain
-chat model (a `BaseChatModel`) from any [provider](https://docs.langchain.com/oss/python/integrations/chat),
-hosted or local. `HeuristicStrategy` scores how hard each request looks. Requests that score low
-go to the first tier, and the rest go to the second.
+A route can be any LangChain chat model (a `BaseChatModel`) from any
+[provider](https://docs.langchain.com/oss/python/integrations/chat), hosted or local. This first
+router routes on difficulty, with two routes: a small model and a frontier one. Its
+`HeuristicStrategy` scores how hard each request looks. Requests that score low go to the first
+tier, and the rest go to the second.
 
 ```python
 from langchain.chat_models import init_chat_model
@@ -76,11 +83,11 @@ the default bar for the frontier tier.
 ```mermaid
 flowchart LR
     request([request]) --> strategy{strategy}
-    strategy -- "small" --> small[small model]
-    strategy -- "frontier" --> frontier[frontier model]
+    strategy -- "route a" --> a[model A]
+    strategy -- "route b" --> b[model B]
     strategy -. "can't decide" .-> default[default route]
-    small --> response([response + routing decision])
-    frontier --> response
+    a --> response([response + routing decision])
+    b --> response
     default --> response
 ```
 
@@ -100,9 +107,8 @@ flowchart LR
 | [`ClassifierStrategy`](docs/strategies.md#classifierstrategy-let-a-small-model-choose) | A small model reads route descriptions and picks one | One small-model call | Subtle distinctions, when accuracy matters most |
 | [Your own function](docs/strategies.md#your-own-strategy) | Your code | Whatever your code costs | Business rules, an existing classifier |
 
-Start with a free strategy. The benchmark found that `HeuristicStrategy` and `KeywordStrategy`
-already reach the cost target. The embedding and classifier strategies route more precisely, but
-they pay for an extra call on every request.
+Start with a strategy that makes no extra call. Reach for embeddings or a classifier when words and
+rules can't tell your routes apart. They read meaning, but they add a call to every request.
 
 ## Documentation
 
@@ -112,8 +118,8 @@ they pay for an extra call on every request.
   output, agents, forcing a route for A/B tests, tracing and cost, retries and caching.
 - **[Examples](examples/README.md)** has one runnable script per use case. They use fake models,
   so they run offline.
-- **[Benchmark](benchmark/README.md)** shows what routing saved on a mixed workload, and how to
-  rerun it with your own models.
+- **[Benchmark](benchmark/README.md)** compares the strategies on cost and answer quality over a
+  mixed workload, and shows how to rerun it with your own models.
 - **[Design notes](docs/design.md)** explain why the router is built the way it is. Read these
   before contributing.
 
