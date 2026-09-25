@@ -20,8 +20,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 requires-python = ">=3.10"
-# No runtime dependency beyond LangChain's core; langchain-core 1.x.
-dependencies = ["langchain-core>=1.1,<2"]
+# No runtime dependency beyond LangChain's core; langchain-core 1.x. The floor is the first
+# release whose `BaseChatModel` fills `profile` from `_resolve_model_profile`, which is how the
+# router reports what every route can do.
+dependencies = ["langchain-core>=1.2.21,<2"]
 
 [project.urls]
 Repository = "https://github.com/danielpolok/langchain-llm-router"

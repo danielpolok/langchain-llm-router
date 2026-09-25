@@ -14,8 +14,8 @@ produce, see [strategies.md](strategies.md) and [decision-record.md](decision-re
 nodes. Middleware only works inside `create_agent`. The consequence is the project's core rule:
 **anything that works on a chat model must work identically on the router**, so the router uses
 LangChain's own mechanisms (`bind_tools`, `with_structured_output`, `with_config`, callbacks, the
-cache) instead of inventing parallel ones. It depends on `langchain-core` only, uses only its
-public names (never private ones), and needs no proxy or service.
+cache) instead of inventing parallel ones. It depends on `langchain-core` only (`>=1.2.21,<2`),
+uses only its public names (never private ones), and needs no proxy or service.
 
 ## Routes and policy
 
@@ -82,7 +82,8 @@ use tools, binding is an error. Structured output counts as tool binding.
 - **Profile:** the router reports the *intersection* of its routes' profiles (booleans AND-ed,
   numbers minimised, differing values dropped, `None` if any route reports none), because
   `create_agent` picks a structured-output strategy from `model.profile` and must not pick one a
-  route can't serve. This needs `langchain-core>=1.3`.
+  route can't serve. This is why the package needs `langchain-core>=1.2.21`: that is the first
+  release whose `BaseChatModel` asks a subclass for its profile (`_resolve_model_profile`).
 
 ## Forced routes
 

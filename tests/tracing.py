@@ -13,11 +13,13 @@ charges without an API key. The live check against LangSmith still needs one.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
+from contextvars import ContextVar, copy_context
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages.ai import add_usage
+from langchain_core.runnables.utils import coro_with_context
 
 from langchain_llm_router import RoutingChoice, RoutingRequest, RoutingStrategy
 
@@ -28,6 +30,27 @@ if TYPE_CHECKING:
     from langchain_core.tracers.schemas import Run
 
 LLM_RUN_TYPES = {"llm", "chat_model"}
+
+
+async def async_calls_inherit_the_context() -> bool:
+    """Whether a coroutine awaited through `coro_with_context` runs in the context it was given.
+
+    This is what the tracing design leans on for a strategy that omits `request.config`, and it is
+    not the same everywhere. `asyncio.create_task` takes a `context` only from Python 3.11; below
+    that, `langchain-core` 1.4.8 and later create the task *inside* the context
+    (`runnables/utils.py:157` in 1.6), which has the same effect, while earlier releases hand back
+    the bare coroutine (`create_task=False`) and the call runs in the caller's context instead.
+    LangChain documents the consequence: there, an async call has to be handed its config. Asking
+    the mechanism, rather than the version numbers, keeps the tests that skip on it true.
+    """
+    probe: ContextVar[bool] = ContextVar("probe", default=False)
+
+    async def read() -> bool:
+        return probe.get()
+
+    context = copy_context()
+    context.run(probe.set, True)
+    return await coro_with_context(read(), context)
 
 
 class PricedCall(NamedTuple):

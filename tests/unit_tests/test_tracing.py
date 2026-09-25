@@ -18,11 +18,8 @@ the offline tracer's tree says where each run ended up and what it carried.
 
 from __future__ import annotations
 
-from contextvars import ContextVar, copy_context
-
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables.utils import coro_with_context
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
 from langchain_llm_router import (
@@ -36,7 +33,14 @@ from langchain_llm_router import (
 from langchain_llm_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, respond
 from tests.fakes import FakeChatModel
-from tests.tracing import ConsultingStrategy, StartLog, model_name_of, model_runs, walk
+from tests.tracing import (
+    ConsultingStrategy,
+    StartLog,
+    async_calls_inherit_the_context,
+    model_name_of,
+    model_runs,
+    walk,
+)
 
 ASYNC: frozenset[AnyConvention] = frozenset({"ainvoke", "astream", "abatch", "events", "agenerate"})
 """The conventions that await the strategy — the ones whose context has to reach a coroutine."""
@@ -60,27 +64,6 @@ def fake_routes(*names: str) -> dict[str, BaseChatModel]:
         name: FakeChatModel(model_name=f"model-{name}", reply=f"{name} answer here")
         for name in names
     }
-
-
-async def async_calls_inherit_the_context() -> bool:
-    """Whether a coroutine awaited through `coro_with_context` runs in the context it was given.
-
-    This is what the tracing design leans on for a strategy that omits `request.config`, and it is
-    not the same everywhere. `asyncio.create_task` takes a `context` only from Python 3.11; below
-    that, `langchain-core` 1.6 creates the task *inside* the context (`runnables/utils.py:157`),
-    which has the same effect, while 1.1 hands back the bare coroutine (`create_task=False`) and the
-    call runs in the caller's context instead. LangChain documents the consequence: there, an
-    async call has to be handed its config. Asking the mechanism, rather than the version
-    numbers, keeps the skip below true.
-    """
-    probe: ContextVar[bool] = ContextVar("probe", default=False)
-
-    async def read() -> bool:
-        return probe.get()
-
-    context = copy_context()
-    context.run(probe.set, True)
-    return await coro_with_context(read(), context)
 
 
 # --- The shape, for every convention ---

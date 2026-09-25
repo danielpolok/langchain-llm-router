@@ -38,7 +38,7 @@ from langchain_llm_router import RoutingCallable, RoutingChoice, RoutingRequest,
 from langchain_llm_router._extraction import build_request
 from langchain_llm_router.strategy import as_strategy, strategy_name
 from tests.fakes import FakeChatModel
-from tests.tracing import model_runs
+from tests.tracing import async_calls_inherit_the_context, model_runs
 
 PACKAGE = "langchain_llm_router"
 ROUTES = ("small", "coder")
@@ -262,7 +262,13 @@ class ContextSpy(RoutingStrategy):
 
 async def test_adecide_carries_the_callers_context_into_decide() -> None:
     """The context the router sets around `adecide` — LangChain's config context
-    (`set_config_context`) and any other context variable — reaches `decide`'s thread."""
+    (`set_config_context`) and any other context variable — reaches `decide`'s thread.
+
+    Wherever the coroutine runs in the context it is handed. Where it doesn't — Python 3.10 with
+    a `langchain-core` older than 1.4.8 — `decide` sees the caller's context, and a strategy's
+    calls get their config only from `request.config`, the documented limit."""
+    if not await async_calls_inherit_the_context():
+        pytest.skip("here a coroutine does not run in the context it is handed")
     strategy = ContextSpy()
     config = RunnableConfig(tags=["strategy-run"])
 

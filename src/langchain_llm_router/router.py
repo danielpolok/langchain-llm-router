@@ -164,7 +164,7 @@ does not implement, so none of the pipeline runs. Delegating to the selected rou
 stream would need the router to own the returned `ChatModelStream`: that type lives in a module
 `langchain_core` doesn't export, it has no completion hook to close the router's run with, and
 it assembles its `response_metadata` only from protocol events, so the record could only
-be put there by forging one. None of it exists in `langchain-core` 1.1, the minimum supported.
+be put there by forging one. None of it exists in `langchain-core` 1.2.21, the minimum supported.
 Refusing at the two public doors keeps the failure honest and, unlike the base class's bare
 `NotImplementedError`, stops a chat-model run being opened for the router itself."""
 
