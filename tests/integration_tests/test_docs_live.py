@@ -6,8 +6,8 @@ are compared: a router warning a block raises must appear in the output the page
 and a warning the output shows must actually be raised. That catches a policy that quietly stopped
 deciding, such as an embedding threshold that no longer fits the model.
 
-Skips without `GEMINI_API_KEY` (`requires_env`, root `conftest.py`); Gemini reads that variable
-when `GOOGLE_API_KEY`, the one the pages name, is unset.
+The pages' examples use Gemini models. Skips without `GEMINI_API_KEY` (`requires_env`, root
+`conftest.py`), which Gemini reads when `GOOGLE_API_KEY` is unset.
 """
 
 from __future__ import annotations

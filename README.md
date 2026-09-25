@@ -26,21 +26,14 @@ response, along with a note of which model answered and why.
 
 ## Get started
 
-Install the router and a provider. These examples use Google Gemini, but any
-[LangChain chat model](https://docs.langchain.com/oss/python/integrations/chat) works.
-
 ```bash
-pip install "langchain-llm-router @ git+https://github.com/danielpolok/langchain-llm-router" "langchain[google-genai]"
-export GOOGLE_API_KEY="..."
+pip install langchain-llm-router
 ```
 
-> [!NOTE]
-> **Not on PyPI yet**, so for now it installs from GitHub. After the first release, this becomes
-> `pip install langchain-llm-router`.
-
-Build a router with two routes: a cheap model and a strong one. `HeuristicStrategy` scores how
-hard each request looks. Requests that score low go to the first tier, and the rest go to the
-second.
+Build a router with two routes: a cheap model and a strong one. A route can be any LangChain
+chat model (a `BaseChatModel`) from any [provider](https://docs.langchain.com/oss/python/integrations/chat),
+hosted or local. `HeuristicStrategy` scores how hard each request looks. Requests that score low
+go to the first tier, and the rest go to the second.
 
 ```python
 from langchain.chat_models import init_chat_model
