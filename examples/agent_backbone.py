@@ -4,7 +4,7 @@
 included: the strategy routes each model call the agent makes on that call's current request,
 and every tool-calling round trip goes through the same routing pipeline as a plain
 `invoke`. See `examples/agent_middleware.py` for combining this with `@wrap_model_call`, and
-`docs/scope.md` for when agent-state-aware selection calls for middleware instead.
+`docs/guide.md` for when agent-state-aware selection calls for middleware instead.
 
 Run it:
 

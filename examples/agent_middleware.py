@@ -10,7 +10,7 @@ Put the router behind an agent when the policy only needs to see the incoming re
 `@wrap_model_call` instead — with or without the router as its `request.model` — when the
 decision needs agent state the router's strategy interface deliberately doesn't see: which
 `create_agent` node is calling, how many tool round trips have run, something a previous
-middleware stored. See `docs/scope.md` for the fuller comparison, LangChain's own
+middleware stored. See the README's Scope section and `docs/guide.md`, LangChain's own
 [middleware docs](https://docs.langchain.com/oss/python/langchain/middleware) for what
 `@wrap_model_call` can do on its own, and `tests/unit_tests/test_placement.py`'s
 `test_wrap_model_call_middleware_coexists_with_routing` for what this example backs

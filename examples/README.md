@@ -1,10 +1,7 @@
 # Examples
 
-One runnable script per use case, plus the agent-middleware case (see
-[`../docs/scope.md`](../docs/scope.md)). Each runs offline —
-against `GenericFakeChatModel` (`langchain_core`) or a small scripted fake in
-[`_fakes.py`](_fakes.py), never a real provider — so no API key is needed, and
-`tests/unit_tests/test_examples.py` runs every one of them in CI.
+One runnable script per use case. Each runs offline against fake models, so no API key is needed,
+and `tests/unit_tests/test_examples.py` runs every one of them in CI.
 
 ```bash
 uv run python examples/cost_tiering.py
@@ -19,17 +16,8 @@ uv run python examples/cost_tiering.py
 | [`experimentation.py`](experimentation.py) | Force a route per call to compare models on the same traffic | forced routes |
 | [`agent_middleware.py`](agent_middleware.py) | `@wrap_model_call` middleware coexisting with the router | `KeywordStrategy` + middleware |
 
-Every route in these examples is a fake — swap in `init_chat_model("provider:model")` (or any
-other `BaseChatModel`) for each `routes=` entry and the rest of the example is unchanged; that
-substitutability is the point of building against `langchain-core`'s own chat-model interface.
+To use real models, replace each fake in `routes=` with `init_chat_model("provider:model")` or any
+other chat model. Nothing else in the example changes.
 
-See also:
-
-- [`../README.md`](../README.md) — installation, the public API, and a walkthrough of the same
-  ground these examples cover.
-- [`../docs/strategies.md`](../docs/strategies.md) — the three strategy levels and the full
-  strategy interface reference.
-- [`../docs/decision-record.md`](../docs/decision-record.md) — the decision record, and every
-  warning and error the router raises.
-- [`../docs/scope.md`](../docs/scope.md) — when to reach for agent middleware instead, what
-  the router deliberately doesn't do, and the prompt-caching caveat.
+The documentation shows the same use cases with real models: [strategies](../docs/strategies.md)
+and [using the router](../docs/guide.md).

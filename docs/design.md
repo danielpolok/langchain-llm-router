@@ -5,8 +5,8 @@ spike, a measurement, or a LangChain behaviour that turned out to differ from th
 and the code relies on them. If you need to change one, read its reasoning first and replace it
 deliberately rather than working around it.
 
-For what the router does *not* do, see [scope.md](scope.md). For the public surface these decisions
-produce, see [strategies.md](strategies.md) and [decision-record.md](decision-record.md).
+For what the router does *not* do, see the [README's scope](../README.md#scope). For the public
+surface these decisions produce, see [strategies.md](strategies.md) and [guide.md](guide.md).
 
 ## A chat model, not middleware
 
@@ -117,7 +117,8 @@ processes (a bare function must not reach it as `<function f at 0x…>`), and a 
 carries a correct decision record.
 
 Provider-side prompt caching is out of the router's control; switching routes mid-conversation can
-lose the cached prefix. See [scope.md](scope.md).
+lose the cached prefix. A strategy that keeps a conversation on one route avoids that; see
+[strategies.md](strategies.md#a-strategy-class).
 
 ## Errors, retries and fallbacks
 
