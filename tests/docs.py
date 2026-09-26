@@ -1,13 +1,17 @@
-"""Reading the documentation: its pages, their code blocks, links and headings.
+"""Reading the documentation: its pages, their code blocks, links and headings, and the examples.
 
 A page's ```` ```python ```` blocks are one script, read top to bottom: setup is written once, and
 later blocks use what earlier ones defined. The ```` ```text ```` block straight after a code block
 is what the page says that code prints.
+
+An example in `examples/` is a whole script, and the `# It prints` comment that ends it is what the
+example says it prints.
 """
 
 from __future__ import annotations
 
 import ast
+import importlib
 import itertools
 import re
 from dataclasses import dataclass
@@ -16,13 +20,16 @@ from types import CodeType
 
 ROOT = Path(__file__).resolve().parents[1]
 README = ROOT / "README.md"
-PAGES = [README, *sorted((ROOT / "docs").rglob("*.md"))]
+EXAMPLES_README = ROOT / "examples" / "README.md"
+PAGES = [README, *sorted((ROOT / "docs").rglob("*.md")), EXAMPLES_README]
+EXAMPLES = sorted((ROOT / "examples").glob("*.py"))
 
 FENCE = re.compile(r"^```(?P<info>[^\n]*)\n(?P<body>.*?)^```[ \t]*$", re.DOTALL | re.MULTILINE)
 LINK = re.compile(r"!?\[[^\]]*\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 SOURCE = re.compile(r"\b(?:src|srcset)=\"(?P<target>[^\"]+)\"")  # <img> and <picture> images
 HEADING = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
 URL = re.compile(r"[a-z][a-z0-9+.-]*:")
+PRINTS = re.compile(r"^# It prints\b.*", re.DOTALL | re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -67,6 +74,24 @@ def python_blocks(page: Path) -> list[Block]:
             )
         )
     return blocks
+
+
+def example_output(script: Path) -> str:
+    """What an example says it prints: the `# It prints` comment that ends it, or `""`."""
+    match = PRINTS.search(script.read_text(encoding="utf-8"))
+    return match.group() if match else ""
+
+
+def check_imports(code: str, location: str) -> None:
+    """Import every module `code` imports, and fail if one lacks a name imported from it."""
+    for node in ast.walk(ast.parse(code, location)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                importlib.import_module(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            module = importlib.import_module(node.module)
+            missing = [alias.name for alias in node.names if not hasattr(module, alias.name)]
+            assert not missing, f"{location}: {node.module} has no {missing}"
 
 
 def links(page: Path) -> list[str]:

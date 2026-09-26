@@ -175,7 +175,7 @@ small The weather in Paris is sunny, and it's also sunny in Rome.
 ```
 
 The router also works in LangGraph nodes and chains, anywhere a chat model goes. To choose a
-model from agent state, such as the number of steps taken, use
+model from agent state, such as how long the conversation has grown, use
 [`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware). It
 can use the router as its model, as
 [`examples/agent_middleware.py`](../examples/agent_middleware.py) shows.
