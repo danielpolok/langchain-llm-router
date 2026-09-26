@@ -1,39 +1,38 @@
-"""Every documented example runs in CI, offline.
+"""The examples stay true offline: they compile, their imports resolve, each shows what it prints.
 
-Each script in `examples/` is run the way its own docstring tells a reader to run it —
-`python examples/<name>.py`, from the repository root — and must exit zero. None of them needs a
-provider credential: every route in every example is a fake (`GenericFakeChatModel` or
-`examples/_fakes.py`'s `ScriptedToolChatModel`), so this runs unconditionally, unlike the
-`requires_env`/`requires_ollama`-gated tests in `tests/integration_tests`.
+Each example calls real models, like the documentation, so running them is the live test's job
+(`tests/integration_tests/test_examples_live.py`). What can be checked without a provider is
+checked here, on every run.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
-EXAMPLES = sorted(
-    path for path in (ROOT / "examples").glob("*.py") if not path.name.startswith("_")
-)
+from tests.docs import EXAMPLES, EXAMPLES_README, check_imports, example_output, links, relative
 
 
 @pytest.mark.parametrize("script", EXAMPLES, ids=lambda path: path.stem)
-def test_example_runs(script: Path) -> None:
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
+def test_example_compiles_and_its_imports_resolve(script: Path) -> None:
+    code = script.read_text(encoding="utf-8")
+    compile(code, relative(script), "exec")
+    check_imports(code, relative(script))
+
+
+@pytest.mark.parametrize("script", EXAMPLES, ids=lambda path: path.stem)
+def test_example_ends_with_what_it_prints(script: Path) -> None:
+    assert example_output(script), f"{relative(script)} doesn't end with an '# It prints' comment"
+
+
+def test_every_example_is_listed_in_the_examples_readme() -> None:
+    listed = set(links(EXAMPLES_README))
+    unlisted = [script.name for script in EXAMPLES if script.name not in listed]
+    assert not unlisted, f"not listed in examples/README.md: {unlisted}"
 
 
 def test_every_example_is_covered() -> None:
-    """A new `examples/*.py` file is picked up automatically (module-level `EXAMPLES` glob);
-    this only guards against the glob itself silently finding nothing."""
+    """A new `examples/*.py` file is picked up automatically (the `EXAMPLES` glob); this only
+    guards against the glob itself silently finding nothing."""
     assert len(EXAMPLES) >= 6

@@ -7,8 +7,6 @@ here, on every run.
 
 from __future__ import annotations
 
-import ast
-import importlib
 import re
 from pathlib import Path
 
@@ -22,6 +20,7 @@ from tests.docs import (
     URL,
     Block,
     anchors,
+    check_imports,
     links,
     python_blocks,
     relative,
@@ -33,14 +32,7 @@ BLOCKS = [block for page in PAGES for block in python_blocks(page)]
 @pytest.mark.parametrize("block", BLOCKS, ids=lambda block: block.location)
 def test_python_blocks_compile_and_their_imports_resolve(block: Block) -> None:
     block.compiled()
-    for node in ast.walk(ast.parse(block.code, block.location)):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                importlib.import_module(alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            module = importlib.import_module(node.module)
-            missing = [alias.name for alias in node.names if not hasattr(module, alias.name)]
-            assert not missing, f"{block.location}: {node.module} has no {missing}"
+    check_imports(block.code, block.location)
 
 
 @pytest.mark.parametrize("page", PAGES, ids=relative)

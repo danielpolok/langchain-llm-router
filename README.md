@@ -108,8 +108,8 @@ rules can't tell your routes apart. They read meaning, but they add a call to ev
   tuning and how to write your own.
 - **[Using the router](docs/guide.md)** covers reading the decision, streaming, tools, structured
   output, agents, forcing a route for A/B tests, tracing and cost, retries and caching.
-- **[Examples](examples/README.md)** has one runnable script per use case. They use fake models,
-  so they run offline.
+- **[Examples](examples/README.md)** has one runnable script per use case, each a small
+  real-world scenario on the same models as these pages.
 - **[Benchmark](benchmark/README.md)** compares the strategies on cost and answer quality over a
   mixed workload, and shows how to rerun it with your own models.
 - **[Design notes](docs/design.md)** explain why the router is built the way it is. Read these

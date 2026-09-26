@@ -34,7 +34,7 @@ hosted proxy, and replacing `@wrap_model_call` agent middleware. See the
 | `tests/integration_tests/` | tests against real providers |
 | `tests/tracing.py` | walks collected runs and prices them the way LangSmith would |
 | `tests/conventions.py` | parametrises tests over the calling conventions (`invoke`, `stream`, `batch`, async…) |
-| `examples/` | one runnable, offline script per use case; `tests/unit_tests/test_examples.py` runs each in CI |
+| `examples/` | one runnable script per use case, a real-world scenario on the same real models as the docs |
 | `benchmark/` | the cost/quality benchmark — a versioned harness and dataset; see its README |
 | `docs/` | user documentation — `strategies.md` (every strategy, and writing your own) and `guide.md` (everything else) — and `design.md`; `README.md` is the landing page and the index |
 
@@ -80,6 +80,13 @@ such as `GenericFakeChatModel`.
   example changes. A new public name or page needs its docs. Diagrams are Excalidraw drawings in
   `docs/images/`: edit the `.excalidraw` source at excalidraw.com and export it again as the light
   and dark SVGs, with fonts embedded.
+- **Examples** follow the same rules. Each script in `examples/` is one real-world scenario on the
+  documentation's models: the value first in its docstring, then the code, then a closing
+  `# It prints` comment with the real output and what to notice in it.
+  `tests/unit_tests/test_examples.py` checks offline that each compiles, its imports resolve, it
+  shows its output and `examples/README.md` lists it;
+  `tests/integration_tests/test_examples_live.py` runs each script and fails on the same warning
+  mismatch. Refresh the output when a script changes.
 - **Tests** exercise behaviour through the public API and every calling convention
   (`tests/conventions.py`), not internals.
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are
