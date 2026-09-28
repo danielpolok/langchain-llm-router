@@ -78,10 +78,7 @@ usage as usual. `routing_decision(response)` tells you which route answered and 
 
 ## How it works
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-it-works-dark.svg">
-  <img alt="A request enters ChatRouter. Its strategy picks one of the routes (a small model, a frontier model or a code model), or the default route if it can't decide. The chosen model's answer comes back with which route answered and why." src="docs/images/how-it-works.svg" width="820">
-</picture>
+<img alt="A request enters ChatRouter. Its strategy picks one of the routes (a small model, a frontier model or a code model), or the default route if it can't decide. The chosen model's answer comes back with which route answered and why." src="docs/images/how-it-works.svg" width="820">
 
 1. The strategy looks at the **current request**, meaning the user's latest message. It ignores
    tool output and the rest of the conversation, so an agent's tool loop can't change the route.

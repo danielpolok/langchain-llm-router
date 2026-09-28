@@ -78,8 +78,9 @@ such as `GenericFakeChatModel`.
   `tests/integration_tests/test_docs_live.py` runs every block against the real models, and fails
   on a router warning the block's output doesn't show. Rerun it and refresh the outputs when an
   example changes. A new public name or page needs its docs. Diagrams are Excalidraw drawings in
-  `docs/images/`: edit the `.excalidraw` source at excalidraw.com and export it again as the light
-  and dark SVGs, with fonts embedded.
+  `docs/images/`, dark lines on a white background, one image for both light and dark mode: edit
+  the `.excalidraw` source at excalidraw.com with sloppiness set to Architect, and export it again
+  as an SVG with Background on, Dark mode off and fonts embedded.
 - **Examples** follow the same rules. Each script in `examples/` is one real-world scenario on the
   documentation's models: the value first in its docstring, then the code, then a closing
   `# It prints` comment with the real output and what to notice in it.
