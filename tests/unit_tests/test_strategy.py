@@ -490,7 +490,7 @@ def _identifiers(source: str) -> set[str]:
 
 
 def test_the_interface_has_no_private_hooks() -> None:
-    """`RoutingStrategy` is `decide`, `adecide` and `wants_full_context` — nothing
+    """`RoutingStrategy` is `decide`, `adecide`, `wants_full_context` and `lookback` — nothing
     hidden for a built-in to hook into that a custom strategy can't see."""
     members = {
         name
@@ -498,7 +498,7 @@ def test_the_interface_has_no_private_hooks() -> None:
         if not (name.startswith("__") and name.endswith("__")) and name != "_abc_impl"
     }
 
-    assert members == {"decide", "adecide", "wants_full_context"}
+    assert members == {"decide", "adecide", "wants_full_context", "lookback"}
 
 
 def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
@@ -512,8 +512,21 @@ def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
         "tools_bound",
         "messages",
         "config",
+        "previous_requests",
     ]
     assert [f.name for f in fields(RoutingChoice)] == ["route", "reason"]
+
+
+def test_the_optional_members_default_to_todays_behaviour() -> None:
+    """What the stability promise lets a minor release add, it adds with the default that
+    keeps today's behaviour: no earlier messages and no transcript, unless a strategy asks."""
+    request = make_request()
+
+    assert RoutingStrategy.lookback == 0
+    assert RoutingStrategy.wants_full_context is False
+    assert as_strategy(pick_route).lookback == 0
+    assert request.previous_requests == ()
+    assert request.messages is None
 
 
 @pytest.mark.parametrize("cls", BUILTINS)

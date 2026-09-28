@@ -4,8 +4,8 @@ The "cost tiering" use case: simple questions to a small model, complex ones to 
 model. The request's difficulty is *scored* from signals computable on the spot — how much text
 there is, whether it carries code, how many things it asks for, whether it asks for reasoning,
 and whether it carries anything but text — and the score picks a tier. Nothing here calls a
-model, embeddings or a network service, and nothing here is private to the package:
-it is an ordinary `RoutingStrategy` a user could have written.
+model, embeddings or a network service, and nothing here uses the router's private parts: it
+is an ordinary `RoutingStrategy` a user could have written.
 
 Setting one up
 --------------
@@ -69,11 +69,24 @@ and are the evidence a benchmark argues with:
   Local signals cannot read intent — that is the trade a strategy with no extra call makes.
   The embedding and classifier strategies are where a router buys its way out.
 
+Follow-ups
+----------
+"Thanks! Which one does SQLite use?" scores `0.00` on its own, though it continues a question
+that needed the frontier model. With `lookback=N`, the user's previous N messages are scored too,
+and **the hardest of them decides**: a conversation goes up at once and comes back down after N
+easier messages. The reason is the deciding message's, with how far back it was —
+`"difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)"`. On a tie the newer message
+decides, so the current request's own reason is kept whenever it is as hard as any. Only the
+user's own messages are scored, never the model's answers or tool output, and a message with
+nothing to judge — an empty one — is passed over, whether it is the current request or an
+earlier one.
+
 Deciding, and not deciding
 --------------------------
 - **A request with nothing to judge** — no text and no other modality — scores nothing, so the
   strategy abstains with `None` and the router falls back to the default route. It does not
-  warn or raise: that is the router's to report, once.
+  warn or raise: that is the router's to report, once. With `lookback`, that is when none of
+  the considered messages has anything to judge.
 - **A tier that isn't one of the router's routes** is named anyway, never quietly swapped for a
   neighbouring tier. A strategy sees `request.routes` but cannot know which name the application
   meant, so it hands the router the route its policy chose and lets the router report the
@@ -90,9 +103,10 @@ import itertools
 import re
 from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import NamedTuple, TypeAlias
 
 from langchain_llm_router.errors import RoutingError
+from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
 from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 __all__ = [
@@ -268,6 +282,14 @@ DEFAULT_THRESHOLD = 1.0
 # --- The strategy ---
 
 
+class _Scored(NamedTuple):
+    """One message's difficulty: the score, how far back the message is, and what made it."""
+
+    score: float
+    distance: int
+    contributions: Mapping[str, float]
+
+
 class HeuristicStrategy(RoutingStrategy):
     """Routes on a difficulty score built from cheap local signals.
 
@@ -281,11 +303,14 @@ class HeuristicStrategy(RoutingStrategy):
         signals: The whole signal set, replacing `DEFAULT_SIGNALS`. A signal is any
             `Callable[[RoutingRequest], float]` returning `0.0` to `1.0`; one not in
             `DEFAULT_WEIGHTS` weighs `1.0` unless `weights` says otherwise.
+        lookback: How many of the user's previous messages to score as well; the hardest of
+            them and the current request decides. Defaults to `0`, the current request alone.
 
     Raises:
         RoutingError: for configuration that could never route — too few tiers, the wrong
             number of thresholds, thresholds out of order, a weight for a signal that doesn't
-            exist. Raised here, at construction, not once per request.
+            exist, a `lookback` that isn't a non-negative integer. Raised here, at
+            construction, not once per request.
 
     Example:
         ```python
@@ -303,6 +328,7 @@ class HeuristicStrategy(RoutingStrategy):
         thresholds: Sequence[float] | None = None,
         weights: Mapping[str, float] | None = None,
         signals: Mapping[str, Signal] | None = None,
+        lookback: int = 0,
     ) -> None:
         """Check the configuration and keep it.
 
@@ -311,6 +337,7 @@ class HeuristicStrategy(RoutingStrategy):
             thresholds: The score at which each tier gives way to the next.
             weights: What a signal counts for, by name.
             signals: The whole signal set, replacing the defaults.
+            lookback: How many of the user's previous messages to score as well.
 
         Raises:
             RoutingError: for configuration that could never route.
@@ -319,33 +346,42 @@ class HeuristicStrategy(RoutingStrategy):
         self.signals = _checked_signals(signals)
         self.weights = _checked_weights(weights, self.signals)
         self.thresholds = _checked_thresholds(thresholds, len(self.tiers))
+        self.lookback = checked_lookback(lookback)
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """The tier this request's difficulty score falls in, or `None` if there is none.
 
-        Thread-safe, as the interface asks: the strategy holds only its configuration, and
-        scoring touches nothing but the request.
+        With `lookback`, the score is the hardest of the current request and the previous
+        ones, and the newest of them on a tie. Thread-safe, as the interface asks: the strategy
+        holds only its configuration, and scoring touches nothing but the request.
 
         Args:
             request: The current request.
 
         Returns:
-            The tier's route and a reason showing the score, or `None` for an empty request.
+            The tier's route and a reason showing the score, or `None` when no message has
+            anything to score.
         """
-        if not request.text.strip() and not request.modalities - {"text"}:
-            # Nothing to score — an empty user turn. Better the default route than a guess.
+        hardest: _Scored | None = None
+        for distance, message in considered(request, self.lookback):
+            if not message.text.strip() and not message.modalities - {"text"}:
+                # Nothing to score — an empty user turn. Better another message, or the default
+                # route, than a guess.
+                continue
+            contributions = {
+                name: self.weights[name] * signal(message) for name, signal in self.signals.items()
+            }
+            score = sum(contributions.values())
+            if hardest is None or score > hardest.score:
+                hardest = _Scored(score, distance, contributions)
+        if hardest is None:
             return None
-        contributions = {
-            name: self.weights[name] * signal(request) for name, signal in self.signals.items()
-        }
-        score = sum(contributions.values())
         tier = next(
-            (index for index, bar in enumerate(self.thresholds) if score < bar),
+            (index for index, bar in enumerate(self.thresholds) if hardest.score < bar),
             len(self.thresholds),
         )
-        return RoutingChoice(
-            route=self.tiers[tier], reason=self._reason(score, tier, contributions)
-        )
+        reason = self._reason(hardest.score, tier, hardest.contributions)
+        return RoutingChoice(route=self.tiers[tier], reason=reason + how_far_back(hardest.distance))
 
     def _reason(self, score: float, tier: int, contributions: Mapping[str, float]) -> str:
         """The score, the band it fell in, and the signals that made it."""

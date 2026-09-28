@@ -8,7 +8,8 @@ so a string, a list of dicts, `BaseMessage`s and a `ChatPromptValue` all arrive 
 position. Trailing AI and tool messages are skipped, so every call in an agent's tool loop
 routes on the request that started it. System prompts never count, wherever they
 sit, and conversation length plays no part: what comes before the current request reaches a
-strategy only if it opts in with `wants_full_context`.
+strategy only if it opts in — the user's earlier messages with `lookback`, the whole transcript
+with `wants_full_context`.
 
 - A user message is a `HumanMessage` — so a `HumanMessageChunk` too, its subclass — or a
   `ChatMessage` whose role is `"user"` or `"human"`: the roles LangChain itself turns into a
@@ -18,6 +19,17 @@ strategy only if it opts in with `wants_full_context`.
   from.
 - No user message at all (an empty transcript, a system prompt alone) is `None`: the strategy
   can't decide, and the router uses the default route.
+
+**The user's earlier messages.** With `lookback` set to N, the N user messages before the
+current request become `previous_requests`, newest first — fewer when the conversation has
+fewer. They are found by the rules above and read by the rules below, so an AI message, a tool
+result or a system prompt never takes one of the N places, and inside a tool loop they are the
+user messages before the one that started it. An empty user message takes a place like any
+other: position alone decides, as it does for the current request. Each describes its own message
+— `text`, `content_blocks` and `modalities` — and shares the rest with the current request:
+`routes`, `tools_bound`, `config`, and the transcript when the strategy wants it, each previous
+request with a list of its own. Its own `previous_requests` is empty: nesting would repeat what
+the current request already holds.
 
 **How it is read.** Through `BaseMessage.content_blocks`, LangChain's standard
 view of content: string content, standard blocks, and the provider-native blocks LangChain
@@ -50,6 +62,7 @@ LangChain can't translate stays `non_standard`; extraction doesn't guess at it.
 from __future__ import annotations
 
 import copy
+import itertools
 from collections.abc import Sequence
 from typing import Any, cast
 
@@ -84,17 +97,50 @@ def build_request(
     tools_bound: bool,
     wants_full_context: bool,
     config: RunnableConfig,
+    lookback: int = 0,
 ) -> RoutingRequest | None:
     """The request a strategy decides on, or `None` when there is no user message.
 
     "Current request" is the most recent user message by position, ignoring trailing AI and
-    tool messages; the module docstring has the exact rules. `None` means the
-    strategy can't decide, and the router falls back to the default route.
+    tool messages, and `lookback` is how many of the user messages before it become its
+    `previous_requests`; the module docstring has the exact rules. `None` means the strategy
+    can't decide, and the router falls back to the default route.
     """
-    current = next((m for m in reversed(messages) if _is_user_message(m)), None)
-    if current is None:
+    newest_first = (message for message in reversed(messages) if _is_user_message(message))
+    read = list(itertools.islice(newest_first, lookback + 1))
+    if not read:
         return None
-    blocks = _read_blocks(current)
+    current, *previous = read
+
+    def request_for(
+        message: BaseMessage, previous_requests: tuple[RoutingRequest, ...] = ()
+    ) -> RoutingRequest:
+        return _read(
+            message,
+            routes=routes,
+            tools_bound=tools_bound,
+            # A new list each time: the strategy may reorder or trim it without touching the
+            # caller's. The messages in it are the caller's own — a transcript is not worth
+            # deep-copying.
+            messages=list(messages) if wants_full_context else None,
+            config=config,
+            previous_requests=previous_requests,
+        )
+
+    return request_for(current, tuple(request_for(message) for message in previous))
+
+
+def _read(
+    message: BaseMessage,
+    *,
+    routes: tuple[str, ...],
+    tools_bound: bool,
+    messages: list[BaseMessage] | None,
+    config: RunnableConfig,
+    previous_requests: tuple[RoutingRequest, ...],
+) -> RoutingRequest:
+    """One user message as a request, in the context of the call it came with."""
+    blocks = _read_blocks(message)
     text = "\n".join(
         block["text"]
         for block in blocks
@@ -111,10 +157,9 @@ def build_request(
         modalities=frozenset(modalities),
         routes=routes,
         tools_bound=tools_bound,
-        # A new list: the strategy may reorder or trim it without touching the caller's. The
-        # messages in it are the caller's own — a transcript is not worth deep-copying.
-        messages=list(messages) if wants_full_context else None,
+        messages=messages,
         config=config,
+        previous_requests=previous_requests,
     )
 
 

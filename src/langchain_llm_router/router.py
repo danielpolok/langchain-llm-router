@@ -203,8 +203,9 @@ class ChatRouter(BaseChatModel):
     Raises:
         RoutingError: at construction, for no routes, a blank route name, a `default_route` or
             `tool_support_overrides` key that isn't a route, a route wrapped in another
-            runnable, or a `cache=` on the router. Constructing inside a pydantic validator
-            surfaces it as `pydantic.ValidationError`.
+            runnable, a strategy whose `lookback` isn't a non-negative integer, or a `cache=`
+            on the router. Constructing inside a pydantic validator surfaces it as
+            `pydantic.ValidationError`.
         TypeError: for a `strategy` that is neither a strategy instance nor a synchronous
             callable.
         ForcedRouteError: at call time, for a forced route that doesn't exist or can't use the
@@ -325,9 +326,18 @@ class ChatRouter(BaseChatModel):
 
         Before the field's own type check, so `as_strategy` is the single gate on what may be
         a strategy and says so itself. What it rejects is a `TypeError`, which pydantic does
-        not wrap — unlike the `RoutingError` a misnamed route raises.
+        not wrap — unlike the `RoutingError` a misnamed route raises, or a `lookback` that
+        isn't a non-negative integer. That one is checked here as well as on each request, so a
+        custom strategy's class attribute fails when the router is built, as a built-in's
+        constructor argument fails when the strategy is.
         """
-        return None if strategy is None else as_strategy(cast("RoutingCallable", strategy))
+        if strategy is None:
+            return None
+        coerced = as_strategy(cast("RoutingCallable", strategy))
+        problem = _lookback_problem(coerced)
+        if problem is not None:
+            raise RoutingError(problem)
+        return coerced
 
     @model_validator(mode="after")
     def _check_route_references(self) -> ChatRouter:
@@ -895,6 +905,10 @@ class ChatRouter(BaseChatModel):
         via `_forced_decision` — and so does having no strategy at all — either way with no
         strategy run. A request with no user message gives a strategy nothing
         to decide on, so it is not consulted either, and the default route answers.
+
+        Nor is a strategy whose `lookback` is no longer a non-negative integer. Construction
+        checked it, but it is an ordinary attribute, read afresh here, and the default route
+        answers rather than the request failing over it.
         """
         forced = config.get("configurable", {}).get("route")
         if forced is not None:
@@ -903,11 +917,15 @@ class ChatRouter(BaseChatModel):
         strategy = cast("RoutingStrategy | None", self.strategy)
         if strategy is None:
             return RoutingDecision(route=self.default_route, reason="no strategy configured")
+        problem = _lookback_problem(strategy)
+        if problem is not None:
+            return self._fallback(problem, strategy=None)
         request = build_request(
             messages,
             routes=tuple(self.routes),
             tools_bound=tools_are_bound(kwargs),
             wants_full_context=strategy.wants_full_context,
+            lookback=strategy.lookback,
             # Replaced by the strategy run's child config once that run is open.
             config=config,
         )
@@ -978,9 +996,7 @@ class ChatRouter(BaseChatModel):
         strategy_run = run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
-        request = replace(
-            pending.request, config=patch_config(config, callbacks=strategy_run.get_child())
-        )
+        request = _in_run(pending.request, patch_config(config, callbacks=strategy_run.get_child()))
         try:
             with set_config_context(request.config) as context:
                 choice: object = context.run(pending.strategy.decide, request)
@@ -1013,9 +1029,7 @@ class ChatRouter(BaseChatModel):
         strategy_run = await run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
-        request = replace(
-            pending.request, config=patch_config(config, callbacks=strategy_run.get_child())
-        )
+        request = _in_run(pending.request, patch_config(config, callbacks=strategy_run.get_child()))
         try:
             with set_config_context(request.config) as context:
                 choice: object = await coro_with_context(pending.strategy.adecide(request), context)
@@ -1213,14 +1227,22 @@ class _StrategyCall:
         """The strategy run's inputs: what it decides on.
 
         The content blocks and transcript are left out — they are already on the router's run
-        and the route's, and may hold large images.
+        and the route's, and may hold large images. The previous requests, when there are any,
+        are there the same way, as their text and modalities: a reason that says a message
+        "1 message back" decided is read against them.
         """
-        return {
+        inputs: dict[str, Any] = {
             "text": self.request.text,
             "modalities": sorted(self.request.modalities),
             "routes": list(self.request.routes),
             "tools_bound": self.request.tools_bound,
         }
+        if self.request.previous_requests:
+            inputs["previous_requests"] = [
+                {"text": previous.text, "modalities": sorted(previous.modalities)}
+                for previous in self.request.previous_requests
+            ]
+        return inputs
 
 
 class _RouteCall(NamedTuple):
@@ -1229,6 +1251,36 @@ class _RouteCall(NamedTuple):
     route: Runnable[LanguageModelInput, AIMessage]
     config: RunnableConfig
     kwargs: dict[str, Any]
+
+
+def _lookback_problem(strategy: RoutingStrategy) -> str | None:
+    """Why the router can't read `strategy.lookback`, or `None` when it can.
+
+    A non-negative integer, as the built-in strategies require of theirs. A `bool` is refused
+    although Python counts it as an `int`: `True` is a flag where a count was meant.
+    """
+    lookback = strategy.lookback
+    if isinstance(lookback, int) and not isinstance(lookback, bool) and lookback >= 0:
+        return None
+    return (
+        f"{strategy_name(strategy)}'s lookback is {lookback!r}: it must be a non-negative "
+        "integer, the number of the user's previous messages to read"
+    )
+
+
+def _in_run(request: RoutingRequest, config: RunnableConfig) -> RoutingRequest:
+    """`request` with the strategy run's config, and each of its previous requests with it too.
+
+    They are all this call's, and a strategy may hand a previous request to another strategy's
+    `decide`, whose own model or embeddings call must still nest under the strategy's run.
+    """
+    return replace(
+        request,
+        config=config,
+        previous_requests=tuple(
+            replace(previous, config=config) for previous in request.previous_requests
+        ),
+    )
 
 
 def _with_record(answer: AnswerT, decision: RoutingDecision) -> AnswerT:

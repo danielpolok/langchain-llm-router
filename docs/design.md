@@ -32,8 +32,8 @@ the default route with a warning and the reason recorded, instead of failing the
 By default a strategy sees the user's **current request**, not the last message of the history, tool
 output, system prompts or conversation length. Routing on the last message or on length misroutes
 agent loops: after a tool call the "last message" is a tool result, and a long conversation says
-nothing about how hard the next question is. More context (the full messages, the config) is an
-opt-in the strategy declares.
+nothing about how hard the next question is. More context (the user's earlier messages through
+`lookback`, the full messages, the config) is an opt-in the strategy declares.
 
 There is one strategy interface — `decide` / `adecide` over a `RoutingRequest` — and the three
 levels (ready-made, configurable, custom code) are all implementations of it.

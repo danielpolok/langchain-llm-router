@@ -6,7 +6,9 @@ router uses the default route. A strategy that raises, or names a route that doe
 exist, is treated the same way, with a `FallbackWarning` and the cause recorded.
 
 - **Current request by default.** A strategy sees the user's current request. It gets the
-  whole transcript in `RoutingRequest.messages` only if it sets `wants_full_context = True`.
+  user's previous messages in `RoutingRequest.previous_requests` only if it sets `lookback`
+  to how many it wants, and the whole transcript in `RoutingRequest.messages` only if it sets
+  `wants_full_context = True`. The two are independent.
 - **Sync and async.** The router calls `decide` on sync paths and `adecide` on async ones.
   `adecide` defaults to `decide` in a worker thread, so `decide` must be thread-safe. A strategy
   that calls a model overrides `adecide` with a native async implementation.
@@ -15,8 +17,8 @@ exist, is treated the same way, with a `FallbackWarning` and the cause recorded.
   Python 3.11 that is the only way an async call nests there.
 - **A plain function is a strategy too.** `strategy=pick`, where `pick(request)`
   returns a `RoutingChoice`, a bare route name, or `None`. It must be synchronous and sees only
-  the current request; for an async strategy or the whole transcript, subclass
-  `RoutingStrategy`.
+  the current request; for an async strategy, earlier messages or the whole transcript,
+  subclass `RoutingStrategy`.
 
 Stability promise
 -----------------
@@ -24,15 +26,16 @@ The interface is the four names `langchain_llm_router` exports from here: `Routi
 `RoutingRequest`, `RoutingChoice` and `RoutingCallable` — their members and what each means.
 Versions follow semantic versioning; until 1.0, the minor version stands in for the major one.
 
-- **Minor release (compatible):** a new `RoutingRequest` field, added last with a default; a new
-  optional `RoutingStrategy` member whose default keeps today's behaviour, as
-  `wants_full_context` does; new values in `modalities` as LangChain adds content-block types;
-  new wording in the reasons the package writes; a widened type that keeps accepting everything
-  it accepts today, such as `ClassVar[bool]` becoming `bool`.
+- **Minor release (compatible):** a new `RoutingRequest` field, added last with a default, as
+  `previous_requests` was; a new optional `RoutingStrategy` member whose default keeps today's
+  behaviour, as `wants_full_context` and `lookback` are; new values in `modalities` as LangChain
+  adds content-block types; new wording in the reasons the package writes; a widened type that
+  keeps accepting everything it accepts today, such as `ClassVar[bool]` becoming `bool`.
 - **Major release (breaking):** removing or renaming anything above, or retyping it so that code
   which type-checks today no longer does; a new abstract method; changing what `None` or a bare
-  route name means; changing the signature of `decide` or `adecide`; changing
-  `wants_full_context`'s default.
+  route name means; changing the signature of `decide` or `adecide`; changing the default of
+  `wants_full_context` or `lookback`, what `lookback` counts, or the order of
+  `previous_requests`.
 
 Everything else in this module — `as_strategy`, `strategy_name` and the underscore names — is
 the router's own and may change in any release.
@@ -73,6 +76,8 @@ class RoutingRequest:
         tools_bound: Whether tools or structured output are bound to this call.
         messages: The whole transcript, or `None` unless the strategy opts in.
         config: The strategy run's child config, to pass on to any model call.
+        previous_requests: The user's previous messages, newest first, up to the strategy's
+            `lookback`.
 
     Example:
         ```python
@@ -112,6 +117,17 @@ class RoutingRequest:
     """The strategy run's child config. Pass it on to any model or embeddings call, so
     that call is traced and costed under the strategy's run. It identifies a run, not a
     request, so it takes no part in equality or repr."""
+
+    previous_requests: tuple[RoutingRequest, ...] = ()
+    """The user's previous messages, newest first — up to the strategy's `lookback` of them.
+
+    Empty unless the strategy sets `lookback`, and on a conversation's first turn. Each is read
+    by the rules the current request is read by, so system prompts, the model's answers and tool
+    results are never among them, and inside an agent's tool loop they are the messages before
+    the one that started it. Each is itself a `RoutingRequest`, so it can be handed to any
+    strategy's `decide`. Only what it was read from differs: its `text`, `content_blocks` and
+    `modalities` are that message's, while `routes`, `tools_bound`, `messages` and `config` are
+    this call's. Its own `previous_requests` is empty."""
 
     __hash__ = None  # type: ignore[assignment]
 
@@ -153,6 +169,16 @@ class RoutingStrategy(ABC):
 
     wants_full_context: ClassVar[bool] = False
     """Set to `True` to receive the whole transcript in `RoutingRequest.messages`."""
+
+    lookback: int = 0
+    """How many of the user's previous messages to read as well as the current one.
+
+    The router hands up to that many to `decide` in `RoutingRequest.previous_requests`, newest
+    first. `0`, the default, is the current request alone. An ordinary attribute rather than a
+    class constant, so a strategy can take it from its constructor, as the built-in ones do; the
+    router reads it on every request, before it builds the request. It must be a non-negative
+    integer: the router refuses a strategy whose `lookback` isn't one when it is built, and
+    answers from the default route, with a `FallbackWarning`, if it stops being one later."""
 
     @abstractmethod
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
