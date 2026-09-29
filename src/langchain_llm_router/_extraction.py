@@ -25,11 +25,16 @@ current request become `previous_requests`, newest first — fewer when the conv
 fewer. They are found by the rules above and read by the rules below, so an AI message, a tool
 result or a system prompt never takes one of the N places, and inside a tool loop they are the
 user messages before the one that started it. An empty user message takes a place like any
-other: position alone decides, as it does for the current request. Each describes its own message
-— `text`, `content_blocks` and `modalities` — and shares the rest with the current request:
-`routes`, `tools_bound`, `config`, and the transcript when the strategy wants it, each previous
-request with a list of its own. Its own `previous_requests` is empty: nesting would repeat what
-the current request already holds.
+other: position alone decides, as it does for the current request.
+
+Each is the request the router read when that message was the current one, as far as the
+transcript records it. Its `text`, `content_blocks` and `modalities` are that message's, and the
+transcript, when the strategy wants it, is the conversation as it stood then: everything up to
+and including that message, in a list of its own. So "the answer before this message" or "the
+first message" means the same on every request, and the current request still holds the whole
+conversation. What the transcript does not record is this call's: `routes`, `tools_bound` and
+`config`. Its own `previous_requests` is empty: nesting would repeat what the current request
+already holds.
 
 **How it is read.** Through `BaseMessage.content_blocks`, LangChain's standard
 view of content: string content, standard blocks, and the provider-native blocks LangChain
@@ -106,28 +111,34 @@ def build_request(
     `previous_requests`; the module docstring has the exact rules. `None` means the strategy
     can't decide, and the router falls back to the default route.
     """
-    newest_first = (message for message in reversed(messages) if _is_user_message(message))
+    newest_first = (
+        index for index in reversed(range(len(messages))) if _is_user_message(messages[index])
+    )
     read = list(itertools.islice(newest_first, lookback + 1))
     if not read:
         return None
     current, *previous = read
 
     def request_for(
-        message: BaseMessage, previous_requests: tuple[RoutingRequest, ...] = ()
+        index: int, until: int, previous_requests: tuple[RoutingRequest, ...] = ()
     ) -> RoutingRequest:
         return _read(
-            message,
+            messages[index],
             routes=routes,
             tools_bound=tools_bound,
-            # A new list each time: the strategy may reorder or trim it without touching the
-            # caller's. The messages in it are the caller's own — a transcript is not worth
-            # deep-copying.
-            messages=list(messages) if wants_full_context else None,
+            # The transcript as it stood when this message was the current request. A new list
+            # each time: the strategy may reorder or trim it without touching the caller's. The
+            # messages in it are the caller's own — a transcript is not worth deep-copying.
+            messages=list(messages[:until]) if wants_full_context else None,
             config=config,
             previous_requests=previous_requests,
         )
 
-    return request_for(current, tuple(request_for(message) for message in previous))
+    return request_for(
+        current,
+        len(messages),
+        tuple(request_for(index, until=index + 1) for index in previous),
+    )
 
 
 def _read(
@@ -139,7 +150,7 @@ def _read(
     config: RunnableConfig,
     previous_requests: tuple[RoutingRequest, ...],
 ) -> RoutingRequest:
-    """One user message as a request, in the context of the call it came with."""
+    """One user message as a request, with the transcript as it stood then and the call's rest."""
     blocks = _read_blocks(message)
     text = "\n".join(
         block["text"]

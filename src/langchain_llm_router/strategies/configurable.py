@@ -160,6 +160,12 @@ class WithHistory(ConfigurableStrategy):
     wants_full_context = True
 ```
 
+With `lookback` as well, a predicate tried on an earlier message sees the conversation as it
+stood when that message was sent, up to and including it. "The answer just before this message"
+is then that message's own, and not the current one's. The flip side is a question about the
+conversation as a whole, such as how long it is: tried on an earlier message, it is answered for
+the conversation as it was then.
+
 The ready-made strategies are not presets
 -----------------------------------------
 `KeywordStrategy` and `HeuristicStrategy` are left as they are; both use cases are configuration

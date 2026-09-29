@@ -574,8 +574,10 @@ question before it. `Sticky` differs in never moving a conversation once it has 
   default route answers and a `FallbackWarning` says why.
 - **Set `lookback` to read earlier messages.** With `lookback = 2` on the class, or
   `self.lookback = 2` in `__init__`, `request.previous_requests` holds up to two of the user's
-  previous messages, newest first. Each is a `RoutingRequest` itself, so you can hand it to
-  another strategy's `decide`. A plain function always sees the current request alone.
+  previous messages, newest first. Each is the `RoutingRequest` the router read when that
+  message arrived, so you can hand it to another strategy's `decide`. Its `messages` end at that
+  message; the whole conversation is on the current request. A plain function always sees the
+  current request alone.
 
 ### What a strategy sees
 
@@ -590,7 +592,7 @@ question before it. `Sticky` differs in never moving a conversation once it has 
 | `tools_bound` | Whether tools or structured output are bound to the call |
 | `messages` | The whole conversation, only if the strategy sets `wants_full_context = True` |
 | `config` | The call's runtime config. Pass it to any model your strategy calls |
-| `previous_requests` | Up to `lookback` of the user's previous messages, newest first, each a `RoutingRequest` of its own. Empty unless the strategy sets `lookback` |
+| `previous_requests` | Up to `lookback` of the user's previous messages, newest first, each the `RoutingRequest` read when that message arrived. Empty unless the strategy sets `lookback` |
 
 ### Stability promise
 

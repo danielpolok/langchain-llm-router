@@ -698,9 +698,9 @@ def test_in_a_tool_loop_the_earlier_messages_are_the_ones_before_the_loop(
 
 def test_an_earlier_message_is_read_as_the_current_request_is() -> None:
     """Each earlier message is read like the current request — its text, content blocks and
-    modalities — and shares everything that belongs to the call: routes, tools, config, and
-    the transcript when the strategy wants it, in a list of its own. It has no earlier messages
-    of its own."""
+    modalities — with the transcript, when the strategy wants it, as it stood when that message
+    was sent. What the transcript doesn't record is the call's: routes, tools and config. It
+    has no earlier messages of its own."""
     config = RunnableConfig(tags=["strategy-run"])
     transcript: list[BaseMessage] = [*MULTIMODAL, AIMessage("A tabby."), HumanMessage("Is it old?")]
 
@@ -720,9 +720,26 @@ def test_an_earlier_message_is_read_as_the_current_request_is() -> None:
     ]
     assert (previous.routes, previous.tools_bound, previous.config) == (ROUTES, True, config)
     assert previous.config is config
-    assert previous.messages == request.messages == transcript
-    assert previous.messages is not request.messages
+    assert request.messages == transcript
+    assert previous.messages == MULTIMODAL
     assert previous.previous_requests == ()
+
+
+def test_an_earlier_messages_transcript_ends_at_that_message() -> None:
+    """An earlier request carries the conversation as it stood when its message was sent: up
+    to and including it, and nothing the model or its tools added after it — while the current
+    request carries the whole of it. So it is what the router read then, and where its message
+    sits is the length of its transcript."""
+    transcript: list[BaseMessage] = [*AGENT_TOOL_LOOP, HumanMessage("And tomorrow?")]
+
+    request = extract(transcript, lookback=1, wants_full_context=True)
+
+    assert request is not None
+    (previous,) = request.previous_requests
+    assert request.messages == transcript
+    assert previous.messages == FIRST_CALL  # the tool loop that followed it is not there yet
+    assert previous == extract(FIRST_CALL, wants_full_context=True)
+    assert transcript[len(previous.messages) - 1] is FIRST_CALL[-1]
 
 
 def test_every_input_form_of_a_conversation_produces_the_same_earlier_messages() -> None:

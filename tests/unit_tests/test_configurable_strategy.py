@@ -1525,6 +1525,87 @@ def test_tools_bound_is_a_property_of_the_call_not_of_a_message() -> None:
     assert strategy.decide(conversation(earlier, current, lookback=1)) is None
 
 
+def replies_to_the_model(request: RoutingRequest) -> bool:
+    """The model's message just before the user's latest one asked a question."""
+    assert request.messages is not None
+    last_user = max(i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage))
+    before = request.messages[last_user - 1] if last_user else None
+    return isinstance(before, AIMessage) and before.text.rstrip().endswith("?")
+
+
+def is_long(request: RoutingRequest) -> bool:
+    """Three user messages or more."""
+    assert request.messages is not None
+    return sum(isinstance(message, HumanMessage) for message in request.messages) >= 3
+
+
+class WithHistory(ConfigurableStrategy):
+    wants_full_context = True
+
+
+def test_a_predicate_reads_the_conversation_as_it_stood_when_the_message_was_sent() -> None:
+    """With the whole transcript and `lookback`, a predicate tried on an earlier message sees
+    the conversation up to that message. "The answer just before this message" is then that
+    message's own: the model asked its question before "Yes please", not before the contract.
+    The flip side, documented: a question about the conversation as a whole is answered for
+    the conversation as it was then, so it holds on the current request alone here."""
+    messages: list[BaseMessage] = [
+        HumanMessage("Review this contract"),
+        AIMessage("Done. The liability cap is unusually low."),
+        HumanMessage("Thanks"),
+        AIMessage("Shall I check the payment terms too?"),
+        HumanMessage("Yes please"),
+    ]
+    request = build_request(
+        messages,
+        routes=ROUTES,
+        tools_bound=False,
+        wants_full_context=True,
+        config=RunnableConfig(),
+        lookback=2,
+    )
+    assert request is not None
+    considered = [request, *request.previous_requests]
+    strategy = WithHistory(
+        [Rule("frontier", all_of(keywords("contract"), predicate(replies_to_the_model)))],
+        lookback=2,
+    )
+
+    assert [replies_to_the_model(message) for message in considered] == [True, False, False]
+    assert [is_long(message) for message in considered] == [True, False, False]
+    assert strategy.decide(request) is None
+
+
+def test_a_predicate_finds_an_earlier_message_that_did_answer_the_model() -> None:
+    """The same rule matches where the message with the keyword really was a reply to the
+    model's question, however many turns ago within the window."""
+    strategy = WithHistory(
+        [Rule("frontier", all_of(keywords("contract"), predicate(replies_to_the_model)))],
+        lookback=2,
+    )
+    messages: list[BaseMessage] = [
+        HumanMessage("Hi"),
+        AIMessage("What would you like me to review?"),
+        HumanMessage("This contract"),
+        AIMessage("Done. The liability cap is unusually low."),
+        HumanMessage("And in Germany?"),
+    ]
+    request = build_request(
+        messages,
+        routes=ROUTES,
+        tools_bound=False,
+        wants_full_context=True,
+        config=RunnableConfig(),
+        lookback=2,
+    )
+
+    assert request is not None
+    assert strategy.decide(request) == RoutingChoice(
+        "frontier",
+        "rule #1 matched: keyword 'contract' and replies_to_the_model (1 message back)",
+    )
+
+
 def test_a_not_rule_decides_on_the_current_message() -> None:
     """The documented limit of `not_` with `lookback`: it holds for an easy follow-up itself,
     so the order-independent spelling of cost tiering sends "ok" to `small` after a long

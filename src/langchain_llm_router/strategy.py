@@ -66,7 +66,9 @@ class RoutingRequest:
     """What a strategy decides on: the current request, and the context it may use.
 
     Frozen but not hashable: `content_blocks` and `messages` are lists, so a generated hash
-    would fail on them anyway. To cache decisions, key on a hashable part such as `text`.
+    would fail on them anyway. To cache decisions, key on a hashable part such as `text` — and,
+    for a strategy with a `lookback`, on the previous requests' `text` as well, since the same
+    follow-up can decide differently after different messages.
 
     Attributes:
         text: The current request's text.
@@ -74,7 +76,7 @@ class RoutingRequest:
         modalities: The modalities present, from a closed vocabulary.
         routes: The available route names, in declaration order.
         tools_bound: Whether tools or structured output are bound to this call.
-        messages: The whole transcript, or `None` unless the strategy opts in.
+        messages: The transcript up to now, or `None` unless the strategy opts in.
         config: The strategy run's child config, to pass on to any model call.
         previous_requests: The user's previous messages, newest first, up to the strategy's
             `lookback`.
@@ -109,7 +111,10 @@ class RoutingRequest:
     """Tools or structured output are bound to this call."""
 
     messages: list[BaseMessage] | None = None
-    """The whole transcript — only when the strategy sets `wants_full_context`."""
+    """The transcript — only when the strategy sets `wants_full_context`.
+
+    The whole of it on the current request. On a previous request, the conversation as it stood
+    when that message was sent: everything up to and including it."""
 
     config: RunnableConfig = field(
         default_factory=lambda: RunnableConfig(), compare=False, repr=False
@@ -125,9 +130,11 @@ class RoutingRequest:
     by the rules the current request is read by, so system prompts, the model's answers and tool
     results are never among them, and inside an agent's tool loop they are the messages before
     the one that started it. Each is itself a `RoutingRequest`, so it can be handed to any
-    strategy's `decide`. Only what it was read from differs: its `text`, `content_blocks` and
-    `modalities` are that message's, while `routes`, `tools_bound`, `messages` and `config` are
-    this call's. Its own `previous_requests` is empty."""
+    strategy's `decide`: it is the request the router read when that message was the current
+    one, as far as the transcript records it. Its `text`, `content_blocks` and `modalities` are
+    that message's, and its `messages` end at that message. What the transcript doesn't record
+    is this call's: `routes`, `tools_bound` and `config`. Its own `previous_requests` is
+    empty."""
 
     __hash__ = None  # type: ignore[assignment]
 

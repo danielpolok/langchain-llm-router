@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from typing import Any, NamedTuple, cast
 
 import pytest
@@ -448,8 +449,8 @@ def test_lookback_and_the_full_transcript_are_independent(
     recording: type[Recording], lookback: int
 ) -> None:
     """Each opt-in gives what it names and nothing else: `lookback` the user's previous
-    messages, `wants_full_context` the transcript — on the current request and, when both are
-    on, on each previous request too, which is the same call's, each in a list of its own."""
+    messages, `wants_full_context` the transcript — the whole of it on the current request and,
+    when both are on, on each previous request the part up to its own message."""
     strategy = recording(lookback=lookback)
     conversation = [HumanMessage(text) for text in LEGAL_THEN_CODE[:3]]
 
@@ -458,9 +459,29 @@ def test_lookback_and_the_full_transcript_are_independent(
     (request,) = strategy.requests
     assert len(request.previous_requests) == lookback
     assert request.messages == (conversation if recording.wants_full_context else None)
-    for previous in request.previous_requests:
-        assert previous.messages == request.messages
-        assert previous.messages is None or previous.messages is not request.messages
+    assert [previous.messages for previous in request.previous_requests] == [
+        conversation[: len(conversation) - back] if recording.wants_full_context else None
+        for back in range(1, lookback + 1)
+    ]
+
+
+@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
+async def test_an_earlier_request_is_the_one_read_when_that_message_arrived(
+    convention: AnyConvention,
+) -> None:
+    """A previous request is the request the strategy was handed when that message was the
+    current one — its text, its content and the conversation as it stood then — bar the
+    previous requests of its own, which it doesn't carry. Handing it to a strategy that reads
+    the transcript asks that strategy about that moment, not about now."""
+    strategy = RecordingTranscripts(lookback=2)
+
+    await converse(make_router(strategy), convention, LEGAL_THEN_CODE[:3])
+
+    first, second, third = strategy.requests
+    assert third.previous_requests == (
+        replace(second, previous_requests=()),
+        replace(first, previous_requests=()),
+    )
 
 
 def test_a_system_prompt_and_the_models_answers_never_take_a_place() -> None:
