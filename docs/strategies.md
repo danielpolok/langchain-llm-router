@@ -316,6 +316,9 @@ reasons. With `gemini-embedding-001`, related requests scored about 0.62 to 0.64
 ones about 0.55, so 0.6 separates them. More varied examples per route help more than a finely
 tuned threshold.
 
+With `lookback=2`, a request that clears no threshold is routed by the newest of the user's two
+previous messages that does. See [Follow-up questions](#follow-up-questions-lookback).
+
 ## `ClassifierStrategy`: let a small model choose
 
 Describe each route in plain words, and a chat model reads the request and picks one. This is the
@@ -355,6 +358,10 @@ The classifier's call appears in your trace and in token usage, under the strate
 > On [our benchmark](../benchmark/README.md), the classifier picked the intended tier for 31 of 32
 > requests, but still saved less than the free heuristic, because its own call is billed too.
 > Reach for it when the free strategies measurably misroute your traffic.
+
+With `lookback=2`, the prompt also shows the user's two previous messages, so the model reads a
+follow-up in their light. See [Follow-up questions](#follow-up-questions-lookback), which also
+covers caching the classifier's answers.
 
 ## Follow-up questions: `lookback`
 
@@ -410,6 +417,8 @@ Each strategy reads the extra messages its own way:
 | `HeuristicStrategy` | The hardest of the messages decides. A conversation moves up at once, and back down after N easier messages. |
 | `KeywordStrategy` | The newest message with a keyword match decides. |
 | `ConfigurableStrategy` | The newest message that a rule matches decides. An `always()` rule applies only when none of them matched. |
+| `EmbeddingStrategy` | The newest message that clears `threshold` decides. |
+| `ClassifierStrategy` | The previous messages go into the prompt as context, and the model classifies the latest one in their light. |
 
 With `KeywordStrategy`, a follow-up with no keyword of its own goes where the question before it
 went:
@@ -462,21 +471,122 @@ frontier rule 'legal' matched: keyword 'contract'
 frontier rule 'legal' matched: keyword 'contract' (1 message back)
 ```
 
+With `EmbeddingStrategy`, a follow-up that is close to no example goes where the question before
+it went. Set the threshold above where a vague message lands first. Against these examples,
+`gemini-embedding-001` scores a short message that says nothing about programming at about 0.6,
+so at the 0.6 used above a follow-up clears it by chance and lookback never gets a turn. Here the
+threshold is 0.7:
+
+```python
+router = ChatRouter(
+    routes={"general": small, "coder": frontier},
+    default_route="general",
+    strategy=EmbeddingStrategy(
+        embeddings,
+        {
+            "coder": [
+                "Why is my Python function raising a KeyError?",
+                "Refactor this SQL query so it runs faster",
+                "Write a unit test for this class",
+            ],
+        },
+        threshold=0.7,
+        lookback=2,
+    ),
+)
+
+chat(
+    router,
+    "My Python function raises a KeyError when it reads the config file",
+    "Alright, and how would you explain that to a child?",
+    "Great, what should I cook for dinner tonight?",
+)
+```
+
+```text
+coder    embedding similarity 0.79 >= 0.70 to 'Why is my Python function raising a KeyError?' (route 'coder')
+coder    embedding similarity 0.79 >= 0.70 to 'Why is my Python function raising a KeyError?' (route 'coder') (1 message back)
+coder    embedding similarity 0.79 >= 0.70 to 'Why is my Python function raising a KeyError?' (route 'coder') (2 messages back)
+```
+
+The follow-up stayed with the programming question, and so did the question about dinner: it
+matches no example either, and to an embedding a message that matches nothing looks the same
+whether it continues the topic or leaves it.
+
+`ClassifierStrategy` can tell the two apart, because the model reads the earlier messages with
+the new one. "Still the same. Any other ideas?" on its own goes to `general`. After a
+programming question, it goes to `coder`:
+
+```python
+router = ChatRouter(
+    routes={"general": small, "coder": frontier},
+    default_route="general",
+    strategy=ClassifierStrategy(
+        small,
+        {
+            "coder": "programming: code, bugs, errors, SQL, tooling",
+            "general": "anything that isn't programming",
+        },
+        lookback=2,
+    ),
+)
+
+chat(
+    router,
+    "My deploy script fails with KeyError: 'user'",
+    "Still the same. Any other ideas?",
+    "Thanks! What should I cook for dinner tonight?",
+)
+```
+
+```text
+coder    the classifier chose 'coder': programming: code, bugs, errors, SQL, tooling
+coder    the classifier chose 'coder': programming: code, bugs, errors, SQL, tooling
+general  the classifier chose 'general': anything that isn't programming
+```
+
+The prompt lists the earlier messages, oldest first, as context, and asks the model to classify
+only the latest one. No single message decided, so the reason has no "messages back". The model
+is not told which route answered before, so one misrouted turn doesn't pull the next ones after
+it. It also doesn't see the model's answers, which are long and would make every classification
+cost more.
+
 What to know before you turn it on:
 
 - **Only the user's messages count.** The model's answers, tool output and the system prompt
   never take one of the N places. Inside an agent's tool loop, the earlier messages are the ones
   before the question that started the loop.
-- **It costs nothing extra** with these three strategies, which make no call.
+- **What it costs depends on the strategy.** The first three make no call, so it costs nothing.
+  `EmbeddingStrategy` embeds each message once: it remembers the result for the last few thousand
+  messages, so a turn embeds only its own new message, and at most N+1 when earlier ones have been
+  forgotten, such as after a restart. `ClassifierStrategy` makes one call as before, with up to N
+  more messages in the prompt.
 - **Keep N small.** Two or three is usually enough, since a follow-up leans on the last message
   or two. A larger N also holds a topic longer after the user has moved on: a question about
   something else still goes to `coder` while a keyword match is within N messages.
-- **The newest match still wins.** Lookback helps a message with no signal of its own. It can't
-  correct one with a misleading signal: in a legal conversation, "Which article of the civil code
-  covers this?" matches `code`. Embeddings or a classifier read meaning instead of words.
+- **The newest match still wins.** Lookback helps a message with no signal of its own. The rule
+  and embedding strategies can't correct one with a misleading signal: in a legal conversation,
+  "Which article of the civil code covers this?" matches `code`. The classifier reads it in the
+  light of the legal question before it.
 - **Say "everything else" with `always()`.** In `ConfigurableStrategy`, a `not_(...)` rule holds
   for the follow-up itself, so it decides before lookback reaches the question that set the
   topic.
+
+**Caching the classifier.** Give the classifier model LangChain's exact cache, and the same
+prompt is classified only once:
+
+```python
+from langchain_core.caches import InMemoryCache
+
+classifier = init_chat_model("google_genai:gemini-3.5-flash-lite", cache=InMemoryCache())
+```
+
+Pass `classifier` to `ClassifierStrategy` in place of `small`. Inside an agent's tool loop, every
+step shows the classifier the same messages, since tool calls and results take none of the
+places, so a loop makes one classifier call instead of one per step, and its route can't change
+halfway through. Don't give the classifier a semantic cache, which answers a request with
+whatever a similar earlier one got. That turns the classifier into an embedding lookup against
+past requests, without a threshold or a reason you can read.
 
 ## Your own strategy
 

@@ -26,12 +26,13 @@ from __future__ import annotations
 import math
 import re
 import warnings
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from langchain_core.embeddings import DeterministicFakeEmbedding, Embeddings
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
@@ -46,9 +47,10 @@ from langchain_llm_router import (
     routing_decision,
 )
 from langchain_llm_router._extraction import build_request
+from langchain_llm_router.strategies import embedding
 from langchain_llm_router.strategies.embedding import EmbeddingStrategy
 from tests.conventions import Convention, respond
-from tests.fakes import FakeChatModel
+from tests.fakes import CountingEmbeddings, FakeChatModel
 from tests.tracing import StartLog
 
 EXAMPLES = {
@@ -82,33 +84,6 @@ def fake_routes() -> dict[str, BaseChatModel]:
 
 def routing_warnings(caught: list[warnings.WarningMessage]) -> list[warnings.WarningMessage]:
     return [warning for warning in caught if issubclass(warning.category, RoutingWarning)]
-
-
-class CountingEmbeddings(Embeddings):
-    """Wraps a real fake, counting each kind of call — for the "embedded once" tests."""
-
-    def __init__(self, inner: Embeddings) -> None:
-        self.inner = inner
-        self.document_calls = 0
-        self.adocument_calls = 0
-        self.query_calls = 0
-        self.aquery_calls = 0
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        self.document_calls += 1
-        return self.inner.embed_documents(texts)
-
-    def embed_query(self, text: str) -> list[float]:
-        self.query_calls += 1
-        return self.inner.embed_query(text)
-
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        self.adocument_calls += 1
-        return self.inner.embed_documents(texts)
-
-    async def aembed_query(self, text: str) -> list[float]:
-        self.aquery_calls += 1
-        return self.inner.embed_query(text)
 
 
 FAILURE = ConnectionError("the embeddings endpoint is down")
@@ -502,3 +477,190 @@ async def test_through_the_router_an_embedding_strategy_is_an_ordinary_strategy(
     assert record is not None
     assert record.route == "coder"
     assert record.fallback is False
+
+
+# --- Follow-ups: the user's previous messages, with `lookback` ---
+
+UNMATCHED = ("it still fails", "any idea why?", "please help")
+"""Messages that match no example: `DeterministicFakeEmbedding` puts them nowhere near one."""
+
+
+def conversation(*texts: str) -> RoutingRequest:
+    """The last of `texts` as the current request, the others as the user's earlier messages."""
+    *earlier, current = texts
+    return replace(
+        make_request(current),
+        previous_requests=tuple(make_request(text) for text in reversed(earlier)),
+    )
+
+
+def strategy_with(lookback: int, embeddings: Embeddings | None = None) -> EmbeddingStrategy:
+    return EmbeddingStrategy(
+        embeddings or DeterministicFakeEmbedding(size=32),
+        EXAMPLES,
+        threshold=0.99,
+        lookback=lookback,
+    )
+
+
+SUPPORT = "embedding similarity 1.00 >= 0.99 to 'reset my password' (route 'support')"
+CODER = "embedding similarity 1.00 >= 0.99 to 'fix this stack trace' (route 'coder')"
+
+
+@pytest.mark.parametrize("convention", ["decide", "adecide"])
+async def test_a_follow_up_goes_where_the_message_before_it_went(convention: str) -> None:
+    """A follow-up close to no example is routed by the message before it, and the reason says
+    so, in the words every strategy uses."""
+    strategy = strategy_with(1)
+    request = conversation("reset my password", UNMATCHED[0])
+
+    choice = strategy.decide(request) if convention == "decide" else await strategy.adecide(request)
+
+    assert choice == RoutingChoice("support", f"{SUPPORT} (1 message back)")
+
+
+def test_the_newest_message_that_clears_the_threshold_decides() -> None:
+    """Messages are tried newest first, so the topic the user moved to wins; and a current
+    request that clears the bar wins outright, with the reason it has without lookback, before
+    any earlier message is embedded."""
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    strategy = strategy_with(2, embeddings)
+
+    assert strategy.decide(
+        conversation("reset my password", "fix this stack trace", UNMATCHED[0])
+    ) == RoutingChoice("coder", f"{CODER} (1 message back)")
+    embeddings.queries.clear()
+    assert strategy.decide(
+        conversation("fix this stack trace", "reset my password")
+    ) == RoutingChoice("support", SUPPORT)
+    # The first request stopped at the message that decided, so this one is new; and the
+    # earlier message isn't read at all, since the current one decides.
+    assert embeddings.queries == ["reset my password"]
+
+
+def test_a_current_request_that_decides_embeds_no_earlier_message() -> None:
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+
+    strategy_with(2, embeddings).decide(conversation(*UNMATCHED[:2], "reset my password"))
+
+    assert embeddings.queries == ["reset my password"]
+
+
+def test_lookback_reaches_as_far_as_it_says_and_passes_over_messages_with_no_text() -> None:
+    """A message with no text takes a place but has nothing to embed; up to `lookback` places,
+    and no further."""
+    request = conversation("reset my password", "   ", UNMATCHED[0])
+
+    assert strategy_with(2).decide(request) == RoutingChoice(
+        "support", f"{SUPPORT} (2 messages back)"
+    )
+    assert strategy_with(1).decide(request) is None
+    assert strategy_with(0).decide(request) is None
+
+
+def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> None:
+    request = conversation("reset my password", *UNMATCHED[:2])
+
+    assert strategy_with(1).decide(request) is None
+    assert strategy_with(2).decide(request) == RoutingChoice(
+        "support", f"{SUPPORT} (2 messages back)"
+    )
+
+
+@pytest.mark.parametrize("convention", ["decide", "adecide"])
+async def test_each_message_is_embedded_once_however_many_turns_read_it(convention: str) -> None:
+    """The cost bound: every earlier message was the current request on its own turn, and its
+    outcome is remembered then, so a turn embeds only its own new message — and a message
+    repeated as-is, as each step of an agent's tool loop repeats it, embeds nothing."""
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    strategy = strategy_with(2, embeddings)
+    turns = [UNMATCHED[: n + 1] for n in range(3)] + [UNMATCHED]
+
+    for turn in turns:
+        request = conversation(*turn)
+        if convention == "decide":
+            assert strategy.decide(request) is None
+        else:
+            assert await strategy.adecide(request) is None
+
+    assert embeddings.queries == list(UNMATCHED)
+    assert embeddings.query_calls + embeddings.aquery_calls == len(UNMATCHED)
+
+
+def test_without_lookback_nothing_is_remembered() -> None:
+    """With `lookback=0` the strategy is what it was: every request is embedded."""
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    strategy = strategy_with(0, embeddings)
+
+    for _ in range(2):
+        strategy.decide(make_request(UNMATCHED[0]))
+
+    assert embeddings.queries == [UNMATCHED[0]] * 2
+
+
+def test_what_is_remembered_is_bounded_and_the_least_recently_read_goes_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(embedding, "_REMEMBERED", 2)
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    strategy = strategy_with(1, embeddings)
+    first, second, third = UNMATCHED
+
+    strategy.decide(make_request(first))
+    strategy.decide(make_request(second))
+    strategy.decide(make_request(first))  # read again: now the most recent
+    strategy.decide(make_request(third))  # `second` is forgotten
+    strategy.decide(conversation(second, first))
+
+    assert embeddings.queries == [first, second, third, second]
+
+
+def test_a_copy_made_by_with_lookback_shares_what_the_original_remembers() -> None:
+    """Same embeddings, same examples: the copy has no reason to embed anything again."""
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    original = strategy_with(1, embeddings)
+    original.decide(conversation(UNMATCHED[0], UNMATCHED[1]))
+
+    copied = original.with_lookback(2)
+    copied.decide(conversation(*UNMATCHED))
+
+    assert embeddings.queries == [UNMATCHED[1], UNMATCHED[0], UNMATCHED[2]]
+    assert embeddings.document_calls == 1
+
+
+@pytest.mark.parametrize("convention", ["invoke", "ainvoke"])
+async def test_a_remembered_message_makes_no_call_and_opens_no_run(
+    convention: Convention,
+) -> None:
+    """Tracing is as it was: one `embed_query` run per embedding call. The follow-up's is the
+    only one on its turn, since the message before it was embedded on its own turn."""
+    strategy = strategy_with(1)
+    router = ChatRouter(routes=fake_routes(), default_route="coder", strategy=strategy)
+    collector = RunCollectorCallbackHandler()
+
+    await respond(router, convention, "reset my password")
+    message = await respond(
+        router,
+        convention,
+        [HumanMessage("reset my password"), AIMessage("done"), HumanMessage(UNMATCHED[0])],
+        {"callbacks": [collector]},
+    )
+
+    assert message.content == "support answer"
+    (router_run,) = collector.traced_runs
+    strategy_run, _route_run = router_run.child_runs
+    assert [run.inputs for run in strategy_run.child_runs] == [{"text": UNMATCHED[0]}]
+
+
+@pytest.mark.parametrize("lookback", [-1, True, 1.5, "2", None])
+def test_lookback_must_be_a_count_of_messages(lookback: Any) -> None:
+    with pytest.raises(
+        RoutingError,
+        match=(
+            r"^lookback must be a non-negative integer, the number of the user's previous "
+            rf"messages to read, got {re.escape(repr(lookback))}$"
+        ),
+    ):
+        EmbeddingStrategy(
+            DeterministicFakeEmbedding(size=8), EXAMPLES, threshold=0.5, lookback=lookback
+        )

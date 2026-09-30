@@ -6,13 +6,15 @@ it" — so on its own it falls back to the default route or drops to the small m
 
 The two conversations below are the specification: each turn's route and reason, today and with
 `lookback=2`, through `ChatRouter` under every calling convention, for `KeywordStrategy`, the
-equivalent `ConfigurableStrategy` and `HeuristicStrategy`. Then the interface a custom strategy
+equivalent `ConfigurableStrategy`, `HeuristicStrategy`, and the two strategies that call a model,
+`EmbeddingStrategy` and `ClassifierStrategy`, on fakes. Then the interface a custom strategy
 gets (`lookback`, `previous_requests`), an agent's tool loop, the router's own checks, and the
 trace. Each strategy's own rules for reading earlier messages are tested with the strategy.
 """
 
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import replace
@@ -20,7 +22,9 @@ from typing import Any, NamedTuple, cast
 
 import pytest
 from langchain.agents import create_agent
+from langchain_core.caches import InMemoryCache
 from langchain_core.callbacks import BaseCallbackManager
+from langchain_core.embeddings import DeterministicFakeEmbedding
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -38,7 +42,9 @@ from pydantic import ValidationError
 
 from langchain_llm_router import (
     ChatRouter,
+    ClassifierStrategy,
     ConfigurableStrategy,
+    EmbeddingStrategy,
     FallbackWarning,
     HeuristicStrategy,
     KeywordStrategy,
@@ -52,7 +58,13 @@ from langchain_llm_router import (
 )
 from langchain_llm_router.strategies.configurable import Rule, keywords
 from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, AnyConvention, Convention, respond
-from tests.fakes import FakeChatModel, ToolCallingFakeChatModel, call_log
+from tests.fakes import (
+    CountingEmbeddings,
+    FakeChatModel,
+    PromptReadingFakeChatModel,
+    ToolCallingFakeChatModel,
+    call_log,
+)
 from tests.tracing import model_runs, walk
 
 # --- The two conversations, and what each turn does ---
@@ -101,6 +113,53 @@ def configurable_strategy(lookback: int) -> ConfigurableStrategy:
 
 def heuristic_strategy(lookback: int) -> HeuristicStrategy:
     return HeuristicStrategy(*TIER_ROUTES, lookback=lookback)
+
+
+EMBEDDING_EXAMPLES = {"legal": [LEGAL_THEN_CODE[0]], "coder": [LEGAL_THEN_CODE[3]]}
+"""One example per route, each a message of the conversation word for word: fake embeddings
+carry no meaning, so a message matches an example only when it is that example."""
+
+
+def embedding_strategy(lookback: int) -> EmbeddingStrategy:
+    return EmbeddingStrategy(
+        DeterministicFakeEmbedding(size=32), EMBEDDING_EXAMPLES, threshold=0.99, lookback=lookback
+    )
+
+
+def similar_to(route: str) -> str:
+    """The reason `embedding_strategy` gives when a message is `route`'s example."""
+    (example,) = EMBEDDING_EXAMPLES[route]
+    return f"embedding similarity 1.00 >= 0.99 to {example!r} (route {route!r})"
+
+
+ROUTE_DESCRIPTIONS = {
+    "general": "anything else",
+    "coder": "programming",
+    "legal": "law",
+}
+
+
+def reads_keywords(prompt: str) -> str | None:
+    """How the fake classifier chooses: the route of the last keyword in the messages it is
+    shown, the newest message's own if it has one. Like a model, it reads every message the
+    prompt shows; unlike one, it can be fooled by a keyword out of place."""
+    _menu, shown = prompt.split("\n\n", 1)
+    found = [
+        (match.start(), route)
+        for route, words in KEYWORD_RULES.items()
+        for word in words
+        for match in re.finditer(rf"\b{word}\b", shown, re.IGNORECASE)
+    ]
+    return max(found)[1] if found else None
+
+
+def classifier_strategy(lookback: int) -> ClassifierStrategy:
+    classifier = PromptReadingFakeChatModel(model_name="classifier", answer=reads_keywords)
+    return ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=lookback)
+
+
+def classified(route: str) -> str:
+    return f"the classifier chose {route!r}: {ROUTE_DESCRIPTIONS[route]}"
 
 
 class Turn(NamedTuple):
@@ -225,6 +284,73 @@ CASES = [
             ],
         ),
         id="heuristic-lookback-2",
+    ),
+    pytest.param(
+        Case(
+            embedding_strategy,
+            0,
+            DOMAIN_ROUTES,
+            LEGAL_THEN_CODE,
+            [
+                Turn("legal", similar_to("legal")),
+                fell_back("EmbeddingStrategy"),
+                fell_back("EmbeddingStrategy"),
+                Turn("coder", similar_to("coder")),
+                fell_back("EmbeddingStrategy"),
+            ],
+        ),
+        id="embedding-today",
+    ),
+    pytest.param(
+        Case(
+            embedding_strategy,
+            2,
+            DOMAIN_ROUTES,
+            LEGAL_THEN_CODE,
+            [
+                Turn("legal", similar_to("legal")),
+                Turn("legal", f"{similar_to('legal')} (1 message back)"),
+                Turn("legal", f"{similar_to('legal')} (2 messages back)"),
+                Turn("coder", similar_to("coder")),
+                Turn("coder", f"{similar_to('coder')} (1 message back)"),
+            ],
+        ),
+        id="embedding-lookback-2",
+    ),
+    pytest.param(
+        Case(
+            classifier_strategy,
+            0,
+            DOMAIN_ROUTES,
+            LEGAL_THEN_CODE,
+            [
+                Turn("legal", classified("legal")),
+                fell_back("ClassifierStrategy"),
+                Turn("coder", classified("coder")),
+                Turn("coder", classified("coder")),
+                fell_back("ClassifierStrategy"),
+            ],
+        ),
+        id="classifier-today",
+    ),
+    pytest.param(
+        Case(
+            classifier_strategy,
+            2,
+            DOMAIN_ROUTES,
+            LEGAL_THEN_CODE,
+            [
+                Turn("legal", classified("legal")),
+                # The model weighs every message it is shown, so no one of them decided alone.
+                Turn("legal", classified("legal")),
+                # The fake reads keywords, so "civil code" fools it; a real model (the live
+                # test) reads the legal question before it.
+                Turn("coder", classified("coder")),
+                Turn("coder", classified("coder")),
+                Turn("coder", classified("coder")),
+            ],
+        ),
+        id="classifier-lookback-2",
     ),
 ]
 
@@ -677,8 +803,52 @@ async def test_a_wrapper_reads_its_inner_strategys_lookback_unless_it_sets_its_o
     )
 
 
+@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 @pytest.mark.parametrize(
-    "build", [keyword_strategy, configurable_strategy, heuristic_strategy, Recording]
+    ("build", "follow_up"),
+    [
+        pytest.param(embedding_strategy, f"{similar_to('legal')} (1 message back)", id="embedding"),
+        pytest.param(classifier_strategy, classified("legal"), id="classifier"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("inner", "wrapper", "reads_back"),
+    [
+        pytest.param(2, None, True, id="inherits-the-inner-lookback"),
+        pytest.param(0, 2, True, id="overrides-it-upwards"),
+        pytest.param(2, 0, False, id="overrides-it-downwards"),
+    ],
+)
+async def test_a_wrapper_gives_a_model_calling_strategy_its_lookback_too(
+    build: Callable[[int], RoutingStrategy],
+    follow_up: str,
+    inner: int,
+    wrapper: int | None,
+    reads_back: bool,
+    convention: AnyConvention,
+) -> None:
+    """`with_lookback` works for the strategies that call a model as for the others: they read
+    `self.lookback` when they decide, so the copy reads the number it was given."""
+    strategy = Logged(build(inner), lookback=wrapper)
+
+    _, answered = await converse(make_router(strategy), convention, LEGAL_THEN_CODE[:2])
+
+    expected = Turn("legal", follow_up) if reads_back else fell_back("Logged")
+    assert answered.decision == RoutingDecision(
+        route=expected.route, reason=expected.reason, strategy="Logged", fallback=expected.fallback
+    )
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        keyword_strategy,
+        configurable_strategy,
+        heuristic_strategy,
+        embedding_strategy,
+        classifier_strategy,
+        Recording,
+    ],
 )
 def test_with_lookback_is_a_copy_and_leaves_the_strategy_as_it_was(
     build: Callable[..., RoutingStrategy],
@@ -816,3 +986,51 @@ def test_a_previous_requests_config_is_the_strategy_runs_child_config() -> None:
         callbacks = config.get("callbacks")
         assert isinstance(callbacks, BaseCallbackManager)
         assert callbacks.parent_run_id == strategy_run.id
+
+
+# --- The strategies that call a model: what lookback costs ---
+
+
+@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
+async def test_each_message_of_a_conversation_is_embedded_once(convention: AnyConvention) -> None:
+    """With `lookback`, the embedding strategy reads earlier messages on every turn, but each
+    was embedded on its own turn and is not embedded again: one call a turn, however far back
+    the turns read."""
+    embeddings = CountingEmbeddings(DeterministicFakeEmbedding(size=32))
+    strategy = EmbeddingStrategy(embeddings, EMBEDDING_EXAMPLES, threshold=0.99, lookback=2)
+
+    await converse(make_router(strategy), convention, LEGAL_THEN_CODE)
+
+    assert embeddings.queries == LEGAL_THEN_CODE
+
+
+def test_an_exact_cache_makes_a_tool_loop_one_classification() -> None:
+    """The caching the docs advise for the classifier model. Each step of an agent's tool loop
+    shows the classifier the same messages, since tool calls and results take no place among
+    them, so with `cache=InMemoryCache()` the three steps of this loop classify once — and the
+    route can't change halfway through it."""
+    classifier = PromptReadingFakeChatModel(
+        model_name="classifier", answer=lambda _: "general", cache=InMemoryCache()
+    )
+    strategy = ClassifierStrategy(classifier, {"general": "anything"}, lookback=2)
+    route = ToolCallingFakeChatModel(
+        script=[
+            AIMessage("Hello! How can I help?"),
+            weather_call("Paris"),
+            weather_call("Berlin"),
+            AIMessage("Both are sunny today."),
+        ]
+    )
+    router = ChatRouter(routes={"general": route}, default_route="general", strategy=strategy)
+    agent = create_agent(router, tools=[get_weather], checkpointer=InMemorySaver())
+    thread = RunnableConfig(configurable={"thread_id": "chat-1"})
+
+    agent.invoke({"messages": [HumanMessage("Hi there")]}, thread)
+    result = agent.invoke({"messages": [HumanMessage("Weather in Paris and Berlin?")]}, thread)
+
+    assert [type(message) for message in result["messages"]].count(ToolMessage) == 2
+    assert len(call_log(route)) == 4
+    assert [prompt.rsplit("\n", 1)[-1] for prompt in classifier.prompts] == [
+        "Hi there",
+        "Weather in Paris and Berlin?",
+    ]

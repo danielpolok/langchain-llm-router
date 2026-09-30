@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import re
 import warnings
+from dataclasses import replace
 from typing import Any
 
 import pytest
+from langchain_core.caches import InMemoryCache
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, ToolCall
 from langchain_core.runnables import RunnableConfig
@@ -52,7 +54,12 @@ from langchain_llm_router import (
 from langchain_llm_router._extraction import build_request
 from langchain_llm_router.strategies.classifier import ClassifierStrategy
 from tests.conventions import Convention, respond
-from tests.fakes import FailingChatModel, FakeChatModel, NativeStructuredFakeChatModel
+from tests.fakes import (
+    FailingChatModel,
+    FakeChatModel,
+    NativeStructuredFakeChatModel,
+    PromptReadingFakeChatModel,
+)
 from tests.tracing import StartLog, model_name_of, model_runs, priced_calls
 
 ROUTE_DESCRIPTIONS = {
@@ -402,3 +409,147 @@ async def test_through_the_router_a_classifier_strategy_is_an_ordinary_strategy(
     assert record is not None
     assert record.route == "coder"
     assert record.fallback is False
+
+
+# --- Follow-ups: the user's previous messages, with `lookback` ---
+
+MENU = (
+    "- coder: programming help: code, debugging, stack traces, refactors\n"
+    "- support: account issues: password resets, billing, cancellations"
+)
+
+
+def conversation(*texts: str) -> RoutingRequest:
+    """The last of `texts` as the current request, the others as the user's earlier messages."""
+    *earlier, current = texts
+    return replace(
+        make_request(current),
+        previous_requests=tuple(make_request(text) for text in reversed(earlier)),
+    )
+
+
+def reading_classifier(route: str | None = "coder") -> PromptReadingFakeChatModel:
+    return PromptReadingFakeChatModel(model_name="model-classifier", answer=lambda _: route)
+
+
+def test_with_no_earlier_message_the_prompt_is_the_one_without_lookback() -> None:
+    """On a conversation's first turn a strategy with `lookback` sends exactly the prompt one
+    without it sends."""
+    with_lookback, without = reading_classifier(), reading_classifier()
+
+    ClassifierStrategy(with_lookback, ROUTE_DESCRIPTIONS, lookback=2).decide(
+        make_request("fix this stack trace")
+    )
+    ClassifierStrategy(without, ROUTE_DESCRIPTIONS).decide(
+        conversation("reset my password", "fix this stack trace")
+    )
+
+    expected = (
+        f"Classify the request below into exactly one of these routes:\n{MENU}\n\n"
+        "Request:\nfix this stack trace"
+    )
+    assert with_lookback.prompts == without.prompts == [expected]
+
+
+@pytest.mark.parametrize("convention", ["decide", "adecide"])
+async def test_the_prompt_shows_the_earlier_messages_oldest_first_as_context(
+    convention: str,
+) -> None:
+    """The model classifies the latest request, in the light of the ones before it; the reason
+    is the one it has without lookback, since no one message decided."""
+    classifier = reading_classifier()
+    strategy = ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=2)
+    request = conversation(
+        "my deploy script is broken", "it throws KeyError: 'user'", "this doesn't work, try again"
+    )
+
+    choice = strategy.decide(request) if convention == "decide" else await strategy.adecide(request)
+
+    assert classifier.prompts == [
+        f"Classify the latest request below into exactly one of these routes:\n{MENU}\n\n"
+        "The user's earlier messages in this conversation, oldest first. They are context: the "
+        "latest request may continue them, so read it in their light, but classify only the "
+        "latest request.\n"
+        "1. my deploy script is broken\n"
+        "2. it throws KeyError: 'user'\n\n"
+        "Latest request:\nthis doesn't work, try again"
+    ]
+    assert choice == RoutingChoice(
+        "coder",
+        "the classifier chose 'coder': programming help: code, debugging, stack traces, refactors",
+    )
+
+
+def test_lookback_shows_as_many_messages_as_it_says() -> None:
+    classifier = reading_classifier()
+    request = conversation("alpha", "beta", "gamma", "latest")
+
+    ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=2).decide(request)
+    ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS).decide(request)
+
+    with_lookback, without = classifier.prompts
+    assert with_lookback.endswith("1. beta\n2. gamma\n\nLatest request:\nlatest")
+    assert without.endswith("Request:\nlatest")
+    assert "alpha" not in with_lookback
+
+
+def test_a_latest_message_with_no_text_classifies_the_newest_one_with_text() -> None:
+    """An image sent on its own, say: the newest earlier message with text is classified, in the
+    light of the ones before it, and the reason says how far back it was. Messages with no text
+    are left out of the prompt."""
+    classifier = reading_classifier()
+    strategy = ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=3)
+
+    choice = strategy.decide(conversation("my deploy script is broken", "   ", "fix it", "   "))
+
+    assert classifier.prompts[0].endswith(
+        "latest request.\n1. my deploy script is broken\n\nLatest request:\nfix it"
+    )
+    assert choice == RoutingChoice(
+        "coder",
+        "the classifier chose 'coder': programming help: code, debugging, stack traces, "
+        "refactors (1 message back)",
+    )
+
+
+def test_no_text_in_reach_abstains_without_calling_the_classifier() -> None:
+    classifier = reading_classifier()
+
+    choice = ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=1).decide(
+        conversation("fix this stack trace", "   ", "   ")
+    )
+
+    assert (choice, classifier.prompts) == (None, [])
+
+
+def test_a_bad_answer_with_earlier_messages_still_abstains() -> None:
+    strategy = ClassifierStrategy(reading_classifier(None), ROUTE_DESCRIPTIONS, lookback=1)
+
+    assert strategy.decide(conversation("fix this stack trace", "and again")) is None
+
+
+def test_an_exact_cache_on_the_classifier_classifies_the_same_prompt_once() -> None:
+    """The caching the docs advise: the same conversation classified again, as each step of a
+    tool loop classifies it, is answered from the cache."""
+    classifier = PromptReadingFakeChatModel(
+        model_name="model-classifier", answer=lambda _: "coder", cache=InMemoryCache()
+    )
+    strategy = ClassifierStrategy(classifier, ROUTE_DESCRIPTIONS, lookback=1)
+    request = conversation("my deploy script is broken", "fix it")
+
+    choices = {strategy.decide(request) for _ in range(3)}
+
+    assert len(choices) == 1
+    assert len(classifier.prompts) == 1
+
+
+@pytest.mark.parametrize("lookback", [-1, True, 1.5, "2", None])
+def test_lookback_must_be_a_count_of_messages(lookback: Any) -> None:
+    with pytest.raises(
+        RoutingError,
+        match=(
+            r"^lookback must be a non-negative integer, the number of the user's previous "
+            rf"messages to read, got {re.escape(repr(lookback))}$"
+        ),
+    ):
+        ClassifierStrategy(classifier_answering("coder"), ROUTE_DESCRIPTIONS, lookback=lookback)

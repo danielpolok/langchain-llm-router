@@ -23,7 +23,8 @@ ClassifierStrategy(
 Deciding
 --------
 The current request's text is the only thing classified: `request.text`, never tool output,
-the system prompt or the rest of the transcript. The prompt lists every route `request.routes`
+the system prompt or the model's answers — with `lookback`, the user's previous messages come
+along as context (below). The prompt lists every route `request.routes`
 and `route_descriptions` **both** name — in the router's own declaration order, not the mapping's
 — together with its description, then the request; the model answers through
 `with_structured_output`, the same mechanism `ChatRouter` itself uses (`_tools.py`), given a
@@ -90,6 +91,42 @@ Deciding, and not deciding
   v1 (the acceptance criteria ask for valid/invalid/failing coverage against a fake classifier,
   not universal real-model compatibility) and is a documented limitation, not an oversight.
 
+Follow-ups: `lookback`
+----------------------
+With `lookback=N`, the user's previous N messages go into the prompt too, oldest first, marked as
+earlier context, and the model classifies the latest request in their light. That is what the
+rule-based strategies can't do: "this doesn't work, try again" has no signal words, and "Which
+article of the civil code covers this?" has a misleading one, yet a model that reads the legal
+question before it can route both. The schema is the same closed `Literal`, and a bad answer is
+still `None`. Messages with no text are left out; if the latest request has none, the newest
+earlier message with text is the one classified, in the light of those before it, and the reason
+says how far back it was, `(1 message back)`, as every built-in strategy does. Otherwise the
+reason is the same as without `lookback`: the model weighed every message, and no one of them
+decided on its own. With no earlier message to show, the prompt is exactly the one without
+`lookback`.
+
+**Cost.** The earlier messages are input tokens on every classification: up to N more messages
+in each prompt, still one call per request.
+
+**Caching.** Give the classifier model LangChain's exact cache, `cache=InMemoryCache()` (or any
+`BaseCache`): the same prompt is then classified once. Every step of an agent's tool loop
+classifies the same prompt, since the loop's tool calls and results take no place in it, so the
+loop makes one classifier call, not one per step — and its route can't change halfway. Don't give
+it a semantic cache: that would answer a request with the route of whichever earlier request read
+most like it, which is `EmbeddingStrategy` done by a cache, without its threshold or its reasons.
+
+Two things this deliberately leaves out of the prompt:
+
+- **The route that answered the previous turn.** The model would tend to repeat it, so one
+  misrouted turn would pull the next ones after it: the classifier's own past answer, fed back to
+  it as evidence. Keeping to a route is a policy of its own, better written as one, such as a
+  strategy that wraps this one and reads the previous route from the transcript.
+- **The model's answers** (`wants_full_context`). Set on a subclass, it hands `decide` the
+  transcript but changes nothing in the prompt. Arch-Router reads the whole conversation; here,
+  an answer is long, so every classification would pay for it again, and it says what a route
+  wrote, not what the user wants next. A subclass that wants it builds its own prompt from
+  `request.messages`.
+
 No dependency beyond `langchain-core` (and `pydantic`, which it depends on) is imported.
 """
 
@@ -97,11 +134,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from pydantic import BaseModel, Field, create_model
 
 from langchain_llm_router.errors import RoutingError
+from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
 from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 if TYPE_CHECKING:
@@ -134,8 +172,9 @@ class ClassifierStrategy(RoutingStrategy):
     The module docstring has the reasoning behind every choice below: the prompt built from
     `route_descriptions` and the request's text, the per-request `Literal` schema, the call
     traced for free because a chat model is a `Runnable`, a bad answer turned into `None` rather
-    than an exception, and a genuine call failure left to propagate so the router's own
-    fallback handles it.
+    than an exception, a genuine call failure left to propagate so the router's own
+    fallback handles it, and, with `lookback`, the user's earlier messages in the prompt as
+    context.
 
     Args:
         model: The application's own chat model, used only to classify — there is no
@@ -144,24 +183,33 @@ class ClassifierStrategy(RoutingStrategy):
         route_descriptions: Each route's human-readable description, at least one. What the
             classifier prompt shows the model, and — intersected with `request.routes` at decide
             time — the closed set of answers the model is allowed to give.
+        lookback: How many of the user's previous messages to put in the prompt as context,
+            oldest first. Defaults to `0`, the current request alone. Each is more input tokens
+            on every classification.
 
     Raises:
         RoutingError: for configuration that could never route — no routes, a blank route or
-            description. Raised here, at construction, not once per request.
+            description — or a `lookback` that isn't a non-negative integer. Raised here, at
+            construction, not once per request.
     """
 
-    def __init__(self, model: BaseChatModel, route_descriptions: Mapping[str, str]) -> None:
+    def __init__(
+        self, model: BaseChatModel, route_descriptions: Mapping[str, str], *, lookback: int = 0
+    ) -> None:
         """Check `route_descriptions` and keep the classifier `model`.
 
         Args:
             model: The chat model used only to classify.
             route_descriptions: Each route's human-readable description.
+            lookback: How many of the user's previous messages to put in the prompt.
 
         Raises:
-            RoutingError: for configuration that could never route.
+            RoutingError: for configuration that could never route, or a `lookback` that isn't
+                a non-negative integer.
         """
         self.model = model
         self.route_descriptions = _checked_route_descriptions(route_descriptions)
+        self.lookback = checked_lookback(lookback)
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """Classify `request.text`, or return `None` if there's nothing to classify.
@@ -170,7 +218,8 @@ class ClassifierStrategy(RoutingStrategy):
         configuration, fixed at construction; every request builds its own schema and prompt.
 
         Args:
-            request: The current request; only its text is classified.
+            request: The current request; only its text is classified, and with `lookback` its
+                previous requests' text is shown as context.
 
         Returns:
             The route the model chose and why, or `None` to abstain.
@@ -179,15 +228,16 @@ class ClassifierStrategy(RoutingStrategy):
             RoutingError: if no route in `route_descriptions` is one the router has.
         """
         choices = self._choices(request.routes)
-        if not request.text.strip():
+        asked = _asked(request, self.lookback)
+        if asked is None:
             return None  # nothing to classify — better the default route than a guess
         classifier = self.model.with_structured_output(_schema(choices), include_raw=True)
         result = classifier.invoke(
-            _prompt(choices, self.route_descriptions, request.text), config=request.config
+            _prompt(choices, self.route_descriptions, asked), config=request.config
         )
         # `include_raw=True` always answers with the {"raw", "parsed", "parsing_error"} dict;
         # the return type is only a union because `with_structured_output` is typed for both.
-        return self._finish(cast("dict[str, Any]", result))
+        return self._finish(cast("dict[str, Any]", result), asked.distance)
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
         """Async `decide`: a native implementation, as the interface asks of a model-calling one.
@@ -196,19 +246,21 @@ class ClassifierStrategy(RoutingStrategy):
         otherwise have to inherit from the calling thread.
 
         Args:
-            request: The current request; only its text is classified.
+            request: The current request; only its text is classified, and with `lookback` its
+                previous requests' text is shown as context.
 
         Returns:
             The route the model chose and why, or `None` to abstain.
         """
         choices = self._choices(request.routes)
-        if not request.text.strip():
+        asked = _asked(request, self.lookback)
+        if asked is None:
             return None
         classifier = self.model.with_structured_output(_schema(choices), include_raw=True)
         result = await classifier.ainvoke(
-            _prompt(choices, self.route_descriptions, request.text), config=request.config
+            _prompt(choices, self.route_descriptions, asked), config=request.config
         )
-        return self._finish(cast("dict[str, Any]", result))
+        return self._finish(cast("dict[str, Any]", result), asked.distance)
 
     def _choices(self, routes: tuple[str, ...]) -> tuple[str, ...]:
         """The routes this request can classify into.
@@ -226,18 +278,22 @@ class ClassifierStrategy(RoutingStrategy):
         )
         raise RoutingError(msg)
 
-    def _finish(self, result: dict[str, Any]) -> RoutingChoice | None:
+    def _finish(self, result: dict[str, Any], distance: int) -> RoutingChoice | None:
         """Turn the classifier's answer into a choice.
 
         `result` is `with_structured_output(..., include_raw=True)`'s answer: `None` if
         `parsed` is `None` — a parse failure or no tool call at all, the module doc's "successful
-        call, bad answer" case — otherwise the route it named, with the reason a trace shows.
+        call, bad answer" case — otherwise the route it named, with the reason a trace shows,
+        saying how far back the classified message was.
         """
         parsed = result.get("parsed")
         if parsed is None:
             return None
         route = cast("str", cast("Any", parsed).route)  # dynamic schema: no static attribute
-        reason = f"the classifier chose {route!r}: {self.route_descriptions[route]}"
+        reason = (
+            f"the classifier chose {route!r}: {self.route_descriptions[route]}"
+            f"{how_far_back(distance)}"
+        )
         return RoutingChoice(route=route, reason=reason)
 
 
@@ -285,9 +341,47 @@ def _schema(choices: Sequence[str]) -> type[BaseModel]:
     )
 
 
-def _prompt(choices: Sequence[str], route_descriptions: Mapping[str, str], text: str) -> str:
-    """What the classifier reads: every candidate route and its description, then the request."""
+class _Asked(NamedTuple):
+    """The message to classify, how far back it is, and the earlier ones shown with it."""
+
+    text: str
+    distance: int
+    earlier: tuple[str, ...]
+    """The user's earlier messages with text, oldest first."""
+
+
+def _asked(request: RoutingRequest, lookback: int) -> _Asked | None:
+    """The message to classify: the newest one with text within `lookback`, with those before it.
+
+    `None` when no message in reach has text: nothing to classify.
+    """
+    with_text = [
+        (distance, message.text)
+        for distance, message in considered(request, lookback)
+        if message.text.strip()
+    ]
+    if not with_text:
+        return None
+    (distance, text), *earlier = with_text
+    return _Asked(text, distance, tuple(text for _, text in reversed(earlier)))
+
+
+def _prompt(choices: Sequence[str], route_descriptions: Mapping[str, str], asked: _Asked) -> str:
+    """What the classifier reads: every candidate route and its description, then the request.
+
+    With earlier messages, they come between the two, oldest first, marked as context; without
+    them, the prompt is the one a strategy with no `lookback` sends.
+    """
     menu = "\n".join(f"- {route}: {route_descriptions[route]}" for route in choices)
+    if not asked.earlier:
+        return (
+            f"Classify the request below into exactly one of these routes:\n{menu}\n\n"
+            f"Request:\n{asked.text}"
+        )
+    earlier = "\n".join(f"{number}. {text}" for number, text in enumerate(asked.earlier, 1))
     return (
-        f"Classify the request below into exactly one of these routes:\n{menu}\n\nRequest:\n{text}"
+        f"Classify the latest request below into exactly one of these routes:\n{menu}\n\n"
+        "The user's earlier messages in this conversation, oldest first. They are context: the "
+        "latest request may continue them, so read it in their light, but classify only the "
+        f"latest request.\n{earlier}\n\nLatest request:\n{asked.text}"
     )
