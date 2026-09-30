@@ -490,15 +490,16 @@ def _identifiers(source: str) -> set[str]:
 
 
 def test_the_interface_has_no_private_hooks() -> None:
-    """`RoutingStrategy` is `decide`, `adecide`, `wants_full_context` and `lookback` — nothing
-    hidden for a built-in to hook into that a custom strategy can't see."""
+    """`RoutingStrategy` is `decide`, `adecide`, `wants_full_context`, `lookback` and
+    `with_lookback` — nothing hidden for a built-in to hook into that a custom strategy can't
+    see."""
     members = {
         name
         for name in vars(RoutingStrategy)
         if not (name.startswith("__") and name.endswith("__")) and name != "_abc_impl"
     }
 
-    assert members == {"decide", "adecide", "wants_full_context", "lookback"}
+    assert members == {"decide", "adecide", "wants_full_context", "lookback", "with_lookback"}
 
 
 def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:

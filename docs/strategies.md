@@ -578,6 +578,12 @@ question before it. `Sticky` differs in never moving a conversation once it has 
   message arrived, so you can hand it to another strategy's `decide`. Its `messages` end at that
   message; the whole conversation is on the current request. A plain function always sees the
   current request alone.
+- **Pass `lookback` on when you wrap a strategy.** The router hands over as many previous
+  messages as the strategy you give it asks for, and a built-in strategy reads at most its own
+  `lookback`. A strategy that hands the request to another one, as `Sticky` does, sets
+  `self.lookback = inner.lookback` so the two agree. To read a different number, it keeps
+  `inner.with_lookback(n)` instead, a copy that reads `n` messages, and takes the copy's
+  `lookback`. The strategy you passed in is left as it was.
 
 ### What a strategy sees
 
@@ -601,8 +607,8 @@ with a compatibility promise. Until 1.0, the minor version plays the role of the
 
 - **Minor releases stay compatible.** They may add a `RoutingRequest` field (last, with a
   default, as `previous_requests` was), an optional `RoutingStrategy` member whose default keeps
-  today's behaviour (as `wants_full_context` and `lookback` are), new `modalities` values, and new
-  wording in the built-in strategies' reasons.
+  today's behaviour (as `wants_full_context`, `lookback` and `with_lookback` are), new
+  `modalities` values, and new wording in the built-in strategies' reasons.
 - **Anything breaking needs a major release.** That covers removing, renaming or retyping any of
   the above, adding an abstract method, changing what `None` or a bare route name means, changing
   `decide` / `adecide`, changing the default of `wants_full_context` or `lookback`, or changing

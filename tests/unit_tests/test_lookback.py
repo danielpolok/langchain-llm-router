@@ -620,6 +620,102 @@ def test_a_lookback_made_unreadable_after_the_router_was_built_falls_back() -> N
     assert [run.name for run in router_run.child_runs] == ["FakeChatModel"]
 
 
+# --- A strategy that wraps another ---
+
+
+class Logged(RoutingStrategy):
+    """Hands every request to another strategy: the shape of a wrapper that logs or measures.
+
+    It reads as many previous messages as the strategy inside it, unless given a number of its
+    own, which the strategy inside then reads too.
+    """
+
+    def __init__(self, inner: RoutingStrategy, *, lookback: int | None = None) -> None:
+        self.inner = inner if lookback is None else inner.with_lookback(lookback)
+        self.lookback = self.inner.lookback
+
+    def decide(self, request: RoutingRequest) -> RoutingChoice | None:
+        return self.inner.decide(request)
+
+
+@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
+@pytest.mark.parametrize(
+    ("inner", "wrapper", "expected"),
+    [
+        pytest.param(
+            2,
+            None,
+            Turn("legal", "matched keyword 'contract' (1 message back)"),
+            id="inherits-the-inner-lookback",
+        ),
+        pytest.param(
+            0,
+            2,
+            Turn("legal", "matched keyword 'contract' (1 message back)"),
+            id="overrides-it-upwards",
+        ),
+        pytest.param(2, 0, fell_back("Logged"), id="overrides-it-downwards"),
+        pytest.param(0, None, fell_back("Logged"), id="off-when-both-are-off"),
+    ],
+)
+async def test_a_wrapper_reads_its_inner_strategys_lookback_unless_it_sets_its_own(
+    inner: int, wrapper: int | None, expected: Turn, convention: AnyConvention
+) -> None:
+    """The router hands over as many previous messages as the wrapper asks for, and a built-in
+    reads at most its own `lookback`. A wrapper that declares its inner strategy's `lookback`
+    makes the two agree; one that sets its own gives the inner strategy a copy that reads it."""
+    strategy = Logged(keyword_strategy(inner), lookback=wrapper)
+
+    _, follow_up = await converse(make_router(strategy), convention, LEGAL_THEN_CODE[:2])
+
+    assert follow_up.decision == RoutingDecision(
+        route=expected.route, reason=expected.reason, strategy="Logged", fallback=expected.fallback
+    )
+
+
+@pytest.mark.parametrize(
+    "build", [keyword_strategy, configurable_strategy, heuristic_strategy, Recording]
+)
+def test_with_lookback_is_a_copy_and_leaves_the_strategy_as_it_was(
+    build: Callable[..., RoutingStrategy],
+) -> None:
+    """A copy of the same class, with the new `lookback` and everything else shared; the
+    original keeps its own, so one strategy can sit in two routers with different windows."""
+    original = build(lookback=1)
+
+    copied = original.with_lookback(3)
+
+    assert type(copied) is type(original)
+    assert copied is not original
+    assert (copied.lookback, original.lookback) == (3, 1)
+    assert vars(copied) == {**vars(original), "lookback": 3}
+
+
+async def test_a_copy_reads_its_own_lookback_and_the_original_keeps_reading_its() -> None:
+    """Both strategies route as their own `lookback` says, side by side."""
+    original = keyword_strategy(0)
+    copied = original.with_lookback(2)
+
+    [_, alone] = await converse(make_router(original), "invoke", LEGAL_THEN_CODE[:2])
+    [_, with_lookback] = await converse(make_router(copied), "invoke", LEGAL_THEN_CODE[:2])
+
+    assert alone.decision is not None
+    assert with_lookback.decision is not None
+    assert (alone.decision.route, with_lookback.decision.route) == ("general", "legal")
+
+
+@pytest.mark.parametrize("value", NOT_A_COUNT)
+def test_with_lookback_refuses_a_value_that_is_not_a_count(value: object) -> None:
+    """The same check the built-ins make when constructed, made when the copy is asked for."""
+    with pytest.raises(RoutingError) as caught:
+        keyword_strategy(0).with_lookback(cast("int", value))
+
+    assert str(caught.value) == (
+        "lookback must be a non-negative integer, the number of the user's previous messages to "
+        f"read, got {value!r}"
+    )
+
+
 # --- The trace ---
 
 

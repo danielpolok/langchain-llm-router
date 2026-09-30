@@ -2,8 +2,10 @@
 
 A strategy with `lookback=N` reads the current request and then up to N of the user's previous
 messages, newest first — at most its own N, whatever the request carries, so a strategy handed a
-request by another one still reads what it was configured to. A message that decides from further
-back says so in the reason, with the same words in every strategy: `(1 message back)`.
+request by another one still reads what it was configured to. A wrapper that wants it to read a
+different number gives it a copy made with `with_lookback`, which sets the same attribute. A
+message that decides from further back says so in the reason, with the same words in every
+strategy: `(1 message back)`.
 """
 
 from __future__ import annotations

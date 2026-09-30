@@ -97,6 +97,7 @@ from langchain_llm_router.strategy import (
     RoutingChoice,
     RoutingRequest,
     RoutingStrategy,
+    _is_count,
     as_strategy,
     strategy_name,
 )
@@ -1256,11 +1257,10 @@ class _RouteCall(NamedTuple):
 def _lookback_problem(strategy: RoutingStrategy) -> str | None:
     """Why the router can't read `strategy.lookback`, or `None` when it can.
 
-    A non-negative integer, as the built-in strategies require of theirs. A `bool` is refused
-    although Python counts it as an `int`: `True` is a flag where a count was meant.
+    A non-negative integer, as the built-in strategies and `with_lookback` require.
     """
     lookback = strategy.lookback
-    if isinstance(lookback, int) and not isinstance(lookback, bool) and lookback >= 0:
+    if _is_count(lookback):
         return None
     return (
         f"{strategy_name(strategy)}'s lookback is {lookback!r}: it must be a non-negative "

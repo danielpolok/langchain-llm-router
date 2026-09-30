@@ -9,6 +9,10 @@ exist, is treated the same way, with a `FallbackWarning` and the cause recorded.
   user's previous messages in `RoutingRequest.previous_requests` only if it sets `lookback`
   to how many it wants, and the whole transcript in `RoutingRequest.messages` only if it sets
   `wants_full_context = True`. The two are independent.
+- **Wrappers pass `lookback` on.** The router hands over as many previous messages as the
+  strategy it was given asks for, and a built-in reads at most its own `lookback`. A strategy
+  that hands the request to another one therefore declares that one's `lookback`, and
+  `with_lookback` gives it a copy that reads a different number.
 - **Sync and async.** The router calls `decide` on sync paths and `adecide` on async ones.
   `adecide` defaults to `decide` in a worker thread, so `decide` must be thread-safe. A strategy
   that calls a model overrides `adecide` with a native async implementation.
@@ -28,9 +32,10 @@ Versions follow semantic versioning; until 1.0, the minor version stands in for 
 
 - **Minor release (compatible):** a new `RoutingRequest` field, added last with a default, as
   `previous_requests` was; a new optional `RoutingStrategy` member whose default keeps today's
-  behaviour, as `wants_full_context` and `lookback` are; new values in `modalities` as LangChain
-  adds content-block types; new wording in the reasons the package writes; a widened type that
-  keeps accepting everything it accepts today, such as `ClassVar[bool]` becoming `bool`.
+  behaviour, as `wants_full_context`, `lookback` and `with_lookback` are; new values in
+  `modalities` as LangChain adds content-block types; new wording in the reasons the package
+  writes; a widened type that keeps accepting everything it accepts today, such as
+  `ClassVar[bool]` becoming `bool`.
 - **Major release (breaking):** removing or renaming anything above, or retyping it so that code
   which type-checks today no longer does; a new abstract method; changing what `None` or a bare
   route name means; changing the signature of `decide` or `adecide`; changing the default of
@@ -43,15 +48,18 @@ the router's own and may change in any release.
 
 from __future__ import annotations
 
+import copy
 import functools
 import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, TypeAlias, TypeVar
 
 from langchain_core.messages import BaseMessage, ContentBlock
 from langchain_core.runnables import RunnableConfig, run_in_executor
+
+from langchain_llm_router.errors import RoutingError
 
 __all__ = [
     "RoutingCallable",
@@ -187,6 +195,53 @@ class RoutingStrategy(ABC):
     integer: the router refuses a strategy whose `lookback` isn't one when it is built, and
     answers from the default route, with a `FallbackWarning`, if it stops being one later."""
 
+    def with_lookback(self: _Strategy, lookback: int) -> _Strategy:
+        """A copy of this strategy that reads `lookback` of the user's previous messages.
+
+        The strategy itself is left as it was. This is for a strategy that hands the request to
+        another one. The router hands over as many previous messages as the strategy it was given
+        asks for, and a built-in reads at most its own `lookback`, so a wrapper declares its
+        inner strategy's `lookback`. To make the inner strategy read a different number, the
+        wrapper gives it this copy.
+
+        The copy is shallow: it shares everything else with the original. That suits a strategy
+        that reads `self.lookback` when it decides, as the built-in ones do. A strategy that works
+        something out from its `lookback` when it is built, or that wraps another strategy which
+        should read the new number too, overrides this.
+
+        Args:
+            lookback: How many of the user's previous messages the copy reads.
+
+        Returns:
+            A copy of this strategy, with that `lookback`.
+
+        Raises:
+            RoutingError: if `lookback` isn't a non-negative integer.
+
+        Example:
+            ```python
+            class Logged(RoutingStrategy):
+                def __init__(self, inner, *, lookback=None):
+                    # None keeps the inner strategy's lookback; a number overrides it.
+                    self.inner = inner if lookback is None else inner.with_lookback(lookback)
+                    self.lookback = self.inner.lookback
+
+                def decide(self, request):
+                    choice = self.inner.decide(request)
+                    print(choice)
+                    return choice
+            ```
+        """
+        if not _is_count(lookback):
+            msg = (
+                f"lookback must be a non-negative integer, the number of the user's previous "
+                f"messages to read, got {lookback!r}"
+            )
+            raise RoutingError(msg)
+        clone = copy.copy(self)
+        clone.lookback = lookback
+        return clone
+
     @abstractmethod
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """Choose a route for `request`, or return `None` if this strategy can't decide.
@@ -220,6 +275,18 @@ class RoutingStrategy(ABC):
         # The config is passed because it is the one a strategy's calls take, and because
         # `Runnable.ainvoke` passes its own here too (`runnables/base.py:929`).
         return await run_in_executor(request.config, self.decide, request)
+
+
+_Strategy = TypeVar("_Strategy", bound=RoutingStrategy)
+
+
+def _is_count(value: object) -> bool:
+    """Whether `value` can be a `lookback`: a non-negative integer.
+
+    A `bool` is refused although Python counts it as an `int`: `True` is a flag where a count
+    was meant.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 RoutingCallable: TypeAlias = Callable[[RoutingRequest], RoutingChoice | str | None]
