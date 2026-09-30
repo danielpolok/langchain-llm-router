@@ -30,7 +30,7 @@ from typing import Any, NoReturn
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.context import register_configure_hook
 
@@ -62,7 +62,12 @@ from langchain_llm_router.strategies.configurable import (
     signal_at_least,
     tools_bound,
 )
-from langchain_llm_router.strategies.heuristic import Signal, code_signal, length_signal
+from langchain_llm_router.strategies.heuristic import (
+    Signal,
+    analysis_signal,
+    code_signal,
+    length_signal,
+)
 from tests.conventions import CONVENTIONS, Convention, respond
 from tests.fakes import FakeChatModel, call_log
 
@@ -1385,6 +1390,290 @@ def test_a_predicate_that_raises_fails_only_the_request_it_ran_for(
         strategy="ConfigurableStrategy",
     )
     assert [warning.category for warning in routing_warnings(caught)] == [FallbackWarning]
+
+
+# Follow-ups: the user's previous messages, with `lookback`
+
+
+def conversation(*texts: str, lookback: int, tools: bool = False) -> RoutingRequest:
+    """The request a router builds from a conversation: the last text is the current request,
+    and the model answered each of the others."""
+    messages: list[BaseMessage] = []
+    for text in texts:
+        messages += [HumanMessage(text), AIMessage("an answer")]
+    request = build_request(
+        messages[:-1],
+        routes=ROUTES,
+        tools_bound=tools,
+        wants_full_context=False,
+        config=RunnableConfig(),
+        lookback=lookback,
+    )
+    assert request is not None
+    return request
+
+
+def domains(*, lookback: int) -> ConfigurableStrategy:
+    return ConfigurableStrategy(
+        [
+            Rule("coder", keywords("python", "sql"), name="code"),
+            Rule("frontier", keywords("contract", "clause"), name="legal"),
+        ],
+        lookback=lookback,
+    )
+
+
+def test_the_newest_message_a_rule_matches_decides() -> None:
+    """Rules are tried message by message, newest first, so a follow-up with no signal of its
+    own goes where the message that set the topic went — the topic the user moved to, not an
+    older one, even when the older one matches a rule tried first."""
+    strategy = domains(lookback=2)
+
+    assert strategy.decide(
+        conversation("Write it in python", "Now review this contract", "In Germany?", lookback=2)
+    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+    assert strategy.decide(
+        conversation("Review this contract", "Now write it in python", lookback=2)
+    ) == RoutingChoice("coder", "rule 'code' matched: keyword 'python'")
+
+
+def test_within_a_message_the_rules_keep_their_priority() -> None:
+    """A message that two rules match goes to the one tried first, as the current request
+    does."""
+    strategy = ConfigurableStrategy(
+        [
+            Rule("coder", keywords("python"), name="code"),
+            Rule("frontier", keywords("contract"), name="legal", priority=1),
+        ],
+        lookback=1,
+    )
+
+    assert strategy.decide(
+        conversation("A python check for this contract", "And in Germany?", lookback=1)
+    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+
+
+def tiering(*, lookback: int) -> ConfigurableStrategy:
+    reasoning = signal_at_least(analysis_signal, 1.0, name="reasoning")
+    return ConfigurableStrategy(
+        [
+            Rule("frontier", reasoning, name="needs reasoning"),
+            Rule("small", always(), name="everything else"),
+        ],
+        lookback=lookback,
+    )
+
+
+HARD_QUESTION = "Compare the trade-offs of B-trees and LSM trees."
+
+
+def test_an_always_rule_applies_only_when_no_message_matched() -> None:
+    """`always()` would decide on the current message and leave nothing to look back for, so
+    it waits until every message has been tried — and then speaks for the whole conversation,
+    with no distance in its reason."""
+    strategy = tiering(lookback=2)
+
+    assert strategy.decide(
+        conversation(HARD_QUESTION, "Thanks! Which one does SQLite use?", lookback=2)
+    ) == RoutingChoice(
+        "frontier", "rule 'needs reasoning' matched: reasoning 1.00 >= 1.00 (1 message back)"
+    )
+    assert strategy.decide(
+        conversation("Hi!", "Suggest a name for my cat", lookback=2)
+    ) == RoutingChoice("small", "rule 'everything else' matched: always")
+    assert tiering(lookback=0).decide(
+        conversation(HARD_QUESTION, "Thanks! Which one does SQLite use?", lookback=0)
+    ) == RoutingChoice("small", "rule 'everything else' matched: always")
+
+
+def test_a_rule_that_always_holds_waits_however_it_is_written() -> None:
+    """A combination that holds for every request is a catch-all as much as `always()` is, and
+    waits in the same way. Its reason, once every message has been tried, is still the one it
+    gives the current request."""
+    strategy = ConfigurableStrategy(
+        [
+            Rule("frontier", keywords("contract"), name="legal"),
+            Rule("small", any_of(keywords("thanks"), always()), name="everything else"),
+        ],
+        lookback=1,
+    )
+
+    assert strategy.decide(
+        conversation("Review this contract", "thanks, and in Germany?", lookback=1)
+    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+    assert strategy.decide(conversation("Hi!", "thanks!", lookback=1)) == RoutingChoice(
+        "small", "rule 'everything else' matched: keyword 'thanks'"
+    )
+
+
+def test_tools_bound_is_a_property_of_the_call_not_of_a_message() -> None:
+    """A previous request carries the call's `tools_bound`: with tools bound, a rule that
+    wants tools and a topic finds the topic in an earlier message; without them it holds for
+    no message at all."""
+    strategy = ConfigurableStrategy(
+        [Rule("coder", all_of(tools_bound(), keywords("python")), name="python tools")],
+        lookback=1,
+    )
+    earlier, current = "Write it in python", "Now run it"
+
+    assert strategy.decide(conversation(earlier, current, lookback=1, tools=True)) == (
+        RoutingChoice(
+            "coder",
+            "rule 'python tools' matched: tools bound and keyword 'python' (1 message back)",
+        )
+    )
+    assert strategy.decide(conversation(earlier, current, lookback=1)) is None
+
+
+def replies_to_the_model(request: RoutingRequest) -> bool:
+    """The model's message just before the user's latest one asked a question."""
+    assert request.messages is not None
+    last_user = max(i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage))
+    before = request.messages[last_user - 1] if last_user else None
+    return isinstance(before, AIMessage) and before.text.rstrip().endswith("?")
+
+
+def is_long(request: RoutingRequest) -> bool:
+    """Three user messages or more."""
+    assert request.messages is not None
+    return sum(isinstance(message, HumanMessage) for message in request.messages) >= 3
+
+
+class WithHistory(ConfigurableStrategy):
+    wants_full_context = True
+
+
+def test_a_predicate_reads_the_conversation_as_it_stood_when_the_message_was_sent() -> None:
+    """With the whole transcript and `lookback`, a predicate tried on an earlier message sees
+    the conversation up to that message. "The answer just before this message" is then that
+    message's own: the model asked its question before "Yes please", not before the contract.
+    The flip side, documented: a question about the conversation as a whole is answered for
+    the conversation as it was then, so it holds on the current request alone here."""
+    messages: list[BaseMessage] = [
+        HumanMessage("Review this contract"),
+        AIMessage("Done. The liability cap is unusually low."),
+        HumanMessage("Thanks"),
+        AIMessage("Shall I check the payment terms too?"),
+        HumanMessage("Yes please"),
+    ]
+    request = build_request(
+        messages,
+        routes=ROUTES,
+        tools_bound=False,
+        wants_full_context=True,
+        config=RunnableConfig(),
+        lookback=2,
+    )
+    assert request is not None
+    considered = [request, *request.previous_requests]
+    strategy = WithHistory(
+        [Rule("frontier", all_of(keywords("contract"), predicate(replies_to_the_model)))],
+        lookback=2,
+    )
+
+    assert [replies_to_the_model(message) for message in considered] == [True, False, False]
+    assert [is_long(message) for message in considered] == [True, False, False]
+    assert strategy.decide(request) is None
+
+
+def test_a_predicate_finds_an_earlier_message_that_did_answer_the_model() -> None:
+    """The same rule matches where the message with the keyword really was a reply to the
+    model's question, however many turns ago within the window."""
+    strategy = WithHistory(
+        [Rule("frontier", all_of(keywords("contract"), predicate(replies_to_the_model)))],
+        lookback=2,
+    )
+    messages: list[BaseMessage] = [
+        HumanMessage("Hi"),
+        AIMessage("What would you like me to review?"),
+        HumanMessage("This contract"),
+        AIMessage("Done. The liability cap is unusually low."),
+        HumanMessage("And in Germany?"),
+    ]
+    request = build_request(
+        messages,
+        routes=ROUTES,
+        tools_bound=False,
+        wants_full_context=True,
+        config=RunnableConfig(),
+        lookback=2,
+    )
+
+    assert request is not None
+    assert strategy.decide(request) == RoutingChoice(
+        "frontier",
+        "rule #1 matched: keyword 'contract' and replies_to_the_model (1 message back)",
+    )
+
+
+def test_a_not_rule_decides_on_the_current_message() -> None:
+    """The documented limit of `not_` with `lookback`: it holds for an easy follow-up itself,
+    so the order-independent spelling of cost tiering sends "ok" to `small` after a long
+    request, where the spelling with `always()` keeps it on `frontier`."""
+    heavy = any_of(
+        signal_at_least(length_signal(20, 200), 0.5, name="length"),
+        signal_at_least(code_signal, 0.5, name="code"),
+    )
+    with_not = ConfigurableStrategy(
+        [
+            Rule("small", not_(heavy), name="short and simple"),
+            Rule("frontier", heavy, name="long or code-bearing"),
+        ],
+        lookback=1,
+    )
+    with_always = ConfigurableStrategy(
+        [
+            Rule("frontier", heavy, name="long or code-bearing"),
+            Rule("small", always(), name="short and simple"),
+        ],
+        lookback=1,
+    )
+    request = conversation(words(150), "ok", lookback=1)
+
+    assert with_not.decide(request) == RoutingChoice(
+        "small", "rule 'short and simple' matched: not (length >= 0.5 or code >= 0.5)"
+    )
+    assert with_always.decide(request) == RoutingChoice(
+        "frontier", "rule 'long or code-bearing' matched: length 0.72 >= 0.50 (1 message back)"
+    )
+
+
+def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> None:
+    """Rules are tried on as many earlier messages as the strategy was built with, and no
+    more, even when the request carries further back."""
+    request = conversation("Review this contract", "Thanks", "In Germany?", lookback=2)
+
+    assert domains(lookback=0).decide(request) is None
+    assert domains(lookback=1).decide(request) is None
+    assert domains(lookback=2).decide(request) == RoutingChoice(
+        "frontier", "rule 'legal' matched: keyword 'contract' (2 messages back)"
+    )
+
+
+def test_the_repr_shows_lookback_when_it_is_set() -> None:
+    """The strategy prints as its constructor call, `lookback` included once it is set."""
+    rules = [Rule("small", always(), name="all")]
+
+    assert repr(ConfigurableStrategy(rules)) == (
+        "ConfigurableStrategy([Rule(route='small', when=always, priority=0, name='all')])"
+    )
+    assert repr(ConfigurableStrategy(rules, lookback=2)) == (
+        "ConfigurableStrategy([Rule(route='small', when=always, priority=0, name='all')], "
+        "lookback=2)"
+    )
+
+
+@pytest.mark.parametrize("lookback", [-1, True, 1.5, "2", None])
+def test_lookback_must_be_a_count_of_messages(lookback: Any) -> None:
+    """Checked at construction, like the rules."""
+    with pytest.raises(
+        RoutingError,
+        match=(
+            r"^lookback must be a non-negative integer, the number of the user's previous "
+            rf"messages to read, got {re.escape(repr(lookback))}$"
+        ),
+    ):
+        ConfigurableStrategy([Rule("small", always())], lookback=lookback)
 
 
 # The transcript

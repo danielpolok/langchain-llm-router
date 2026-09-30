@@ -5,10 +5,17 @@ line:
 
     strategy=KeywordStrategy({"coder": ["python", "regex", "stack trace"]})
 
-**What is matched.** The current request's text, and nothing else: `request.text`, what the
-user has just asked. A request with no text — an image on its own — matches no rule, so the
-default route answers; a list of keywords has nothing to say about a picture, which is why
-`modalities` plays no part here.
+**What is matched.** The current request's text: `request.text`, what the user has just asked.
+A request with no text — an image on its own — matches no rule, so the default route answers; a
+list of keywords has nothing to say about a picture, which is why `modalities` plays no part here.
+
+**Follow-ups.** With `lookback=N`, the user's previous N messages are matched too, when the
+current one has no match: the newest message with a match decides, and the reason says how far
+back it was — `matched keyword 'contract' (1 message back)`. "Is it enforceable in Germany?",
+asked after a question about a contract, then goes where that question went. Only the user's own
+messages count, never the model's answers or tool output. The newest match wins even when it is
+a false one, so a follow-up that happens to contain another route's keyword goes there; and a
+topic, once named, holds for N more messages that match nothing, whatever they are about.
 
 **How a keyword matches.** As a whole word, ignoring case: `"python"` matches `"Python?"` and
 `"in python,"` but not `"pythonic"`. Substring matching is the tempting default and the wrong
@@ -73,6 +80,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from langchain_llm_router.errors import RoutingError
+from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
 from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 __all__ = ["KeywordStrategy"]
@@ -100,7 +108,9 @@ class KeywordStrategy(RoutingStrategy):
 
     The first rule that matches wins, in declaration order, and the reason on the decision
     record names it — `"matched keyword 'python'"` — so a trace says what the router saw. When
-    nothing matches, the strategy returns `None` and the default route answers.
+    nothing matches, the strategy returns `None` and the default route answers. With
+    `lookback`, the user's previous messages are tried too, newest first, when the current one
+    matches nothing.
 
     A strategy is immutable once built: the rules are compiled in `__init__` and never touched
     again, so `decide` is thread-safe, as the interface requires, and one instance can serve
@@ -109,10 +119,13 @@ class KeywordStrategy(RoutingStrategy):
     Args:
         rules: Route name to its keywords — a keyword, a compiled pattern, or an iterable of
             either, in the order they should be tried.
+        lookback: How many of the user's previous messages to match as well, newest first,
+            when the current one has no match. Defaults to `0`, the current request alone.
 
     Raises:
         RoutingError: for a rule set that could never decide — not a mapping, empty, a blank
-            route name or keyword, a route with no keywords. Raised here, at construction.
+            route name or keyword, a route with no keywords — or a `lookback` that isn't a
+            non-negative integer. Raised here, at construction.
 
     Example:
         ```python
@@ -125,14 +138,16 @@ class KeywordStrategy(RoutingStrategy):
         ```
     """
 
-    def __init__(self, rules: Mapping[str, Keywords]) -> None:
+    def __init__(self, rules: Mapping[str, Keywords], *, lookback: int = 0) -> None:
         """Compile `rules`, raising `RoutingError` for a rule set that could never decide.
 
         Args:
             rules: Route name to its keywords, as described on the class.
+            lookback: How many of the user's previous messages to match as well.
 
         Raises:
-            RoutingError: if the rule set could never decide.
+            RoutingError: if the rule set could never decide, or `lookback` isn't a
+                non-negative integer.
         """
         if not isinstance(rules, Mapping):
             msg = (
@@ -151,16 +166,20 @@ class KeywordStrategy(RoutingStrategy):
             named = route.strip()
             compiled += [_rule(named, keyword) for keyword in _listed(named, keywords)]
         self._rules = tuple(compiled)
+        self.lookback = checked_lookback(lookback)
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """The route named by the first rule that matches, or `None` if none does.
 
-        A matching rule is answered with even when the router has no such route: the router
-        says so far better than this can, and one mistyped rule must not take the rest down
-        with it (the module docstring has the reasoning).
+        The newest message with a match decides: the current request, and then, with
+        `lookback`, the previous ones in turn. A matching rule is answered with even when the
+        router has no such route: the router says so far better than this can, and one
+        mistyped rule must not take the rest down with it (the module docstring has the
+        reasoning).
 
         Args:
-            request: The current request; only its text is matched.
+            request: The current request; only its text is matched, and with `lookback` its
+                previous requests' text.
 
         Returns:
             The first matching rule's route and reason, or `None` if no rule matches.
@@ -169,9 +188,12 @@ class KeywordStrategy(RoutingStrategy):
             RoutingError: if no rule names a route the router has.
         """
         self._check_it_can_decide(request.routes)
-        for rule in self._rules:
-            if rule.pattern.search(request.text):
-                return RoutingChoice(route=rule.route, reason=rule.reason)
+        for distance, message in considered(request, self.lookback):
+            for rule in self._rules:
+                if rule.pattern.search(message.text):
+                    return RoutingChoice(
+                        route=rule.route, reason=rule.reason + how_far_back(distance)
+                    )
         return None
 
     def _check_it_can_decide(self, routes: tuple[str, ...]) -> None:

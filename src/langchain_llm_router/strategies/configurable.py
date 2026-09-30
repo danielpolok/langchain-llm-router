@@ -25,8 +25,8 @@ What is a rule
 --------------
 A `Rule` is a route, a condition and a rank: `Rule(route, when, priority=0, name=None)`. When
 the condition holds for a request, the rule sends it to the route. The condition is built from
-what a strategy can see of the current request — nothing else, so nothing here can misroute
-an agent loop on its tool output:
+what a strategy can see of the user's messages — the current request, and with `lookback` the
+ones before it — and never from tool output, so nothing here can misroute an agent loop on it:
 
 | Condition | Holds when |
 | --- | --- |
@@ -93,7 +93,8 @@ Everything that can be judged from the configuration alone fails at construction
 `RoutingError` naming the rule at fault, never once per request: an empty rule set;
 a blank route, a bad priority or a duplicate name; an empty `any_of`; an unknown modality; a
 blank keyword; a threshold outside `(0, 1]`; an `async` function where a synchronous one is
-called; and **a rule that can never fire**, because an earlier one always matches first:
+called; a `lookback` that isn't a non-negative integer; and **a rule that can never fire**,
+because an earlier one always matches first:
 
 - after an `always()` rule,
 - with the same condition as an earlier rule — two rules sending the same requests to different
@@ -121,18 +122,49 @@ but a `bool`, fails the request it ran for and the router falls back. A `bool` i
 rather than "truthy" because the truthy mistakes are silent ones — an un-awaited coroutine, a
 match object — that route every request the same way.
 
+Follow-ups
+----------
+With `lookback=N`, the rules are tried on the user's previous N messages too, one message at a
+time, newest first: **the newest message that a rule matches decides**, and within a message the
+rules keep their order. The reason then says how far back that message was:
+`"rule 'legal' matched: keyword 'contract' (1 message back)"`. So a follow-up with no signal of
+its own, "Is it enforceable in Germany?", goes where the message that named the topic went.
+
+Two kinds of condition are not about any one message:
+
+- **`always()` waits for all of them.** A rule whose condition holds for every request — an
+  `always()`, or a combination that always holds — applies only when none of the considered
+  messages matched another rule; tried on each message in turn, it would decide on the current
+  one and make `lookback` do nothing. Its reason carries no distance: it speaks for the whole
+  conversation. It is always the last rule tried, since any rule after it is refused as dead.
+- **`tools_bound()` is a property of the call**, not of a message: a previous request carries
+  the call's `tools_bound`, as it carries its `routes`, so the condition holds for every message
+  of a call with tools bound, or for none.
+
+A broad rule decides on the current message just as it would without `lookback`. That matters
+most for `not_`: `not_(heavy)` holds for an easy follow-up itself, so in the order-independent
+spelling of cost tiering above it sends "ok" to `small` however hard the question before it
+was. Say "everything else" with `always()` when `lookback` is on.
+
 The transcript
 --------------
-`wants_full_context` stays `False`, so a condition sees the current request and `messages` is
+`wants_full_context` stays `False`, so a condition sees the user's messages and `messages` is
 `None`. It is a class attribute, which the router reads before it builds the request,
-so a configuration can't switch it on — and shouldn't: the opt-in is meant to be
-conspicuous. A rule that needs the conversation is a one-line subclass, whose predicates then
-find it in `request.messages`:
+so a configuration can't switch it on — and shouldn't: unlike `lookback`, which reads only what
+the user wrote, it hands over tool output and the model's answers too, and that opt-in is meant
+to be conspicuous. A rule that needs the whole conversation is a one-line subclass, whose
+predicates then find it in `request.messages`:
 
 ```python
 class WithHistory(ConfigurableStrategy):
     wants_full_context = True
 ```
+
+With `lookback` as well, a predicate tried on an earlier message sees the conversation as it
+stood when that message was sent, up to and including it. "The answer just before this message"
+is then that message's own, and not the current one's. The flip side is a question about the
+conversation as a whole, such as how long it is: tried on an earlier message, it is answered for
+the conversation as it was then.
 
 The ready-made strategies are not presets
 -----------------------------------------
@@ -162,6 +194,7 @@ from dataclasses import dataclass, field
 from typing import TypeAlias
 
 from langchain_llm_router.errors import RoutingError
+from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
 from langchain_llm_router.strategies.heuristic import Signal
 from langchain_llm_router.strategies.keyword import _whole_word, _written
 from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
@@ -540,6 +573,7 @@ class ConfigurableStrategy(RoutingStrategy):
 
     The highest-priority rule whose condition holds decides, and its reason names it and what
     made it hold. When none does, the strategy returns `None` and the default route answers.
+    With `lookback`, the newest of the user's messages that a rule matches decides.
 
     A strategy is immutable once built: the rules are checked and ordered in `__init__` and never
     touched again, so `decide` is thread-safe as the interface requires — provided the
@@ -547,11 +581,15 @@ class ConfigurableStrategy(RoutingStrategy):
 
     Args:
         rules: The rules, in declaration order; at least one.
+        lookback: How many of the user's previous messages to try the rules on as well, newest
+            first, when the current one matches none. Defaults to `0`, the current request
+            alone.
 
     Raises:
         RoutingError: for configuration that could never route — an empty rule set, a rule that
-            can never fire because an earlier one always matches first. Raised here, at
-            construction, not once per request; the module docstring lists them.
+            can never fire because an earlier one always matches first, a `lookback` that
+            isn't a non-negative integer. Raised here, at construction, not once per request;
+            the module docstring lists them.
 
     Example:
         ```python
@@ -571,29 +609,40 @@ class ConfigurableStrategy(RoutingStrategy):
     rules: tuple[Rule, ...]
     """The rules, in the order they were declared — not the order they are tried in."""
 
-    def __init__(self, rules: Sequence[Rule]) -> None:
+    def __init__(self, rules: Sequence[Rule], *, lookback: int = 0) -> None:
         """Check and order `rules`.
 
         Args:
             rules: The rules, in declaration order; at least one.
+            lookback: How many of the user's previous messages to try the rules on as well.
 
         Raises:
             RoutingError: for configuration that could never route.
         """
         self.rules = _checked_rules(rules)
-        self._ordered = _evaluation_order(self.rules)
-        _reject_dead_rules(self._ordered)
+        self.lookback = checked_lookback(lookback)
+        ordered = _evaluation_order(self.rules)
+        _reject_dead_rules(ordered)
+        # Nothing can follow a rule that always holds — it would be dead, and was refused just
+        # now — so if there is one, it is the last, and the only one.
+        if _always_holds(ordered[-1][1].when):
+            self._per_message, self._otherwise = ordered[:-1], ordered[-1:]
+        else:
+            self._per_message, self._otherwise = ordered, ()
 
     def __repr__(self) -> str:
         """The strategy as its constructor call."""
-        return f"ConfigurableStrategy({list(self.rules)!r})"
+        lookback = f", lookback={self.lookback}" if self.lookback else ""
+        return f"ConfigurableStrategy({list(self.rules)!r}{lookback})"
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """The route of the first rule that holds, in priority order, or `None` if none does.
 
-        A rule that holds is answered with even when the router has no such route: the router
-        says so far better than this can, and one mistyped rule must not take the rest down
-        with it (the module docstring has the reasoning).
+        The newest message a rule holds for decides: the current request, and then, with
+        `lookback`, the previous ones in turn. A rule that always holds is tried last, once
+        every message has been. A rule that holds is answered with even when the router has
+        no such route: the router says so far better than this can, and one mistyped rule
+        must not take the rest down with it (the module docstring has the reasoning).
 
         Args:
             request: The current request.
@@ -605,7 +654,15 @@ class ConfigurableStrategy(RoutingStrategy):
             RoutingError: if no rule names a route the router has.
         """
         self._check_it_can_decide(request.routes)
-        for label, rule in self._ordered:
+        for distance, message in considered(request, self.lookback):
+            for label, rule in self._per_message:
+                reason = rule.when.explain(message)
+                if reason is not None:
+                    return RoutingChoice(
+                        route=rule.route,
+                        reason=f"rule {label} matched: {reason}{how_far_back(distance)}",
+                    )
+        for label, rule in self._otherwise:
             reason = rule.when.explain(request)
             if reason is not None:
                 return RoutingChoice(route=rule.route, reason=f"rule {label} matched: {reason}")
@@ -724,6 +781,15 @@ def _implies(narrow: Condition, wide: Condition) -> bool:
     if isinstance(narrow, _Not) and isinstance(wide, _Not):
         return _implies(wide.condition, narrow.condition)
     return False
+
+
+def _always_holds(condition: Condition) -> bool:
+    """Whether `condition` holds for every request: `always()`, or a combination that is one.
+
+    `always()` implying it is the proof — the same sound check that finds dead rules, so a
+    condition is only ever treated as a catch-all when it is one.
+    """
+    return _implies(_Always(), condition)
 
 
 def _contains_run(words: tuple[str, ...] | None, run: tuple[str, ...] | None) -> bool:

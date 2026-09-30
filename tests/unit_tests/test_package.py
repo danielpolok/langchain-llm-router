@@ -1,6 +1,8 @@
 """Package-level guarantees: it needs langchain-core only, and langchain-core 1.x."""
 
+from dataclasses import fields
 from importlib.metadata import requires, version
+from inspect import Parameter, signature
 
 from packaging.requirements import Requirement
 
@@ -35,6 +37,21 @@ def test_package_exports_the_pinned_api() -> None:
     assert set(langchain_llm_router.__all__) >= PINNED_EXPORTS
     for name in langchain_llm_router.__all__:
         assert getattr(langchain_llm_router, name) is not None
+
+
+# Defaults the stability promise settles: changing one is a breaking release.
+READS_EARLIER_MESSAGES = ["KeywordStrategy", "ConfigurableStrategy", "HeuristicStrategy"]
+
+
+def test_reading_earlier_messages_is_off_by_default() -> None:
+    import langchain_llm_router
+
+    assert langchain_llm_router.RoutingStrategy.lookback == 0
+    request_fields = {field.name: field for field in fields(langchain_llm_router.RoutingRequest)}
+    assert request_fields["previous_requests"].default == ()
+    for name in READS_EARLIER_MESSAGES:
+        lookback = signature(getattr(langchain_llm_router, name)).parameters["lookback"]
+        assert (lookback.kind, lookback.default) == (Parameter.KEYWORD_ONLY, 0)
 
 
 def test_runtime_dependencies_are_langchain_core_only() -> None:

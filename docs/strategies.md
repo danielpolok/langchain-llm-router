@@ -6,7 +6,8 @@ should answer and says why. If it can't tell, it abstains, and the router's defa
 A strategy sees the **current request**: the text of the user's latest message, any images or
 files attached to it, and whether tools are bound. By default it doesn't see tool output, the
 system prompt or the rest of the conversation. That keeps an agent's tool loop, or a long chat,
-from changing where a simple question goes.
+from changing where a simple question goes. To route a short follow-up in the light of what the
+user asked before, give the strategy [`lookback`](#follow-up-questions-lookback).
 
 | Strategy | Decides by | Extra cost per request |
 | --- | --- | --- |
@@ -140,6 +141,10 @@ ask(router, "Check this invoice: 3 hours at $40 comes to $150.")
 frontier difficulty 1.00 >= 1.00 (money 1.00)
 ```
 
+**Keep follow-ups on the stronger model.** "Thanks! Which one does SQLite use?" scores 0 on its
+own. With `lookback=2`, the strategy scores the user's two previous messages too, and the
+hardest one decides. See [Follow-up questions](#follow-up-questions-lookback).
+
 > [!NOTE]
 > **What the score can't see.** `length` counts words separated by spaces, and the reasoning
 > words are English. A hard question in Chinese, Japanese or Thai can score 0. Length is also
@@ -185,6 +190,9 @@ How it matches:
   `FallbackWarning`, so a request that nothing matched never goes unnoticed. If "everything else
   goes to the default" is part of your policy, write it as an explicit rule with
   [`ConfigurableStrategy`](#configurablestrategy-combine-rules) and `always()`.
+- **Follow-ups can match on earlier messages.** With `lookback=2`, a request with no match of
+  its own is matched on the user's two previous messages, and the newest match decides. See
+  [Follow-up questions](#follow-up-questions-lookback).
 
 ## `ConfigurableStrategy`: combine rules
 
@@ -245,6 +253,9 @@ Rules are tried from the highest `priority=` to the lowest. The default priority
 without priorities the first matching rule wins. Mistakes that can't work are caught when the
 strategy is built. For example, a rule that can never fire because an earlier rule always matches
 first is rejected at construction instead of failing silently later.
+
+With `lookback=2`, the rules are also tried on the user's two previous messages, and the newest
+message that a rule matches decides. See [Follow-up questions](#follow-up-questions-lookback).
 
 ## `EmbeddingStrategy`: route on meaning
 
@@ -345,6 +356,128 @@ The classifier's call appears in your trace and in token usage, under the strate
 > requests, but still saved less than the free heuristic, because its own call is billed too.
 > Reach for it when the free strategies measurably misroute your traffic.
 
+## Follow-up questions: `lookback`
+
+People rarely repeat the topic in a follow-up. "Thanks! Which one does SQLite use?" looks easy,
+although it continues a question that needed the frontier model, so on its own it goes to the
+small one. Give the strategy `lookback=N`, and it reads the user's previous N messages as well as
+the current one.
+
+The examples in this section send each question as part of one conversation, with the answers
+before it, the way a chat app does:
+
+```python
+def chat(router, *questions):
+    conversation = []
+    for question in questions:
+        conversation.append(("user", question))
+        response = router.invoke(conversation)
+        conversation.append(response)
+        decision = routing_decision(response)
+        print(f"{decision.route:<8} {decision.reason}")
+
+
+router = ChatRouter(
+    routes={"small": small, "frontier": frontier},
+    default_route="small",
+    strategy=HeuristicStrategy("small", "frontier", lookback=2),
+)
+
+chat(
+    router,
+    "Compare the trade-offs of B-trees and LSM trees for databases.",
+    "Thanks! Which one does SQLite use?",
+    "And Postgres?",
+    "Suggest a name for my cat",
+)
+```
+
+```text
+frontier difficulty 1.00 >= 1.00 (analysis 1.00)
+frontier difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)
+frontier difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)
+small    difficulty 0.00 < 1.00 (no signal fired)
+```
+
+The two follow-ups stayed on the frontier model, and each reason says which message decided and
+how far back it was. By the fourth question the hard one was three messages back, out of reach,
+so the conversation came back down to the small model.
+
+Each strategy reads the extra messages its own way:
+
+| Strategy | With `lookback=N` |
+| --- | --- |
+| `HeuristicStrategy` | The hardest of the messages decides. A conversation moves up at once, and back down after N easier messages. |
+| `KeywordStrategy` | The newest message with a keyword match decides. |
+| `ConfigurableStrategy` | The newest message that a rule matches decides. An `always()` rule applies only when none of them matched. |
+
+With `KeywordStrategy`, a follow-up with no keyword of its own goes where the question before it
+went:
+
+```python
+router = ChatRouter(
+    routes={"general": small, "coder": frontier},
+    default_route="general",
+    strategy=KeywordStrategy({"coder": ["python", "sql", "regex"]}, lookback=2),
+)
+
+chat(
+    router,
+    "Write a regex that matches an email address",
+    "Now make it reject addresses with a plus sign",
+)
+```
+
+```text
+coder    matched keyword 'regex'
+coder    matched keyword 'regex' (1 message back)
+```
+
+With `ConfigurableStrategy`, the rules are tried on each message in turn, newest first. The final
+`always()` rule waits until no message matched, so it doesn't answer the follow-up before the
+legal rule has seen the question it follows:
+
+```python
+router = ChatRouter(
+    routes={"small": small, "frontier": frontier},
+    default_route="small",
+    strategy=ConfigurableStrategy(
+        [
+            Rule("frontier", keywords("contract", "clause", "liability"), name="legal"),
+            Rule("small", always(), name="everything else"),
+        ],
+        lookback=2,
+    ),
+)
+
+chat(
+    router,
+    "Review this contract clause on limitation of liability",
+    "Is it enforceable in Germany?",
+)
+```
+
+```text
+frontier rule 'legal' matched: keyword 'contract'
+frontier rule 'legal' matched: keyword 'contract' (1 message back)
+```
+
+What to know before you turn it on:
+
+- **Only the user's messages count.** The model's answers, tool output and the system prompt
+  never take one of the N places. Inside an agent's tool loop, the earlier messages are the ones
+  before the question that started the loop.
+- **It costs nothing extra** with these three strategies, which make no call.
+- **Keep N small.** Two or three is usually enough, since a follow-up leans on the last message
+  or two. A larger N also holds a topic longer after the user has moved on: a question about
+  something else still goes to `coder` while a keyword match is within N messages.
+- **The newest match still wins.** Lookback helps a message with no signal of its own. It can't
+  correct one with a misleading signal: in a legal conversation, "Which article of the civil code
+  covers this?" matches `code`. Embeddings or a classifier read meaning instead of words.
+- **Say "everything else" with `always()`.** In `ConfigurableStrategy`, a `not_(...)` rule holds
+  for the follow-up itself, so it decides before lookback reaches the question that set the
+  topic.
+
 ## Your own strategy
 
 Your policy may depend on your own data, such as a customer's plan, a feature flag or a classifier
@@ -381,9 +514,10 @@ function must be synchronous. The type it must match is `RoutingCallable`.
 
 ### A strategy class
 
-Subclass `RoutingStrategy` when you need state, async support or the whole conversation. This one
-keeps a conversation on the route that answered its previous turn. That way a follow-up question
-stays with the model that has the context, and keeps the provider's prompt cache warm:
+Subclass `RoutingStrategy` when you need state, async support, the user's earlier messages or the
+whole conversation. This one keeps a conversation on the route that answered its previous turn.
+That way a follow-up question stays with the model that has the context, and keeps the provider's
+prompt cache warm:
 
 ```python
 from langchain_llm_router import RoutingChoice, RoutingStrategy
@@ -426,6 +560,8 @@ conversation is on 'frontier'
 ```
 
 On its own, "Which one does SQLite use?" scores 0 and would go to the small model.
+[`lookback`](#follow-up-questions-lookback) keeps it on the frontier model too, by reading the
+question before it. `Sticky` differs in never moving a conversation once it has a route.
 
 `decide` returns a `RoutingChoice` or `None`. A few rules apply:
 
@@ -436,6 +572,18 @@ On its own, "Which one does SQLite use?" scores 0 and would go to the small mode
   the strategy. `ClassifierStrategy` does exactly this.
 - **Failures fall back.** If the strategy raises, or names a route the router doesn't have, the
   default route answers and a `FallbackWarning` says why.
+- **Set `lookback` to read earlier messages.** With `lookback = 2` on the class, or
+  `self.lookback = 2` in `__init__`, `request.previous_requests` holds up to two of the user's
+  previous messages, newest first. Each is the `RoutingRequest` the router read when that
+  message arrived, so you can hand it to another strategy's `decide`. Its `messages` end at that
+  message; the whole conversation is on the current request. A plain function always sees the
+  current request alone.
+- **Pass `lookback` on when you wrap a strategy.** The router hands over as many previous
+  messages as the strategy you give it asks for, and a built-in strategy reads at most its own
+  `lookback`. A strategy that hands the request to another one, as `Sticky` does, sets
+  `self.lookback = inner.lookback` so the two agree. To read a different number, it keeps
+  `inner.with_lookback(n)` instead, a copy that reads `n` messages, and takes the copy's
+  `lookback`. The strategy you passed in is left as it was.
 
 ### What a strategy sees
 
@@ -450,6 +598,7 @@ On its own, "Which one does SQLite use?" scores 0 and would go to the small mode
 | `tools_bound` | Whether tools or structured output are bound to the call |
 | `messages` | The whole conversation, only if the strategy sets `wants_full_context = True` |
 | `config` | The call's runtime config. Pass it to any model your strategy calls |
+| `previous_requests` | Up to `lookback` of the user's previous messages, newest first, each the `RoutingRequest` read when that message arrived. Empty unless the strategy sets `lookback` |
 
 ### Stability promise
 
@@ -457,11 +606,13 @@ On its own, "Which one does SQLite use?" scores 0 and would go to the small mode
 with a compatibility promise. Until 1.0, the minor version plays the role of the major one:
 
 - **Minor releases stay compatible.** They may add a `RoutingRequest` field (last, with a
-  default), an optional `RoutingStrategy` member whose default keeps today's behaviour, new
+  default, as `previous_requests` was), an optional `RoutingStrategy` member whose default keeps
+  today's behaviour (as `wants_full_context`, `lookback` and `with_lookback` are), new
   `modalities` values, and new wording in the built-in strategies' reasons.
 - **Anything breaking needs a major release.** That covers removing, renaming or retyping any of
-  the above, adding an abstract method, changing what `None` or a bare route name means, or
-  changing `decide` / `adecide` or the default of `wants_full_context`.
+  the above, adding an abstract method, changing what `None` or a bare route name means, changing
+  `decide` / `adecide`, changing the default of `wants_full_context` or `lookback`, or changing
+  what `lookback` counts or the order of `previous_requests`.
 
 The same promise covers each built-in strategy's constructor and public attributes. Names that
 start with an underscore are internal and may change in any release.

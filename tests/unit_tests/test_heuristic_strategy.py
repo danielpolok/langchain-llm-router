@@ -30,7 +30,7 @@ from uuid import UUID
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.context import register_configure_hook
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
@@ -573,6 +573,124 @@ def test_configuration_that_could_never_route_fails_at_construction(
     built, not a surprise on the first request."""
     with pytest.raises(RoutingError, match=message):
         HeuristicStrategy(*tiers, **kwargs)
+
+
+# --- Follow-ups: the user's previous messages, with `lookback` ---
+
+HARD = "Compare the trade-offs of B-trees and LSM trees for databases."
+"""Two analysis terms: `analysis 1.00`, exactly on the default threshold."""
+
+FOLLOW_UP = "Thanks! Which one does SQLite use?"
+"""Scores `0.00` on its own."""
+
+
+def conversation(*turns: str | Sequence[str | dict[Any, Any]], lookback: int) -> RoutingRequest:
+    """The request a router builds when the last turn follows the others, each answered."""
+    messages: list[BaseMessage] = []
+    for turn in turns:
+        content = turn if isinstance(turn, str) else list(turn)
+        messages += [HumanMessage(content=content), AIMessage("an answer")]
+    request = build_request(
+        messages[:-1],
+        routes=TIERS,
+        tools_bound=False,
+        wants_full_context=False,
+        config=RunnableConfig(),
+        lookback=lookback,
+    )
+    assert request is not None
+    return request
+
+
+def test_the_hardest_of_the_considered_messages_decides() -> None:
+    """An easy follow-up to a hard question stays on the stronger tier, and the reason is the
+    hard question's own, with how far back it was."""
+    choice = HeuristicStrategy(*TIERS, lookback=2).decide(
+        conversation(HARD, FOLLOW_UP, "ok", lookback=2)
+    )
+
+    assert choice == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)"
+    )
+
+
+def test_a_conversation_comes_back_down_after_lookback_easier_messages() -> None:
+    """Up at once, down after N easier messages: the hard question stops counting once it is
+    further back than `lookback`."""
+    strategy = HeuristicStrategy(*TIERS, lookback=2)
+
+    assert strategy.decide(
+        conversation(HARD, FOLLOW_UP, "ok", "A name for my cat?", lookback=2)
+    ) == (RoutingChoice("small", "difficulty 0.00 < 1.00 (no signal fired)"))
+
+
+def test_a_harder_current_request_keeps_its_own_reason() -> None:
+    """The current request decides whenever it is at least as hard as the earlier ones: a
+    tie goes to the newer message, so its reason carries no distance."""
+    strategy = HeuristicStrategy(*TIERS, lookback=1)
+
+    assert strategy.decide(conversation(HARD, MULTI_PART_ANALYSIS, lookback=1)) == RoutingChoice(
+        "frontier", "difficulty 2.07 >= 1.00 (parts 1.00, analysis 1.00, length 0.07)"
+    )
+    assert strategy.decide(conversation(HARD, HARD, lookback=1)) == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00)"
+    )
+    assert HeuristicStrategy(*TIERS, lookback=2).decide(
+        conversation(HARD, HARD, FOLLOW_UP, lookback=2)
+    ) == RoutingChoice("frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)")
+
+
+def test_an_earlier_message_decides_a_middle_tier_too() -> None:
+    """With more tiers, the hardest message picks the band, whichever tier that is."""
+    strategy = HeuristicStrategy("small", "mid", "frontier", thresholds=[0.5, 1.5], lookback=1)
+
+    assert strategy.decide(conversation(HARD, FOLLOW_UP, lookback=1)) == RoutingChoice(
+        "mid", "difficulty 1.00 in [0.50, 1.50) (analysis 1.00) (1 message back)"
+    )
+
+
+def test_a_message_with_nothing_to_score_is_passed_over() -> None:
+    """An empty message is not the easiest one, it is no evidence at all: an empty current
+    request is judged by the messages before it, and only when none has anything to score
+    does the strategy abstain."""
+    strategy = HeuristicStrategy(*TIERS, lookback=1)
+
+    assert strategy.decide(conversation(HARD, "  ", lookback=1)) == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)"
+    )
+    assert strategy.decide(conversation("", "  ", lookback=1)) is None
+
+
+def test_an_image_earlier_in_the_conversation_is_scored_where_it_was_sent() -> None:
+    """Every signal reads the message it is given, `modalities` included: a question about
+    an image sent a message ago still weighs the image."""
+    image_turn = [{"type": "text", "text": "What is this?"}, IMAGE]
+
+    assert HeuristicStrategy(*TIERS, lookback=1).decide(
+        conversation(image_turn, "and the one on the left?", lookback=1)
+    ) == RoutingChoice("frontier", "difficulty 1.00 >= 1.00 (modalities 1.00) (1 message back)")
+
+
+def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> None:
+    """Only as many earlier messages as the strategy was built with are scored."""
+    request = conversation(HARD, "ok", FOLLOW_UP, lookback=2)
+
+    assert HeuristicStrategy(*TIERS).decide(request) == RoutingChoice(
+        "small", "difficulty 0.00 < 1.00 (no signal fired)"
+    )
+    assert HeuristicStrategy(*TIERS, lookback=1).decide(request) == RoutingChoice(
+        "small", "difficulty 0.00 < 1.00 (no signal fired)"
+    )
+    assert HeuristicStrategy(*TIERS, lookback=2).decide(request) == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)"
+    )
+
+
+@pytest.mark.parametrize("lookback", [-1, True, 1.5, "2", None])
+def test_lookback_must_be_a_count_of_messages(lookback: Any) -> None:
+    """Checked at construction, with the rest of the configuration."""
+    with pytest.raises(RoutingError, match=r"^lookback must be a non-negative integer"):
+        HeuristicStrategy(*TIERS, lookback=lookback)
 
 
 # --- an ordinary public strategy ---

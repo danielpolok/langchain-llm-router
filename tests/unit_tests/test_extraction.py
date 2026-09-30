@@ -11,6 +11,7 @@ the same check through `ChatRouter` is a small addition: swap the model in
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -67,6 +68,7 @@ def extract(
     wants_full_context: bool = False,
     tools_bound: bool = False,
     config: RunnableConfig | None = None,
+    lookback: int = 0,
 ) -> RoutingRequest | None:
     return build_request(
         messages,
@@ -74,6 +76,7 @@ def extract(
         tools_bound=tools_bound,
         wants_full_context=wants_full_context,
         config=config if config is not None else RunnableConfig(),
+        lookback=lookback,
     )
 
 
@@ -610,3 +613,153 @@ def test_every_input_form_of_a_multimodal_conversation_produces_the_same_request
             modalities=frozenset({"text", "image"}),
         ),
     )
+
+
+# the user's earlier messages, with lookback.
+
+EARLIER_TURN: list[BaseMessage] = [
+    HumanMessage("Hi, I'm planning a trip."),
+    AIMessage("Happy to help. Where to?"),
+]
+"""A turn before the agent loop's question, answered."""
+
+
+def texts(requests: Sequence[RoutingRequest]) -> list[str]:
+    return [request.text for request in requests]
+
+
+def test_the_earlier_user_messages_are_read_newest_first_up_to_lookback() -> None:
+    """`lookback` of the user's messages before the current one, the newest first — as many as
+    there are, when there are fewer — and none without it."""
+    transcript = [
+        SYSTEM,
+        HumanMessage("one"),
+        AIMessage("reply"),
+        HumanMessage("two"),
+        AIMessage("reply"),
+        HumanMessage("three"),
+        AIMessage("reply"),
+        HumanMessage("four"),
+    ]
+
+    for lookback, expected in [
+        (0, []),
+        (1, ["three"]),
+        (2, ["three", "two"]),
+        (5, ["three", "two", "one"]),
+    ]:
+        request = extract(transcript, lookback=lookback)
+        assert request is not None
+        assert (request.text, texts(request.previous_requests)) == ("four", expected)
+    assert extract(transcript) == extract(transcript, lookback=0) == request_for("four")
+
+
+def test_earlier_messages_are_found_by_the_rules_the_current_request_is() -> None:
+    """A user message is a `HumanMessage`, a chunk of one, or a `ChatMessage` in a user role —
+    and an empty one keeps its place, as it would as the current request. Nothing else takes a
+    place: not a system prompt, an AI message, a tool result or another role."""
+    transcript: list[BaseMessage] = [
+        ChatMessage(role="human", content="by role"),
+        SystemMessage("Reminder: be brief."),
+        HumanMessageChunk(content="a chunk"),
+        ChatMessage(role="critic", content="not a user"),
+        weather_call("Paris", "call_paris"),
+        ToolMessage(FORECAST.format(city="Paris"), tool_call_id="call_paris"),
+        HumanMessage(""),
+        AIMessage("reply"),
+        HumanMessage("current"),
+    ]
+
+    request = extract(transcript, lookback=5)
+
+    assert request is not None
+    assert texts(request.previous_requests) == ["", "a chunk", "by role"]
+    assert [previous.modalities for previous in request.previous_requests] == [
+        frozenset(),
+        frozenset({"text"}),
+        frozenset({"text"}),
+    ]
+
+
+@pytest.mark.parametrize("call", TOOL_LOOP_CALLS, ids=["first", "second", "third"])
+def test_in_a_tool_loop_the_earlier_messages_are_the_ones_before_the_loop(
+    call: list[BaseMessage],
+) -> None:
+    """However many tool calls and results a loop has added, every call in it reads the request
+    that started the loop, and before it the user's earlier turns — never the tool output."""
+    request = extract([*EARLIER_TURN, *call], lookback=2)
+
+    assert request is not None
+    assert (request.text, texts(request.previous_requests)) == (
+        QUESTION,
+        ["Hi, I'm planning a trip."],
+    )
+
+
+def test_an_earlier_message_is_read_as_the_current_request_is() -> None:
+    """Each earlier message is read like the current request — its text, content blocks and
+    modalities — with the transcript, when the strategy wants it, as it stood when that message
+    was sent. What the transcript doesn't record is the call's: routes, tools and config. It
+    has no earlier messages of its own."""
+    config = RunnableConfig(tags=["strategy-run"])
+    transcript: list[BaseMessage] = [*MULTIMODAL, AIMessage("A tabby."), HumanMessage("Is it old?")]
+
+    request = extract(
+        transcript, lookback=1, wants_full_context=True, tools_bound=True, config=config
+    )
+
+    assert request is not None
+    (previous,) = request.previous_requests
+    assert (previous.text, previous.modalities) == (
+        "What breed is this cat?",
+        frozenset({"text", "image"}),
+    )
+    assert previous.content_blocks == [
+        {"type": "text", "text": "What breed is this cat?"},
+        {"type": "image", "url": IMAGE_URL},
+    ]
+    assert (previous.routes, previous.tools_bound, previous.config) == (ROUTES, True, config)
+    assert previous.config is config
+    assert request.messages == transcript
+    assert previous.messages == MULTIMODAL
+    assert previous.previous_requests == ()
+
+
+def test_an_earlier_messages_transcript_ends_at_that_message() -> None:
+    """An earlier request carries the conversation as it stood when its message was sent: up
+    to and including it, and nothing the model or its tools added after it — while the current
+    request carries the whole of it. So it is what the router read then, and where its message
+    sits is the length of its transcript."""
+    transcript: list[BaseMessage] = [*AGENT_TOOL_LOOP, HumanMessage("And tomorrow?")]
+
+    request = extract(transcript, lookback=1, wants_full_context=True)
+
+    assert request is not None
+    (previous,) = request.previous_requests
+    assert request.messages == transcript
+    assert previous.messages == FIRST_CALL  # the tool loop that followed it is not there yet
+    assert previous == extract(FIRST_CALL, wants_full_context=True)
+    assert transcript[len(previous.messages) - 1] is FIRST_CALL[-1]
+
+
+def test_every_input_form_of_a_conversation_produces_the_same_earlier_messages() -> None:
+    """Dicts, messages and a prompt template's `ChatPromptValue` of the same conversation give
+    the same earlier messages, as they give the same current request."""
+    template = ChatPromptTemplate.from_messages(
+        [("system", SYSTEM_PROMPT), ("human", "Hi"), ("ai", "Hello!"), ("human", "{q}")]
+    )
+    forms: dict[str, LanguageModelInput] = {
+        "dicts": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+            {"role": "user", "content": HAIKU_REQUEST},
+        ],
+        "messages": [SYSTEM, HumanMessage("Hi"), AIMessage("Hello!"), HumanMessage(HAIKU_REQUEST)],
+        "prompt-value": template.invoke({"q": HAIKU_REQUEST}),
+    }
+
+    requests = {name: extract_input(value, lookback=3) for name, value in forms.items()}
+
+    expected = replace(request_for(HAIKU_REQUEST), previous_requests=(request_for("Hi"),))
+    assert requests == dict.fromkeys(forms, expected)

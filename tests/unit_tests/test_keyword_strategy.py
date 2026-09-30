@@ -19,6 +19,7 @@ import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import Any, NoReturn
 
 import pytest
@@ -412,6 +413,90 @@ def test_a_rule_set_that_could_never_decide_fails_at_construction(rules: Any, me
     package raises for configuration, and the message says which rule is at fault."""
     with pytest.raises(RoutingError, match=rf"^{re.escape(message)}$"):
         KeywordStrategy(rules)
+
+
+# Follow-ups: the user's previous messages, with `lookback`
+
+DOMAINS = {"coder": ["python", "sql", "code"], "legal": ["contract", "clause", "liability"]}
+
+
+def conversation(*texts: str) -> RoutingRequest:
+    """The last of `texts` as the current request, the others as the user's earlier messages."""
+    *earlier, current = texts
+    return replace(
+        request_for(current),
+        previous_requests=tuple(request_for(text) for text in reversed(earlier)),
+    )
+
+
+def test_a_follow_up_is_matched_on_the_message_before_it() -> None:
+    """A follow-up with no keyword of its own goes where the message before it went, and the
+    reason says it was that message that matched."""
+    strategy = KeywordStrategy(DOMAINS, lookback=1)
+
+    assert strategy.decide(
+        conversation("Review this contract clause", "Is it enforceable in Germany?")
+    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)")
+
+
+def test_the_newest_message_with_a_match_decides() -> None:
+    """Messages are tried newest first, and within a message the rules keep their order. So the
+    topic the user moved to wins, even over a rule declared before it; and a match in the
+    current request wins outright, with the reason it has without lookback."""
+    strategy = KeywordStrategy(DOMAINS, lookback=2)
+
+    assert strategy.decide(
+        conversation("A python script, please", "Now review this contract", "And in Germany?")
+    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)")
+    assert strategy.decide(
+        conversation("Review this contract", "Now a python script for it")
+    ) == RoutingChoice("coder", "matched keyword 'python'")
+
+
+def test_lookback_reaches_past_messages_that_match_nothing() -> None:
+    """A message with no match takes a place and passes the question on — up to `lookback`
+    places, and no further."""
+    earlier = ("Write it in python", "Thanks", "Looks good")
+
+    assert KeywordStrategy(DOMAINS, lookback=3).decide(
+        conversation(*earlier, "One more thing")
+    ) == RoutingChoice("coder", "matched keyword 'python' (3 messages back)")
+    assert KeywordStrategy(DOMAINS, lookback=2).decide(conversation(*earlier, "One more")) is None
+
+
+def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> None:
+    """A strategy handed a request by another one, which read further back, still reads only
+    as far as it was configured to — without `lookback`, the current request alone."""
+    request = conversation("Review this contract", "Thanks", "And in Germany?")
+
+    assert KeywordStrategy(DOMAINS).lookback == 0
+    assert KeywordStrategy(DOMAINS).decide(request) is None
+    assert KeywordStrategy(DOMAINS, lookback=1).decide(request) is None
+    assert KeywordStrategy(DOMAINS, lookback=2).decide(request) == RoutingChoice(
+        "legal", "matched keyword 'contract' (2 messages back)"
+    )
+
+
+async def test_the_async_path_reads_back_the_same() -> None:
+    """`adecide` runs `decide` in a worker thread, so earlier messages are read the same way."""
+    strategy = KeywordStrategy(DOMAINS, lookback=1)
+    request = conversation("Write it in python", "Add unit tests for it")
+
+    assert await strategy.adecide(request) == strategy.decide(request)
+
+
+@pytest.mark.parametrize("lookback", [-1, True, 1.5, "2", None])
+def test_lookback_must_be_a_count_of_messages(lookback: Any) -> None:
+    """Checked at construction, like the rules: a negative number, a flag or anything but an
+    integer could never say how many messages to read."""
+    with pytest.raises(
+        RoutingError,
+        match=(
+            r"^lookback must be a non-negative integer, the number of the user's previous "
+            rf"messages to read, got {re.escape(repr(lookback))}$"
+        ),
+    ):
+        KeywordStrategy(DOMAINS, lookback=lookback)
 
 
 # Through the router: a built-in is an ordinary strategy
