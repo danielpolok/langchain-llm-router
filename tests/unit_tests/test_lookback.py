@@ -596,7 +596,8 @@ def test_a_lookback_made_unreadable_after_the_router_was_built_falls_back() -> N
     """`lookback` is an ordinary attribute, read on every request. One that stopped being a
     count after the router was built is reported like a strategy failure — the default route
     answers, one `FallbackWarning` says why — rather than failing the call. The strategy can't
-    be consulted, so no strategy run opens."""
+    be consulted, so no strategy run opens, but the record names it: the fallback is down to its
+    setting."""
 
     class Unreadable(Recording):
         pass
@@ -613,7 +614,10 @@ def test_a_lookback_made_unreadable_after_the_router_was_built_falls_back() -> N
         f"{not_a_count(-1)}; falling back to the default route 'general'"
     ]
     assert routing_decision(answer) == RoutingDecision(
-        route="general", reason=f"{not_a_count(-1)}; fell back to the default route", fallback=True
+        route="general",
+        reason=f"{not_a_count(-1)}; fell back to the default route",
+        strategy="Unreadable",
+        fallback=True,
     )
     assert strategy.requests == []
     (router_run,) = collector.traced_runs

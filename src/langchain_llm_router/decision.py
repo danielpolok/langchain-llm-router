@@ -38,7 +38,7 @@ class RoutingDecision:
     Attributes:
         route: The route that ran.
         reason: Why, in words, for a human reading a trace.
-        strategy: The strategy's name, or `None` when no strategy ran.
+        strategy: The strategy's name, or `None` when no strategy decided or was to blame.
         fallback: Whether the default route ran because the strategy could not decide.
         forced: Whether the route came from runtime config.
         diverted_from: The tool-incapable route the request was diverted from, if any.
@@ -58,7 +58,11 @@ class RoutingDecision:
     """Why, in words, for a human reading a trace."""
 
     strategy: str | None = None
-    """The strategy's name, or `None` when no strategy ran (no strategy, or a forced route)."""
+    """The strategy's name, or `None` when no strategy decided or was to blame.
+
+    `None` when there is no strategy, the route was forced, or the request had no user message to
+    route on. A strategy whose `lookback` stopped being a count is named although it never ran:
+    the fallback is down to its setting."""
 
     fallback: bool = False
     """The default-route fallback was taken: the strategy could not decide, so the default route

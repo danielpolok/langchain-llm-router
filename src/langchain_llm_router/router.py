@@ -909,7 +909,9 @@ class ChatRouter(BaseChatModel):
 
         Nor is a strategy whose `lookback` is no longer a non-negative integer. Construction
         checked it, but it is an ordinary attribute, read afresh here, and the default route
-        answers rather than the request failing over it.
+        answers rather than the request failing over it. The record still names the strategy,
+        though it never ran: the fallback is down to its setting, and a count of fallbacks by
+        strategy should include it.
         """
         forced = config.get("configurable", {}).get("route")
         if forced is not None:
@@ -920,7 +922,7 @@ class ChatRouter(BaseChatModel):
             return RoutingDecision(route=self.default_route, reason="no strategy configured")
         problem = _lookback_problem(strategy)
         if problem is not None:
-            return self._fallback(problem, strategy=None)
+            return self._fallback(problem, strategy=strategy_name(strategy))
         request = build_request(
             messages,
             routes=tuple(self.routes),
