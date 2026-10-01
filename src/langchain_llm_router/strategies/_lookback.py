@@ -5,7 +5,9 @@ messages, newest first — at most its own N, whatever the request carries, so a
 request by another one still reads what it was configured to. A wrapper that wants it to read a
 different number gives it a copy made with `with_lookback`, which sets the same attribute. A
 message that decides from further back says so in the reason, with the same words in every
-strategy: `(1 message back)`.
+strategy: `(1 message back)`. Each also reports the distance itself, `0` for the current request,
+in `RoutingChoice.messages_back`, so the decision record carries it without anyone reading the
+reason.
 """
 
 from __future__ import annotations

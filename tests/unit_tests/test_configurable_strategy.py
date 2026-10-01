@@ -267,6 +267,12 @@ TIERING = [
 TIERING_TEXTS = [text for _, text, _, _ in TIERING_CASES]
 
 
+def tiering_distance(reason: str) -> int | None:
+    """The `messages_back` a tiering decision reports: `0`, the current message, for a rule that
+    matched it, and `None` for the catch-all, which speaks for no one message."""
+    return None if reason.endswith("matched: always") else 0
+
+
 @pytest.mark.parametrize(("text", "route", "reason"), TIERING)
 def test_cost_tiering_is_configuration_alone(text: str, route: str, reason: str) -> None:
     """Cheap for short simple requests, frontier for long or code-bearing ones —
@@ -275,23 +281,25 @@ def test_cost_tiering_is_configuration_alone(text: str, route: str, reason: str)
     strategy = cost_tiering()
 
     assert type(strategy) is ConfigurableStrategy
-    assert strategy.decide(make_request(text)) == RoutingChoice(route, reason)
+    assert strategy.decide(make_request(text)) == RoutingChoice(
+        route, reason, messages_back=tiering_distance(reason)
+    )
 
 
 DOMAIN = [
     pytest.param(
         "How do I do this in Python?",
-        RoutingChoice("coder", "rule 'code' matched: keyword 'python'"),
+        RoutingChoice("coder", "rule 'code' matched: keyword 'python'", messages_back=0),
         id="keyword",
     ),
     pytest.param(
         "why does my REGEX never match?",
-        RoutingChoice("coder", "rule 'code' matched: keyword 'regex'"),
+        RoutingChoice("coder", "rule 'code' matched: keyword 'regex'", messages_back=0),
         id="keyword, whatever its case",
     ),
     pytest.param(
         TRACEBACK,
-        RoutingChoice("coder", "rule 'code' matched: code 0.50 >= 0.50"),
+        RoutingChoice("coder", "rule 'code' matched: code 0.50 >= 0.50", messages_back=0),
         id="pasted traceback",
     ),
     pytest.param("What is the weather in Kraków?", None, id="everything else"),
@@ -377,7 +385,10 @@ async def test_cost_tiering_through_the_router(
     assert calls_per_route(routes) == {"coder": 0, "frontier": 0, "small": 0} | {route: 1}
     assert routing_warnings(caught) == []
     assert routing_decision(message) == RoutingDecision(
-        route=route, reason=reason, strategy="ConfigurableStrategy"
+        route=route,
+        reason=reason,
+        strategy="ConfigurableStrategy",
+        messages_back=tiering_distance(reason),
     )
 
 
@@ -401,6 +412,7 @@ async def test_domain_routing_through_the_router(
         route="coder",
         reason="rule 'code' matched: keyword 'regex'",
         strategy="ConfigurableStrategy",
+        messages_back=0,
     )
 
 
@@ -708,7 +720,7 @@ def test_a_script_without_spaces_needs_a_predicate_to_be_called_long() -> None:
         "small", "rule 'short' matched: always"
     )
     assert tiering(by_characters).decide(request) == RoutingChoice(
-        "frontier", "rule 'long' matched: over 300 characters"
+        "frontier", "rule 'long' matched: over 300 characters", messages_back=0
     )
 
 
@@ -724,7 +736,7 @@ def test_the_highest_priority_rule_is_tried_first_whatever_its_position() -> Non
 
     for declared in ([low, high], [high, low]):
         assert ConfigurableStrategy(declared).decide(request) == RoutingChoice(
-            "coder", "rule 'high' matched: keyword 'python'"
+            "coder", "rule 'high' matched: keyword 'python'", messages_back=0
         )
 
 
@@ -736,10 +748,10 @@ def test_rules_of_equal_priority_are_tried_in_declaration_order() -> None:
     request = make_request("a python test")
 
     assert ConfigurableStrategy([python, test]).decide(request) == RoutingChoice(
-        "coder", "rule 'python' matched: keyword 'python'"
+        "coder", "rule 'python' matched: keyword 'python'", messages_back=0
     )
     assert ConfigurableStrategy([test, python]).decide(request) == RoutingChoice(
-        "small", "rule 'test' matched: keyword 'test'"
+        "small", "rule 'test' matched: keyword 'test'", messages_back=0
     )
 
 
@@ -762,7 +774,7 @@ def test_a_tie_is_broken_by_declaration_within_its_own_priority_only() -> None:
         return decision.reason
 
     assert ConfigurableStrategy(rules).decide(request) == RoutingChoice(
-        "frontier", "rule 'highest' matched: keyword 'a'"
+        "frontier", "rule 'highest' matched: keyword 'a'", messages_back=0
     )
     assert winner("highest") == "rule 'first of two' matched: keyword 'of'"
     assert winner("highest", "first of two") == "rule 'second of two' matched: keyword 'python'"
@@ -785,7 +797,7 @@ def test_a_catch_all_can_be_declared_first_with_a_lower_priority() -> None:
     )
 
     assert strategy.decide(make_request("a python question")) == RoutingChoice(
-        "coder", "rule 'python' matched: keyword 'python'"
+        "coder", "rule 'python' matched: keyword 'python'", messages_back=0
     )
     assert strategy.decide(make_request("a question")) == RoutingChoice(
         "small", "rule 'otherwise' matched: always"
@@ -800,10 +812,10 @@ def test_an_unnamed_rule_goes_by_its_declaration_position() -> None:
     )
 
     assert strategy.decide(make_request("b")) == RoutingChoice(
-        "coder", "rule #2 matched: keyword 'b'"
+        "coder", "rule #2 matched: keyword 'b'", messages_back=0
     )
     assert strategy.decide(make_request("a")) == RoutingChoice(
-        "small", "rule 'named' matched: keyword 'a'"
+        "small", "rule 'named' matched: keyword 'a'", messages_back=0
     )
 
 
@@ -829,7 +841,7 @@ def test_a_request_with_no_text_matches_no_keyword() -> None:
     assert domain_routing().decide(picture) is None
     assert ConfigurableStrategy([Rule("small", modality("image"), name="pictures")]).decide(
         picture
-    ) == RoutingChoice("small", "rule 'pictures' matched: has image")
+    ) == RoutingChoice("small", "rule 'pictures' matched: has image", messages_back=0)
 
 
 # What is checked at construction
@@ -1232,10 +1244,10 @@ def test_a_rule_the_check_calls_dead_never_fires_and_the_reverse_order_does() ->
 
     reached = ConfigurableStrategy([specific, general])
     assert reached.decide(request) == RoutingChoice(
-        "coder", "rule 'specific' matched: keyword 'unit test'"
+        "coder", "rule 'specific' matched: keyword 'unit test'", messages_back=0
     )
     assert reached.decide(make_request("a test")) == RoutingChoice(
-        "small", "rule 'general' matched: keyword 'test'"
+        "small", "rule 'general' matched: keyword 'test'", messages_back=0
     )
     with pytest.raises(RoutingError, match=r"rule 'specific' \(for 'coder'\) can never fire"):
         ConfigurableStrategy([general, specific])
@@ -1258,10 +1270,10 @@ def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
     )
 
     assert strategy.decide(make_request("a question about python")) == RoutingChoice(
-        "coder", "rule 'code' matched: keyword 'python'"
+        "coder", "rule 'code' matched: keyword 'python'", messages_back=0
     )
     assert strategy.decide(make_request("prove there are infinitely many primes")) == RoutingChoice(
-        "frontir", "rule 'proofs' matched: keyword 'prove'"
+        "frontir", "rule 'proofs' matched: keyword 'prove'", messages_back=0
     )
     assert strategy.decide(make_request("nothing here matches a rule")) is None
 
@@ -1388,6 +1400,7 @@ def test_a_predicate_that_raises_fails_only_the_request_it_ran_for(
         route="coder",
         reason="rule 'code' matched: keyword 'python'",
         strategy="ConfigurableStrategy",
+        messages_back=0,
     )
     assert [warning.category for warning in routing_warnings(caught)] == [FallbackWarning]
 
@@ -1431,10 +1444,12 @@ def test_the_newest_message_a_rule_matches_decides() -> None:
 
     assert strategy.decide(
         conversation("Write it in python", "Now review this contract", "In Germany?", lookback=2)
-    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+    ) == RoutingChoice(
+        "frontier", "rule 'legal' matched: keyword 'contract' (1 message back)", messages_back=1
+    )
     assert strategy.decide(
         conversation("Review this contract", "Now write it in python", lookback=2)
-    ) == RoutingChoice("coder", "rule 'code' matched: keyword 'python'")
+    ) == RoutingChoice("coder", "rule 'code' matched: keyword 'python'", messages_back=0)
 
 
 def test_within_a_message_the_rules_keep_their_priority() -> None:
@@ -1450,7 +1465,9 @@ def test_within_a_message_the_rules_keep_their_priority() -> None:
 
     assert strategy.decide(
         conversation("A python check for this contract", "And in Germany?", lookback=1)
-    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+    ) == RoutingChoice(
+        "frontier", "rule 'legal' matched: keyword 'contract' (1 message back)", messages_back=1
+    )
 
 
 def tiering(*, lookback: int) -> ConfigurableStrategy:
@@ -1476,7 +1493,9 @@ def test_an_always_rule_applies_only_when_no_message_matched() -> None:
     assert strategy.decide(
         conversation(HARD_QUESTION, "Thanks! Which one does SQLite use?", lookback=2)
     ) == RoutingChoice(
-        "frontier", "rule 'needs reasoning' matched: reasoning 1.00 >= 1.00 (1 message back)"
+        "frontier",
+        "rule 'needs reasoning' matched: reasoning 1.00 >= 1.00 (1 message back)",
+        messages_back=1,
     )
     assert strategy.decide(
         conversation("Hi!", "Suggest a name for my cat", lookback=2)
@@ -1489,7 +1508,8 @@ def test_an_always_rule_applies_only_when_no_message_matched() -> None:
 def test_a_rule_that_always_holds_waits_however_it_is_written() -> None:
     """A combination that holds for every request is a catch-all as much as `always()` is, and
     waits in the same way. Its reason, once every message has been tried, is still the one it
-    gives the current request."""
+    gives the current request, and like any catch-all it names no message as the one that
+    decided."""
     strategy = ConfigurableStrategy(
         [
             Rule("frontier", keywords("contract"), name="legal"),
@@ -1500,7 +1520,9 @@ def test_a_rule_that_always_holds_waits_however_it_is_written() -> None:
 
     assert strategy.decide(
         conversation("Review this contract", "thanks, and in Germany?", lookback=1)
-    ) == RoutingChoice("frontier", "rule 'legal' matched: keyword 'contract' (1 message back)")
+    ) == RoutingChoice(
+        "frontier", "rule 'legal' matched: keyword 'contract' (1 message back)", messages_back=1
+    )
     assert strategy.decide(conversation("Hi!", "thanks!", lookback=1)) == RoutingChoice(
         "small", "rule 'everything else' matched: keyword 'thanks'"
     )
@@ -1520,6 +1542,7 @@ def test_tools_bound_is_a_property_of_the_call_not_of_a_message() -> None:
         RoutingChoice(
             "coder",
             "rule 'python tools' matched: tools bound and keyword 'python' (1 message back)",
+            messages_back=1,
         )
     )
     assert strategy.decide(conversation(earlier, current, lookback=1)) is None
@@ -1603,6 +1626,7 @@ def test_a_predicate_finds_an_earlier_message_that_did_answer_the_model() -> Non
     assert strategy.decide(request) == RoutingChoice(
         "frontier",
         "rule #1 matched: keyword 'contract' and replies_to_the_model (1 message back)",
+        messages_back=1,
     )
 
 
@@ -1631,10 +1655,14 @@ def test_a_not_rule_decides_on_the_current_message() -> None:
     request = conversation(words(150), "ok", lookback=1)
 
     assert with_not.decide(request) == RoutingChoice(
-        "small", "rule 'short and simple' matched: not (length >= 0.5 or code >= 0.5)"
+        "small",
+        "rule 'short and simple' matched: not (length >= 0.5 or code >= 0.5)",
+        messages_back=0,
     )
     assert with_always.decide(request) == RoutingChoice(
-        "frontier", "rule 'long or code-bearing' matched: length 0.72 >= 0.50 (1 message back)"
+        "frontier",
+        "rule 'long or code-bearing' matched: length 0.72 >= 0.50 (1 message back)",
+        messages_back=1,
     )
 
 
@@ -1646,7 +1674,7 @@ def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> N
     assert domains(lookback=0).decide(request) is None
     assert domains(lookback=1).decide(request) is None
     assert domains(lookback=2).decide(request) == RoutingChoice(
-        "frontier", "rule 'legal' matched: keyword 'contract' (2 messages back)"
+        "frontier", "rule 'legal' matched: keyword 'contract' (2 messages back)", messages_back=2
     )
 
 
@@ -1719,6 +1747,7 @@ def test_a_predicate_sees_the_transcript_only_in_a_subclass_that_opts_in(
         route="frontier",
         reason="rule 'long conversation' matched: conversation_is_long",
         strategy="WithHistory",
+        messages_back=0,
     )
 
 
@@ -1748,7 +1777,7 @@ def test_a_strategy_is_immutable_once_built() -> None:
     assert isinstance(strategy.rules, tuple)
     assert [rule.name for rule in strategy.rules] == ["a", "b"]
     assert strategy.decide(make_request("b")) == RoutingChoice(
-        "coder", "rule 'b' matched: keyword 'b'"
+        "coder", "rule 'b' matched: keyword 'b'", messages_back=0
     )
     with pytest.raises(FrozenInstanceError):
         strategy.rules[0].route = "coder"  # type: ignore[misc]

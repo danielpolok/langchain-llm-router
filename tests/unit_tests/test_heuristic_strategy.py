@@ -306,7 +306,7 @@ def test_a_real_image_request_scores_the_image() -> None:
 
     assert request.modalities == frozenset({"image"})
     assert HeuristicStrategy(*TIERS).decide(request) == RoutingChoice(
-        "frontier", "difficulty 1.00 >= 1.00 (modalities 1.00)"
+        "frontier", "difficulty 1.00 >= 1.00 (modalities 1.00)", messages_back=0
     )
 
 
@@ -337,7 +337,9 @@ def test_a_score_on_the_threshold_takes_the_upper_tier(
     reason says which side of it the score fell on."""
     strategy = HeuristicStrategy(*TIERS, signals={"stub": fixed(strength)})
 
-    assert strategy.decide(make_request("anything")) == RoutingChoice(route, reason)
+    assert strategy.decide(make_request("anything")) == RoutingChoice(
+        route, reason, messages_back=0
+    )
 
 
 @pytest.mark.parametrize(
@@ -367,7 +369,9 @@ def test_more_than_two_tiers_use_ascending_bands(strength: float, route: str, re
         "small", "mid", "frontier", thresholds=[1.0, 3.0], signals={"stub": fixed(strength)}
     )
 
-    assert strategy.decide(make_request("anything")) == RoutingChoice(route, reason)
+    assert strategy.decide(make_request("anything")) == RoutingChoice(
+        route, reason, messages_back=0
+    )
 
 
 def test_a_weight_scales_one_signals_contribution() -> None:
@@ -377,10 +381,10 @@ def test_a_weight_scales_one_signals_contribution() -> None:
     weighted = HeuristicStrategy(*TIERS, weights={"analysis": 3.0})
 
     assert HeuristicStrategy(*TIERS).decide(request) == RoutingChoice(
-        "small", "difficulty 0.50 < 1.00 (analysis 0.50)"
+        "small", "difficulty 0.50 < 1.00 (analysis 0.50)", messages_back=0
     )
     assert weighted.decide(request) == RoutingChoice(
-        "frontier", "difficulty 1.50 >= 1.00 (analysis 1.50)"
+        "frontier", "difficulty 1.50 >= 1.00 (analysis 1.50)", messages_back=0
     )
 
 
@@ -391,7 +395,7 @@ def test_a_weight_of_zero_silences_a_signal() -> None:
     strategy = HeuristicStrategy(*TIERS, weights={"modalities": 0.0})
 
     assert strategy.decide(request) == RoutingChoice(
-        "small", "difficulty 0.00 < 1.00 (no signal fired)"
+        "small", "difficulty 0.00 < 1.00 (no signal fired)", messages_back=0
     )
 
 
@@ -401,10 +405,10 @@ def test_a_custom_signal_set_replaces_the_defaults() -> None:
     strategy = HeuristicStrategy(*TIERS, thresholds=[0.5], signals={"words": length_signal(0, 10)})
 
     assert strategy.decide(make_request("one two three four")) == RoutingChoice(
-        "small", "difficulty 0.40 < 0.50 (words 0.40)"
+        "small", "difficulty 0.40 < 0.50 (words 0.40)", messages_back=0
     )
     assert strategy.decide(make_request(" ".join(["word"] * 8))) == RoutingChoice(
-        "frontier", "difficulty 0.80 >= 0.50 (words 0.80)"
+        "frontier", "difficulty 0.80 >= 0.50 (words 0.80)", messages_back=0
     )
 
 
@@ -417,7 +421,9 @@ def test_the_reason_leads_with_the_signal_that_drove_the_score() -> None:
 
     choice = strategy.decide(make_request("anything"))
 
-    assert choice == RoutingChoice("frontier", "difficulty 1.25 >= 1.00 (major 1.00, minor 0.25)")
+    assert choice == RoutingChoice(
+        "frontier", "difficulty 1.25 >= 1.00 (major 1.00, minor 0.25)", messages_back=0
+    )
 
 
 # --- Realistic requests: the corpus a benchmark argues with ---
@@ -610,7 +616,7 @@ def test_the_hardest_of_the_considered_messages_decides() -> None:
     )
 
     assert choice == RoutingChoice(
-        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)"
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)", messages_back=2
     )
 
 
@@ -621,7 +627,7 @@ def test_a_conversation_comes_back_down_after_lookback_easier_messages() -> None
 
     assert strategy.decide(
         conversation(HARD, FOLLOW_UP, "ok", "A name for my cat?", lookback=2)
-    ) == (RoutingChoice("small", "difficulty 0.00 < 1.00 (no signal fired)"))
+    ) == (RoutingChoice("small", "difficulty 0.00 < 1.00 (no signal fired)", messages_back=0))
 
 
 def test_a_harder_current_request_keeps_its_own_reason() -> None:
@@ -630,14 +636,18 @@ def test_a_harder_current_request_keeps_its_own_reason() -> None:
     strategy = HeuristicStrategy(*TIERS, lookback=1)
 
     assert strategy.decide(conversation(HARD, MULTI_PART_ANALYSIS, lookback=1)) == RoutingChoice(
-        "frontier", "difficulty 2.07 >= 1.00 (parts 1.00, analysis 1.00, length 0.07)"
+        "frontier",
+        "difficulty 2.07 >= 1.00 (parts 1.00, analysis 1.00, length 0.07)",
+        messages_back=0,
     )
     assert strategy.decide(conversation(HARD, HARD, lookback=1)) == RoutingChoice(
-        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00)"
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00)", messages_back=0
     )
     assert HeuristicStrategy(*TIERS, lookback=2).decide(
         conversation(HARD, HARD, FOLLOW_UP, lookback=2)
-    ) == RoutingChoice("frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)")
+    ) == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)", messages_back=1
+    )
 
 
 def test_an_earlier_message_decides_a_middle_tier_too() -> None:
@@ -645,7 +655,7 @@ def test_an_earlier_message_decides_a_middle_tier_too() -> None:
     strategy = HeuristicStrategy("small", "mid", "frontier", thresholds=[0.5, 1.5], lookback=1)
 
     assert strategy.decide(conversation(HARD, FOLLOW_UP, lookback=1)) == RoutingChoice(
-        "mid", "difficulty 1.00 in [0.50, 1.50) (analysis 1.00) (1 message back)"
+        "mid", "difficulty 1.00 in [0.50, 1.50) (analysis 1.00) (1 message back)", messages_back=1
     )
 
 
@@ -656,7 +666,7 @@ def test_a_message_with_nothing_to_score_is_passed_over() -> None:
     strategy = HeuristicStrategy(*TIERS, lookback=1)
 
     assert strategy.decide(conversation(HARD, "  ", lookback=1)) == RoutingChoice(
-        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)"
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (1 message back)", messages_back=1
     )
     assert strategy.decide(conversation("", "  ", lookback=1)) is None
 
@@ -668,7 +678,9 @@ def test_an_image_earlier_in_the_conversation_is_scored_where_it_was_sent() -> N
 
     assert HeuristicStrategy(*TIERS, lookback=1).decide(
         conversation(image_turn, "and the one on the left?", lookback=1)
-    ) == RoutingChoice("frontier", "difficulty 1.00 >= 1.00 (modalities 1.00) (1 message back)")
+    ) == RoutingChoice(
+        "frontier", "difficulty 1.00 >= 1.00 (modalities 1.00) (1 message back)", messages_back=1
+    )
 
 
 def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> None:
@@ -676,13 +688,13 @@ def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> N
     request = conversation(HARD, "ok", FOLLOW_UP, lookback=2)
 
     assert HeuristicStrategy(*TIERS).decide(request) == RoutingChoice(
-        "small", "difficulty 0.00 < 1.00 (no signal fired)"
+        "small", "difficulty 0.00 < 1.00 (no signal fired)", messages_back=0
     )
     assert HeuristicStrategy(*TIERS, lookback=1).decide(request) == RoutingChoice(
-        "small", "difficulty 0.00 < 1.00 (no signal fired)"
+        "small", "difficulty 0.00 < 1.00 (no signal fired)", messages_back=0
     )
     assert HeuristicStrategy(*TIERS, lookback=2).decide(request) == RoutingChoice(
-        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)"
+        "frontier", "difficulty 1.00 >= 1.00 (analysis 1.00) (2 messages back)", messages_back=2
     )
 
 

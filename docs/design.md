@@ -96,7 +96,7 @@ default; falling back is an explicit setting.
 
 ## The decision record
 
-Every routed call records which route ran and why — six fields, carried on exactly one streamed
+Every routed call records which route ran and why — eight fields, carried on exactly one streamed
 chunk (LangChain merges a string repeated across chunks by concatenating it, so a record on every
 chunk would aggregate to `"frontierfrontier…"`).
 
@@ -105,6 +105,21 @@ The record always reaches the trace. On messages it also reaches `response_metad
 with `include_raw=True`, and `last_routing_decision()` covers the parsed-only path. That function
 publishes to both a context variable and the calling thread, because LangChain runs a sequence's
 steps in a copy of the caller's context — a context variable alone never reaches the caller.
+
+Two of the fields describe the conversation rather than the choice, and each has an owner:
+
+- **`previous_route` is the router's.** It reads it from the newest AI message in the input whose
+  record names one of its own routes, so it is there whatever the strategy, and on forced and
+  fallen-back turns too. Nothing decides on it: keeping a conversation on one route is a policy,
+  and a policy is a strategy. Inside a router that is itself a route, the history holds only the
+  outer router's records, so the inner router finds none of its own routes there and records
+  `None`, unless the two routers share a route name — a record names its route and nothing else.
+- **`messages_back` is the strategy's.** Only the strategy knows which message decided, so it says
+  so in `RoutingChoice.messages_back`, a field added under the
+  [stability promise](strategies.md#stability-promise), and every built-in strategy fills it.
+  The alternative, reading `(1 message back)` out of the reason, would have made the reason's
+  wording part of the interface. It is `None` when no one message decided: a forced route, a
+  fallback, a catch-all rule, or a strategy that doesn't say.
 
 ## Caching
 

@@ -34,7 +34,13 @@ from langchain_core.runnables.utils import coro_with_context
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
 import langchain_llm_router
-from langchain_llm_router import RoutingCallable, RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_llm_router import (
+    RoutingCallable,
+    RoutingChoice,
+    RoutingError,
+    RoutingRequest,
+    RoutingStrategy,
+)
 from langchain_llm_router._extraction import build_request
 from langchain_llm_router.strategy import as_strategy, strategy_name
 from tests.fakes import FakeChatModel
@@ -515,7 +521,15 @@ def test_the_dataclasses_carry_the_fields_the_api_pins() -> None:
         "config",
         "previous_requests",
     ]
-    assert [f.name for f in fields(RoutingChoice)] == ["route", "reason"]
+    assert [f.name for f in fields(RoutingChoice)] == ["route", "reason", "messages_back"]
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5, "1"], ids=["negative", "bool", "float", "str"])
+def test_a_choice_refuses_a_distance_that_is_not_a_count(value: object) -> None:
+    """`messages_back` counts the user's messages, as `lookback` does: `None` or a
+    non-negative integer, and a `bool` is a flag where a count was meant."""
+    with pytest.raises(RoutingError, match=r"messages_back must be None or a non-negative"):
+        RoutingChoice("small", "why", messages_back=value)  # type: ignore[arg-type]
 
 
 def test_the_optional_members_default_to_todays_behaviour() -> None:
@@ -528,6 +542,7 @@ def test_the_optional_members_default_to_todays_behaviour() -> None:
     assert as_strategy(pick_route).lookback == 0
     assert request.previous_requests == ()
     assert request.messages is None
+    assert RoutingChoice("small", "why").messages_back is None
 
 
 @pytest.mark.parametrize("cls", BUILTINS)

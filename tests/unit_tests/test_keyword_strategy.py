@@ -175,7 +175,7 @@ def test_a_one_line_setup_sends_a_code_request_to_the_code_route() -> None:
 
     assert len(setup) == 1
     assert one_line_setup().decide(request_for("how do I do this in Python?")) == RoutingChoice(
-        route="coder", reason="matched keyword 'python'"
+        route="coder", reason="matched keyword 'python'", messages_back=0
     )
 
 
@@ -211,7 +211,11 @@ def test_a_keyword_matches_a_whole_word_whatever_its_case(
     """The documented default: whole words, ignoring case, every character literal, the words
     of a keyword across any whitespace — and a keyword's own punctuation edge left open, so
     `'c++'` can be a keyword while `'pythonic'` is not `'python'`."""
-    expected = RoutingChoice("coder", f"matched keyword {keyword.strip()!r}") if matches else None
+    expected = (
+        RoutingChoice("coder", f"matched keyword {keyword.strip()!r}", messages_back=0)
+        if matches
+        else None
+    )
 
     assert KeywordStrategy({"coder": [keyword]}).decide(request_for(text)) == expected
 
@@ -224,7 +228,7 @@ def test_a_keyword_in_an_unspaced_script_needs_a_pattern() -> None:
 
     assert KeywordStrategy({"coder": ["北京"]}).decide(request) is None
     assert KeywordStrategy({"coder": [re.compile("北京")]}).decide(request) == RoutingChoice(
-        route="coder", reason='matched pattern r"北京"'
+        route="coder", reason='matched pattern r"北京"', messages_back=0
     )
 
 
@@ -235,10 +239,10 @@ def test_a_compiled_pattern_is_searched_exactly_as_compiled() -> None:
     sensitive = KeywordStrategy({"coder": re.compile("SQL")})
 
     assert signature.decide(request_for("why does def parse( fail?")) == RoutingChoice(
-        route="coder", reason=r'matched pattern r"\bdef\s+\w+\("'
+        route="coder", reason=r'matched pattern r"\bdef\s+\w+\("', messages_back=0
     )
     assert sensitive.decide(request_for("this SQL query")) == RoutingChoice(
-        route="coder", reason='matched pattern r"SQL"'
+        route="coder", reason='matched pattern r"SQL"', messages_back=0
     )
     assert sensitive.decide(request_for("this sql query")) is None
 
@@ -253,7 +257,7 @@ def test_a_pattern_is_the_way_past_whole_word_matching() -> None:
 
     assert KeywordStrategy({"coder": ["regex"]}).decide(request_for("two regexes")) is None
     assert strategy.decide(request_for("two Regexes")) == RoutingChoice(
-        route="coder", reason='matched pattern r"regexe?s?" with re.IGNORECASE'
+        route="coder", reason='matched pattern r"regexe?s?" with re.IGNORECASE', messages_back=0
     )
 
 
@@ -265,10 +269,14 @@ def test_the_first_rule_in_declaration_order_wins() -> None:
     general_first = KeywordStrategy({"small": ["test"], "coder": ["unit test"]})
     request = request_for("write a unit test for this")
 
-    assert specific_first.decide(request) == RoutingChoice("coder", "matched keyword 'unit test'")
-    assert general_first.decide(request) == RoutingChoice("small", "matched keyword 'test'")
+    assert specific_first.decide(request) == RoutingChoice(
+        "coder", "matched keyword 'unit test'", messages_back=0
+    )
+    assert general_first.decide(request) == RoutingChoice(
+        "small", "matched keyword 'test'", messages_back=0
+    )
     assert KeywordStrategy({"coder": ["python", "test"]}).decide(request_for("a python test")) == (
-        RoutingChoice("coder", "matched keyword 'python'")
+        RoutingChoice("coder", "matched keyword 'python'", messages_back=0)
     )
 
 
@@ -278,7 +286,7 @@ def test_a_single_keyword_need_not_be_a_list() -> None:
     strategy = KeywordStrategy({"coder": "python"})
 
     assert strategy.decide(request_for("in Python")) == RoutingChoice(
-        "coder", "matched keyword 'python'"
+        "coder", "matched keyword 'python'", messages_back=0
     )
     assert strategy.decide(request_for("not one of the letters, though")) is None
 
@@ -289,7 +297,9 @@ async def test_the_async_path_decides_the_same() -> None:
     strategy = one_line_setup()
     request = request_for("a python question")
 
-    assert await strategy.adecide(request) == RoutingChoice("coder", "matched keyword 'python'")
+    assert await strategy.adecide(request) == RoutingChoice(
+        "coder", "matched keyword 'python'", messages_back=0
+    )
     assert await strategy.adecide(request_for("nothing here")) is None
 
 
@@ -332,10 +342,10 @@ def test_one_mistyped_route_name_leaves_the_other_rules_working() -> None:
     strategy = KeywordStrategy({"coder": ["python"], "frontir": ["prove"], "small": ["hello"]})
 
     assert strategy.decide(request_for("a question about python")) == RoutingChoice(
-        route="coder", reason="matched keyword 'python'"
+        route="coder", reason="matched keyword 'python'", messages_back=0
     )
     assert strategy.decide(request_for("prove there are infinitely many primes")) == RoutingChoice(
-        route="frontir", reason="matched keyword 'prove'"
+        route="frontir", reason="matched keyword 'prove'", messages_back=0
     )
     assert strategy.decide(request_for("nothing in this request matches a rule")) is None
 
@@ -436,7 +446,7 @@ def test_a_follow_up_is_matched_on_the_message_before_it() -> None:
 
     assert strategy.decide(
         conversation("Review this contract clause", "Is it enforceable in Germany?")
-    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)")
+    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)", messages_back=1)
 
 
 def test_the_newest_message_with_a_match_decides() -> None:
@@ -447,10 +457,10 @@ def test_the_newest_message_with_a_match_decides() -> None:
 
     assert strategy.decide(
         conversation("A python script, please", "Now review this contract", "And in Germany?")
-    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)")
+    ) == RoutingChoice("legal", "matched keyword 'contract' (1 message back)", messages_back=1)
     assert strategy.decide(
         conversation("Review this contract", "Now a python script for it")
-    ) == RoutingChoice("coder", "matched keyword 'python'")
+    ) == RoutingChoice("coder", "matched keyword 'python'", messages_back=0)
 
 
 def test_lookback_reaches_past_messages_that_match_nothing() -> None:
@@ -460,7 +470,7 @@ def test_lookback_reaches_past_messages_that_match_nothing() -> None:
 
     assert KeywordStrategy(DOMAINS, lookback=3).decide(
         conversation(*earlier, "One more thing")
-    ) == RoutingChoice("coder", "matched keyword 'python' (3 messages back)")
+    ) == RoutingChoice("coder", "matched keyword 'python' (3 messages back)", messages_back=3)
     assert KeywordStrategy(DOMAINS, lookback=2).decide(conversation(*earlier, "One more")) is None
 
 
@@ -473,7 +483,7 @@ def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> N
     assert KeywordStrategy(DOMAINS).decide(request) is None
     assert KeywordStrategy(DOMAINS, lookback=1).decide(request) is None
     assert KeywordStrategy(DOMAINS, lookback=2).decide(request) == RoutingChoice(
-        "legal", "matched keyword 'contract' (2 messages back)"
+        "legal", "matched keyword 'contract' (2 messages back)", messages_back=2
     )
 
 
@@ -519,7 +529,7 @@ async def test_the_router_takes_the_route_the_matching_rule_names(
     assert (len(call_log(routes["coder"])), len(call_log(routes["small"]))) == (1, 0)
     assert routing_warnings(caught) == []
     assert routing_decision(message) == RoutingDecision(
-        route="coder", reason="matched keyword 'regex'", strategy="KeywordStrategy"
+        route="coder", reason="matched keyword 'regex'", strategy="KeywordStrategy", messages_back=0
     )
 
 

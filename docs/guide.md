@@ -33,7 +33,7 @@ print(routing_decision(response))
 ```
 
 ```text
-RoutingDecision(route='frontier', reason='difficulty 1.00 >= 1.00 (analysis 1.00)', strategy='HeuristicStrategy', fallback=False, forced=False, diverted_from=None)
+RoutingDecision(route='frontier', reason='difficulty 1.00 >= 1.00 (analysis 1.00)', strategy='HeuristicStrategy', fallback=False, forced=False, diverted_from=None, previous_route=None, messages_back=0)
 ```
 
 | Field | Meaning |
@@ -44,10 +44,19 @@ RoutingDecision(route='frontier', reason='difficulty 1.00 >= 1.00 (analysis 1.00
 | `fallback` | `True` if the default route answered because the strategy couldn't decide |
 | `forced` | `True` if the route was [forced through runtime config](#forcing-a-route) |
 | `diverted_from` | The route the strategy chose, if that route couldn't use the [bound tools](#tools-and-structured-output) |
+| `previous_route` | The route that answered the conversation's previous turn, or `None` on the first turn |
+| `messages_back` | How far back the user message that decided was: `0` for the current one, `1` for the one before it, as [`lookback`](strategies.md#follow-up-questions-lookback) counts. `None` when no strategy decided |
 
 `routing_decision(response)` reads the record from `response.response_metadata["routing"]` and
 returns it as a `RoutingDecision`. For a message the router didn't answer, it returns `None`. The
 same record appears in your [trace](#tracing-and-cost).
+
+The router fills in `previous_route` from the conversation you pass it. When the history holds the
+router's earlier answers, as it does when a chat app appends each response or a LangGraph
+checkpointer keeps the thread, the router reads the record on the latest one. So a turn whose
+`previous_route` is set and differs from `route` switched models: count those in your traces to
+see how often a conversation changes model, or to spot a follow-up that dropped to a smaller one.
+History converted to OpenAI-style dicts loses the records, and `previous_route` is then `None`.
 
 ## Streaming, batching and async
 
@@ -190,7 +199,7 @@ print(routing_decision(response))
 ```
 
 ```text
-RoutingDecision(route='frontier', reason='forced via runtime config', strategy=None, fallback=False, forced=True, diverted_from=None)
+RoutingDecision(route='frontier', reason='forced via runtime config', strategy=None, fallback=False, forced=True, diverted_from=None, previous_route=None, messages_back=None)
 ```
 
 Use `router.with_config(configurable={"route": "frontier"})` to pin a route for a whole session.

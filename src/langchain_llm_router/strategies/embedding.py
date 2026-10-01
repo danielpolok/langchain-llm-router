@@ -377,7 +377,7 @@ class EmbeddingStrategy(RoutingStrategy):
             f"embedding similarity {match.similarity:.2f} >= {self.threshold:.2f} to "
             f"{match.example!r} (route {match.route!r}){how_far_back(distance)}"
         )
-        return RoutingChoice(route=match.route, reason=reason)
+        return RoutingChoice(route=match.route, reason=reason, messages_back=distance)
 
     def _check_it_can_decide(self, routes: tuple[str, ...]) -> None:
         """At least one route in `examples` is one the router has.
