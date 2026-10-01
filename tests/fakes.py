@@ -1,4 +1,4 @@
-"""Fake routes for offline tests.
+"""Fake routes, and fake embeddings, for offline tests.
 
 ``GenericFakeChatModel`` drops ``usage_metadata`` and ``response_metadata`` when it streams,
 and no core fake implements ``bind_tools`` — both of which the router's tests need.
@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Literal, cast
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
 from langchain_core.messages.ai import UsageMetadata
@@ -197,6 +198,48 @@ class NativeStructuredFakeChatModel(ToolCallingFakeChatModel):
         return super().with_structured_output(schema, include_raw=include_raw, **kwargs)
 
 
+class PromptReadingFakeChatModel(NativeStructuredFakeChatModel):
+    """A classifier that keeps every prompt it is sent, and can answer from it.
+
+    `answer` picks the route from the prompt, or `None` for an answer with no tool call; when
+    unset, the fixed `tool_calls` answer, as for the plainer fake.
+    """
+
+    prompts: list[str] = Field(default_factory=list)
+    answer: Callable[[str], str | None] | None = None
+
+    def _read(self, messages: list[BaseMessage]) -> None:
+        prompt = messages[-1].text
+        self.prompts.append(prompt)
+        if self.answer is not None:
+            route = self.answer(prompt)
+            self.tool_calls = (
+                []
+                if route is None
+                else [ToolCall(id="call_1", name="RouteClassification", args={"route": route})]
+            )
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        self._read(messages)
+        return super()._generate(messages, stop, run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        self._read(messages)
+        yield from super()._stream(messages, stop, run_manager, **kwargs)
+
+
 class StreamingStructuredFakeChatModel(NativeStructuredFakeChatModel):
     """A route whose structured output streams progressively, as a real provider's does.
 
@@ -336,3 +379,34 @@ def call_log(route: BaseChatModel) -> list[dict[str, Any]]:
     hold their routes as `dict[str, BaseChatModel]` and come back here for the fake's own record.
     """
     return cast("GenerateOnlyFakeChatModel", route).calls
+
+
+class CountingEmbeddings(Embeddings):
+    """Wraps a real fake, counting each kind of call — for the "embedded once" tests."""
+
+    def __init__(self, inner: Embeddings) -> None:
+        self.inner = inner
+        self.document_calls = 0
+        self.adocument_calls = 0
+        self.query_calls = 0
+        self.aquery_calls = 0
+        self.queries: list[str] = []
+        """Every text embedded as a query, sync or async, in order."""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_calls += 1
+        return self.inner.embed_documents(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        self.query_calls += 1
+        self.queries.append(text)
+        return self.inner.embed_query(text)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.adocument_calls += 1
+        return self.inner.embed_documents(texts)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        self.aquery_calls += 1
+        self.queries.append(text)
+        return self.inner.embed_query(text)

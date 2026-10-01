@@ -92,17 +92,62 @@ up front, at the first `decide`, is a route mapping that names *none* of the rou
 can never decide anything, and `RoutingError` says so before silently abstaining for the life of
 the process, the same precedent.
 
+Follow-ups: `lookback`
+----------------------
+With `lookback=N`, when the current request clears no `threshold`, the user's previous N
+messages are tried in turn, newest first, and **the newest one that clears it decides**; the
+reason ends with how far back it was, `(1 message back)`, the same words every built-in strategy
+uses. A message with no text is passed over. A message that clears the bar is never overruled by
+an older one, so a new topic takes over as soon as it is asked.
+
+An earlier message costs an embedding only once. Each earlier message was the current request on
+its own turn, so it has already been embedded, and embedding it again on every later turn would
+multiply the per-request cost by up to N+1. So a strategy with a `lookback` **remembers the
+outcome for the messages it has embedded recently** — the closest example, its route and the
+similarity, not the vector — and a remembered message makes no call and opens no run. A turn
+therefore makes one embedding call, for its own new message, and a message repeated as-is, as
+every step of an agent's tool loop repeats it, makes none. At most N+1 calls a turn is the
+bound, reached only when earlier messages have been forgotten (after a restart, or pushed out
+by other conversations' messages), and a turn stops at the first message that clears the bar.
+
+The two alternatives weighed, and why this one:
+
+- **LangChain's `CacheBackedEmbeddings` with a `query_embedding_cache`** caches the vector under
+  any `ByteStore`, and it still works here: it is an `Embeddings`, so an application can hand one
+  to this strategy. It isn't the answer on its own. It lives in `langchain-classic`, which this
+  package doesn't depend on; `langchain-core`'s `InMemoryByteStore` has no bound, so a long-running
+  server would keep every message it has seen; and a hit inside it looks like a call from here,
+  so every hit would be traced with a cost estimate for an embedding nobody paid for.
+- **Remembering the vectors** would cost kilobytes a message (an embedding is hundreds to
+  thousands of floats), where the outcome is three values, and the outcome is all that is ever
+  read again: the examples and the similarity are fixed for the life of the strategy.
+
+The outcomes are kept under a SHA-256 hash of the message's text, so the strategy keeps no user
+text beyond the request. It holds the last `_REMEMBERED` distinct messages, the least recently
+read forgotten first, shared by every conversation the strategy serves and guarded by a lock
+like the example vectors. It is used only with a `lookback`: with `lookback=0` every request is
+embedded, exactly as without one. A copy made by `with_lookback` shares it, and the example
+vectors, with the original, since both are the same embeddings on the same examples.
+
+**Only the user's words.** Setting `wants_full_context` on a subclass changes nothing here: the
+model's answers are not embedded. The examples are requests, and an answer — long, and about
+what the route said rather than what was asked — would be compared with them as if it were one.
+It would also make the cost of a turn grow with the conversation. A subclass that wants the
+transcript reads `request.messages` in its own `decide`.
+
 No dependency beyond `langchain-core` is imported: the similarity itself is a few lines of
 `math`, not `numpy`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import threading
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from langchain_core.callbacks import (
     AsyncCallbackManager,
@@ -112,6 +157,7 @@ from langchain_core.callbacks import (
 )
 
 from langchain_llm_router.errors import RoutingError
+from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
 from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 if TYPE_CHECKING:
@@ -127,9 +173,58 @@ _CHARS_PER_TOKEN = 4
 """The rough English chars-per-token ratio several providers document for their own models —
 close enough for an overhead *estimate*, never offered as a measurement."""
 
+_REMEMBERED = 4096
+"""How many messages' outcomes a strategy with a `lookback` keeps (module doc).
+
+A few hundred bytes each, so about a megabyte in all."""
+
 Vector = list[float]
 _RouteVectors = dict[str, list[tuple[str, Vector]]]
 """Route name -> its examples, each paired with its embedding, in declaration order."""
+
+
+class _Match(NamedTuple):
+    """How one message compares with the examples: its closest example, and that route."""
+
+    similarity: float
+    route: str
+    example: str
+
+
+class _Memory:
+    """What a strategy works out and keeps: the example vectors, and recent messages' matches.
+
+    One object, so a copy made by `with_lookback` shares it with the original rather than
+    working it all out again.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.route_vectors: _RouteVectors | None = None
+        self.matches: OrderedDict[bytes, _Match] = OrderedDict()
+
+    def recall(self, text: str) -> _Match | None:
+        """The match remembered for `text`, now the most recently read, or `None`."""
+        key = _key(text)
+        with self.lock:
+            match = self.matches.get(key)
+            if match is not None:
+                self.matches.move_to_end(key)
+            return match
+
+    def remember(self, text: str, match: _Match) -> None:
+        """Keep `match` for `text`, forgetting the least recently read beyond `_REMEMBERED`."""
+        key = _key(text)
+        with self.lock:
+            self.matches[key] = match
+            self.matches.move_to_end(key)
+            while len(self.matches) > _REMEMBERED:
+                self.matches.popitem(last=False)
+
+
+def _key(text: str) -> bytes:
+    """What a message's match is kept under: a hash, so no user text is kept."""
+    return hashlib.sha256(text.encode()).digest()
 
 
 class EmbeddingStrategy(RoutingStrategy):
@@ -137,8 +232,9 @@ class EmbeddingStrategy(RoutingStrategy):
 
     The module docstring has the reasoning behind every choice below: examples embedded once
     and lazily, the per-request embedding call traced as its own run, maximum similarity per
-    route, one global threshold with no default, and an embedding failure left to propagate so
-    the router's own fallback handles it.
+    route, one global threshold with no default, an embedding failure left to propagate so
+    the router's own fallback handles it, and, with `lookback`, the newest message that clears
+    the threshold deciding, each message embedded once.
 
     Args:
         embeddings: The application's own `Embeddings` instance — there is no
@@ -149,11 +245,14 @@ class EmbeddingStrategy(RoutingStrategy):
             to decide, in the embedding model's own units (cosine similarity — typically but not
             always `[-1.0, 1.0]`). No default: see the module docstring for why one number can't
             serve every embedding model.
+        lookback: How many of the user's previous messages to try as well, newest first, when
+            the current one clears no threshold. Defaults to `0`, the current request alone.
+            Each costs an embedding call the first time it is read, and none after.
 
     Raises:
         RoutingError: for configuration that could never route — no routes, a route with no
-            examples, a blank route or example, a non-numeric threshold. Raised here, at
-            construction, not once per request.
+            examples, a blank route or example, a non-numeric threshold — or a `lookback` that
+            isn't a non-negative integer. Raised here, at construction, not once per request.
 
     Example:
         ```python
@@ -178,6 +277,7 @@ class EmbeddingStrategy(RoutingStrategy):
         examples: Mapping[str, Sequence[str]],
         *,
         threshold: float,
+        lookback: int = 0,
     ) -> None:
         """Check the configuration and keep the embeddings; nothing is embedded yet.
 
@@ -185,28 +285,43 @@ class EmbeddingStrategy(RoutingStrategy):
             embeddings: The application's own `Embeddings` instance.
             examples: Each route's example utterances.
             threshold: The similarity a route's best example must clear.
+            lookback: How many of the user's previous messages to try as well.
 
         Raises:
-            RoutingError: for configuration that could never route.
+            RoutingError: for configuration that could never route, or a `lookback` that isn't
+                a non-negative integer.
         """
         self.embeddings = embeddings
         self.examples = _checked_examples(examples)
         self.threshold = _checked_threshold(threshold)
-        self._lock = threading.Lock()
-        self._route_vectors: _RouteVectors | None = None
+        self.lookback = checked_lookback(lookback)
+        self._memory = _Memory()
 
     def decide(self, request: RoutingRequest) -> RoutingChoice | None:
         """The route whose closest example clears `threshold`, or `None` if none does.
 
-        Thread-safe, as the interface requires: the only mutable state is the example-vector
-        cache, which `_ensure_route_vectors` guards with a lock.
+        The newest message that clears it decides: the current request, and then, with
+        `lookback`, the previous ones in turn. Thread-safe, as the interface requires: the only
+        mutable state is what the strategy keeps, which a lock guards.
+
+        Args:
+            request: The current request; only its text is embedded, and with `lookback` its
+                previous requests' text.
+
+        Returns:
+            The best route's choice if it clears `threshold`, otherwise `None`.
+
+        Raises:
+            RoutingError: if no route in `examples` is one the router has.
         """
         self._check_it_can_decide(request.routes)
-        if not request.text.strip():
-            return None  # nothing to embed — better the default route than a guess
-        route_vectors = self._ensure_route_vectors()
-        vector = _traced_embed(request.config, request.text, self.embeddings.embed_query)
-        return _choose(vector, route_vectors, self.threshold)
+        for distance, message in considered(request, self.lookback):
+            if not message.text.strip():
+                continue  # nothing to embed — better the default route than a guess
+            match = self._match(message)
+            if match.similarity >= self.threshold:
+                return self._choice(match, distance)
+        return None
 
     async def adecide(self, request: RoutingRequest) -> RoutingChoice | None:
         """Async `decide`: a native implementation, as the interface asks of a strategy that calls.
@@ -224,11 +339,45 @@ class EmbeddingStrategy(RoutingStrategy):
             RoutingError: if no route in `examples` is one the router has.
         """
         self._check_it_can_decide(request.routes)
-        if not request.text.strip():
-            return None
+        for distance, message in considered(request, self.lookback):
+            if not message.text.strip():
+                continue
+            match = await self._amatch(message)
+            if match.similarity >= self.threshold:
+                return self._choice(match, distance)
+        return None
+
+    def _match(self, message: RoutingRequest) -> _Match:
+        """How `message` compares with the examples: remembered, or embedded now (module doc)."""
+        remembered = self._memory.recall(message.text) if self.lookback else None
+        if remembered is not None:
+            return remembered
+        route_vectors = self._ensure_route_vectors()
+        vector = _traced_embed(message.config, message.text, self.embeddings.embed_query)
+        match = _closest(vector, route_vectors)
+        if self.lookback:
+            self._memory.remember(message.text, match)
+        return match
+
+    async def _amatch(self, message: RoutingRequest) -> _Match:
+        """Async `_match`."""
+        remembered = self._memory.recall(message.text) if self.lookback else None
+        if remembered is not None:
+            return remembered
         route_vectors = await self._aensure_route_vectors()
-        vector = await _atraced_embed(request.config, request.text, self.embeddings.aembed_query)
-        return _choose(vector, route_vectors, self.threshold)
+        vector = await _atraced_embed(message.config, message.text, self.embeddings.aembed_query)
+        match = _closest(vector, route_vectors)
+        if self.lookback:
+            self._memory.remember(message.text, match)
+        return match
+
+    def _choice(self, match: _Match, distance: int) -> RoutingChoice:
+        """The choice `match` makes, saying how far back its message was."""
+        reason = (
+            f"embedding similarity {match.similarity:.2f} >= {self.threshold:.2f} to "
+            f"{match.example!r} (route {match.route!r}){how_far_back(distance)}"
+        )
+        return RoutingChoice(route=match.route, reason=reason)
 
     def _check_it_can_decide(self, routes: tuple[str, ...]) -> None:
         """At least one route in `examples` is one the router has.
@@ -246,16 +395,17 @@ class EmbeddingStrategy(RoutingStrategy):
 
     def _ensure_route_vectors(self) -> _RouteVectors:
         """The routes' example embeddings, computing them once on the first call (module doc)."""
-        vectors = self._route_vectors
+        memory = self._memory
+        vectors = memory.route_vectors
         if vectors is not None:
             return vectors
-        with self._lock:
-            vectors = self._route_vectors
+        with memory.lock:
+            vectors = memory.route_vectors
             if vectors is None:
                 vectors = _grouped(
                     self.examples, self.embeddings.embed_documents(_flattened(self.examples))
                 )
-                self._route_vectors = vectors
+                memory.route_vectors = vectors
             return vectors
 
     async def _aensure_route_vectors(self) -> _RouteVectors:
@@ -264,16 +414,17 @@ class EmbeddingStrategy(RoutingStrategy):
         The embed call itself runs outside the lock, so it never holds a plain `threading.Lock`
         across an `await` (module doc).
         """
-        vectors = self._route_vectors
+        memory = self._memory
+        vectors = memory.route_vectors
         if vectors is not None:
             return vectors
         computed = _grouped(
             self.examples, await self.embeddings.aembed_documents(_flattened(self.examples))
         )
-        with self._lock:
-            if self._route_vectors is None:
-                self._route_vectors = computed
-            return self._route_vectors
+        with memory.lock:
+            if memory.route_vectors is None:
+                memory.route_vectors = computed
+            return memory.route_vectors
 
 
 # --- Configuration checking (construction time only) ---
@@ -374,23 +525,16 @@ def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _choose(vector: Vector, route_vectors: _RouteVectors, threshold: float) -> RoutingChoice | None:
-    """The route of the closest example overall, if it clears `threshold`."""
-    best_route: str | None = None
-    best_score = float("-inf")
-    best_example = ""
-    for route, examples in route_vectors.items():
-        for example_text, example_vector in examples:
-            score = _cosine_similarity(vector, example_vector)
-            if score > best_score:
-                best_score, best_route, best_example = score, route, example_text
-    if best_route is None or best_score < threshold:
-        return None
-    reason = (
-        f"embedding similarity {best_score:.2f} >= {threshold:.2f} to {best_example!r} "
-        f"(route {best_route!r})"
+def _closest(vector: Vector, route_vectors: _RouteVectors) -> _Match:
+    """The closest example overall, and its route: the first of equals, in declaration order."""
+    return max(
+        (
+            _Match(_cosine_similarity(vector, example_vector), route, example_text)
+            for route, examples in route_vectors.items()
+            for example_text, example_vector in examples
+        ),
+        key=lambda match: match.similarity,
     )
-    return RoutingChoice(route=best_route, reason=reason)
 
 
 # --- Tracing a per-request embedding call ---
