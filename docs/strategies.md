@@ -407,7 +407,9 @@ small    difficulty 0.00 < 1.00 (no signal fired)
 ```
 
 The two follow-ups stayed on the frontier model, and each reason says which message decided and
-how far back it was. By the fourth question the hard one was three messages back, out of reach,
+how far back it was. The decision record carries the distance as a number too, `messages_back`
+(`0` for the current message), so a dashboard can count the follow-ups an earlier message decided
+without reading the reason. By the fourth question the hard one was three messages back, out of reach,
 so the conversation came back down to the small model.
 
 Each strategy reads the extra messages its own way:
@@ -546,7 +548,8 @@ general  the classifier chose 'general': anything that isn't programming
 ```
 
 The prompt lists the earlier messages, oldest first, as context, and asks the model to classify
-only the latest one. No single message decided, so the reason has no "messages back". The model
+only the latest one. That is the message it classifies, so the reason has no "messages back",
+and `messages_back` is `0`. The model
 is not told which route answered before, so one misrouted turn doesn't pull the next ones after
 it. It also doesn't see the model's answers, which are long and would make every classification
 cost more.
@@ -694,6 +697,10 @@ question before it. `Sticky` differs in never moving a conversation once it has 
   `self.lookback = inner.lookback` so the two agree. To read a different number, it keeps
   `inner.with_lookback(n)` instead, a copy that reads `n` messages, and takes the copy's
   `lookback`. The strategy you passed in is left as it was.
+- **Say which message decided.** A strategy that reads earlier messages returns
+  `RoutingChoice(route, reason, messages_back=n)`, where `n` is how many of the user's messages
+  back the deciding one was, and the record carries it. A wrapper hands back the inner
+  strategy's choice as it is, or changes it with `dataclasses.replace`, so the number survives.
 
 ### What a strategy sees
 
@@ -715,14 +722,15 @@ question before it. `Sticky` differs in never moving a conversation once it has 
 `RoutingStrategy`, `RoutingRequest`, `RoutingChoice` and `RoutingCallable` are a public interface
 with a compatibility promise. Until 1.0, the minor version plays the role of the major one:
 
-- **Minor releases stay compatible.** They may add a `RoutingRequest` field (last, with a
-  default, as `previous_requests` was), an optional `RoutingStrategy` member whose default keeps
-  today's behaviour (as `wants_full_context`, `lookback` and `with_lookback` are), new
-  `modalities` values, and new wording in the built-in strategies' reasons.
+- **Minor releases stay compatible.** They may add a `RoutingRequest` or `RoutingChoice` field
+  (last, with a default, as `previous_requests` and `messages_back` were), an optional
+  `RoutingStrategy` member whose default keeps today's behaviour (as `wants_full_context`,
+  `lookback` and `with_lookback` are), new `modalities` values, and new wording in the built-in
+  strategies' reasons.
 - **Anything breaking needs a major release.** That covers removing, renaming or retyping any of
   the above, adding an abstract method, changing what `None` or a bare route name means, changing
   `decide` / `adecide`, changing the default of `wants_full_context` or `lookback`, or changing
-  what `lookback` counts or the order of `previous_requests`.
+  what `lookback` or `messages_back` counts or the order of `previous_requests`.
 
 The same promise covers each built-in strategy's constructor and public attributes. Names that
 start with an underscore are internal and may change in any release.

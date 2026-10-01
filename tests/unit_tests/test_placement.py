@@ -122,7 +122,8 @@ def lookup(city: str) -> str:
 def test_create_agent_with_an_unbound_router_completes_its_tool_loop() -> None:
     """`create_agent(model=router)` — the router passed as given, not pre-bound —
     builds and completes a real tool loop, with `create_agent` calling `router.bind_tools`
-    itself exactly as it would on a bare model."""
+    itself exactly as it would on a bare model. The final call's record names the route that
+    made the loop's tool call before it as its `previous_route`."""
     from langchain.agents import create_agent
 
     route = ToolCallingFakeChatModel(
@@ -144,7 +145,9 @@ def test_create_agent_with_an_unbound_router_completes_its_tool_loop() -> None:
 
     final = out["messages"][-1]
     assert final.content == "Lyon is nice."
-    assert routing_decision(final) == RoutingDecision(route="a", reason="no strategy configured")
+    assert routing_decision(final) == RoutingDecision(
+        route="a", reason="no strategy configured", previous_route="a"
+    )
 
 
 # --- 3. A LangGraph node: a plain function that calls the router ---
@@ -176,7 +179,9 @@ def test_a_checkpointed_graph_persists_the_conversation_across_turns() -> None:
     """The current message-history idiom — a checkpointer, not the deprecated
     `RunnableWithMessageHistory` — works with the router as the graph's model. The second turn's
     route call sees both the first turn's messages and the second's, proving the history
-    persisted across two separate `graph.invoke` calls on the same thread, through the router."""
+    persisted across two separate `graph.invoke` calls on the same thread, through the router —
+    and the first turn's record with it, which the second turn's record reads back as its
+    `previous_route`."""
     route = FakeChatModel(
         model_name="a",
         script=[AIMessage(content="Hi Dan!"), AIMessage(content="Your name is Dan.")],
@@ -193,7 +198,9 @@ def test_a_checkpointed_graph_persists_the_conversation_across_turns() -> None:
 
     final = out["messages"][-1]
     assert final.content == "Your name is Dan."
-    assert routing_decision(final) == RoutingDecision(route="a", reason="no strategy configured")
+    assert routing_decision(final) == RoutingDecision(
+        route="a", reason="no strategy configured", previous_route="a"
+    )
     # The second call's own transcript, not just the graph's accumulated state, carried the
     # first turn forward: proof the checkpointer — not the router — is what persisted it.
     first_call, second_call = inputs.calls

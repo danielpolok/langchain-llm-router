@@ -192,7 +192,9 @@ class KeywordStrategy(RoutingStrategy):
             for rule in self._rules:
                 if rule.pattern.search(message.text):
                     return RoutingChoice(
-                        route=rule.route, reason=rule.reason + how_far_back(distance)
+                        route=rule.route,
+                        reason=rule.reason + how_far_back(distance),
+                        messages_back=distance,
                     )
         return None
 

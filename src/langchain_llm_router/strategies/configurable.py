@@ -661,7 +661,10 @@ class ConfigurableStrategy(RoutingStrategy):
                     return RoutingChoice(
                         route=rule.route,
                         reason=f"rule {label} matched: {reason}{how_far_back(distance)}",
+                        messages_back=distance,
                     )
+        # A rule that always holds speaks for the whole conversation, not for one message, so
+        # its choice says no distance.
         for label, rule in self._otherwise:
             reason = rule.when.explain(request)
             if reason is not None:

@@ -168,10 +168,36 @@ class Turn(NamedTuple):
     route: str
     reason: str
     fallback: bool = False
+    messages_back: int | None = 0
+    """How far back the message that decided was: what the reason says in words."""
 
 
 def fell_back(strategy: str) -> Turn:
-    return Turn("general", f"{strategy} could not decide; fell back to the default route", True)
+    return Turn(
+        "general", f"{strategy} could not decide; fell back to the default route", True, None
+    )
+
+
+def recorded(
+    turns: Sequence[Turn], strategy: str, *, after: str | None = None
+) -> list[RoutingDecision]:
+    """The records a conversation of `turns` should carry, one per turn.
+
+    Each turn's `previous_route` is the route the turn before it took — `after` for the first
+    one: the conversation is passed back as messages, records and all, as a chat app passes it.
+    """
+    previous_routes = [after, *(turn.route for turn in turns[:-1])]
+    return [
+        RoutingDecision(
+            route=turn.route,
+            reason=turn.reason,
+            strategy=strategy,
+            fallback=turn.fallback,
+            previous_route=previous_route,
+            messages_back=turn.messages_back,
+        )
+        for turn, previous_route in zip(turns, previous_routes, strict=True)
+    ]
 
 
 EASY = "difficulty 0.00 < 1.00 (no signal fired)"
@@ -211,11 +237,11 @@ CASES = [
             LEGAL_THEN_CODE,
             [
                 Turn("legal", "matched keyword 'contract'"),
-                Turn("legal", "matched keyword 'contract' (1 message back)"),
+                Turn("legal", "matched keyword 'contract' (1 message back)", messages_back=1),
                 # A known false match: the newest match wins, and "code" is this message's own.
                 Turn("coder", "matched keyword 'code'"),
                 Turn("coder", "matched keyword 'python'"),
-                Turn("coder", "matched keyword 'python' (1 message back)"),
+                Turn("coder", "matched keyword 'python' (1 message back)", messages_back=1),
             ],
         ),
         id="keyword-lookback-2",
@@ -244,10 +270,18 @@ CASES = [
             LEGAL_THEN_CODE,
             [
                 Turn("legal", "rule 'legal' matched: keyword 'contract'"),
-                Turn("legal", "rule 'legal' matched: keyword 'contract' (1 message back)"),
+                Turn(
+                    "legal",
+                    "rule 'legal' matched: keyword 'contract' (1 message back)",
+                    messages_back=1,
+                ),
                 Turn("coder", "rule 'coder' matched: keyword 'code'"),
                 Turn("coder", "rule 'coder' matched: keyword 'python'"),
-                Turn("coder", "rule 'coder' matched: keyword 'python' (1 message back)"),
+                Turn(
+                    "coder",
+                    "rule 'coder' matched: keyword 'python' (1 message back)",
+                    messages_back=1,
+                ),
             ],
         ),
         id="configurable-lookback-2",
@@ -277,8 +311,8 @@ CASES = [
             [
                 Turn("small", EASY),
                 Turn("frontier", HARD),
-                Turn("frontier", f"{HARD} (1 message back)"),
-                Turn("frontier", f"{HARD} (2 messages back)"),
+                Turn("frontier", f"{HARD} (1 message back)", messages_back=1),
+                Turn("frontier", f"{HARD} (2 messages back)", messages_back=2),
                 # Back down: the hard question is three messages back now.
                 Turn("small", EASY),
             ],
@@ -309,10 +343,10 @@ CASES = [
             LEGAL_THEN_CODE,
             [
                 Turn("legal", similar_to("legal")),
-                Turn("legal", f"{similar_to('legal')} (1 message back)"),
-                Turn("legal", f"{similar_to('legal')} (2 messages back)"),
+                Turn("legal", f"{similar_to('legal')} (1 message back)", messages_back=1),
+                Turn("legal", f"{similar_to('legal')} (2 messages back)", messages_back=2),
                 Turn("coder", similar_to("coder")),
-                Turn("coder", f"{similar_to('coder')} (1 message back)"),
+                Turn("coder", f"{similar_to('coder')} (1 message back)", messages_back=1),
             ],
         ),
         id="embedding-lookback-2",
@@ -413,21 +447,15 @@ async def converse(
 async def test_a_conversation_routes_as_specified(case: Case, convention: AnyConvention) -> None:
     """Each turn takes the route the table gives it, with that reason, through every calling
     convention. With `lookback=2` a follow-up goes where the message that set its topic went,
-    and says how far back that was; with `lookback=0` every turn routes as it always has. Every
-    turn calls exactly one route: reading earlier messages costs no call."""
+    and says how far back that was, in the reason and in `messages_back`; with `lookback=0`
+    every turn routes as it always has. Every record names the route of the turn before it as
+    its `previous_route`, so a switch shows. Every turn calls exactly one route: reading earlier
+    messages costs no call."""
     strategy = case.build(case.lookback)
 
     answered = await converse(make_router(strategy, case.routes), convention, case.turns)
 
-    assert [turn.decision for turn in answered] == [
-        RoutingDecision(
-            route=turn.route,
-            reason=turn.reason,
-            strategy=type(strategy).__name__,
-            fallback=turn.fallback,
-        )
-        for turn in case.expected
-    ]
+    assert [turn.decision for turn in answered] == recorded(case.expected, type(strategy).__name__)
     assert [turn.text for turn in answered] == [f"{turn.route} answer" for turn in case.expected]
     assert [turn.route_calls for turn in answered] == [1] * len(case.turns)
     assert [turn.warnings for turn in answered] == [
@@ -519,7 +547,7 @@ class ByTopicSoFar(RoutingStrategy):
         for back, message in enumerate((request, *request.previous_requests)):
             choice = self.inner.decide(message)
             if choice is not None:
-                return RoutingChoice(choice.route, f"{choice.reason}, {back} back")
+                return RoutingChoice(choice.route, f"{choice.reason}, {back} back", back)
         return None
 
 
@@ -528,21 +556,22 @@ async def test_a_custom_strategy_can_hand_previous_requests_to_another_strategy(
     convention: AnyConvention,
 ) -> None:
     """Each previous request can be passed to any strategy's `decide`. Its own
-    `previous_requests` is empty, so the inner strategy decides on that one message."""
+    `previous_requests` is empty, so the inner strategy decides on that one message. The
+    strategy says how far back that message was in its choice, and the record carries it."""
     router = make_router(ByTopicSoFar(KeywordStrategy(KEYWORD_RULES)))
 
     answered = await converse(router, convention, LEGAL_THEN_CODE)
 
-    assert [turn.decision for turn in answered] == [
-        RoutingDecision(route=route, reason=reason, strategy="ByTopicSoFar")
-        for route, reason in [
-            ("legal", "matched keyword 'contract', 0 back"),
-            ("legal", "matched keyword 'contract', 1 back"),
-            ("coder", "matched keyword 'code', 0 back"),
-            ("coder", "matched keyword 'python', 0 back"),
-            ("coder", "matched keyword 'python', 1 back"),
-        ]
-    ]
+    assert [turn.decision for turn in answered] == recorded(
+        [
+            Turn("legal", "matched keyword 'contract', 0 back"),
+            Turn("legal", "matched keyword 'contract', 1 back", messages_back=1),
+            Turn("coder", "matched keyword 'code', 0 back"),
+            Turn("coder", "matched keyword 'python', 0 back"),
+            Turn("coder", "matched keyword 'python', 1 back", messages_back=1),
+        ],
+        "ByTopicSoFar",
+    )
 
 
 def test_a_previous_request_describes_its_message_and_shares_the_call() -> None:
@@ -775,13 +804,13 @@ class Logged(RoutingStrategy):
         pytest.param(
             2,
             None,
-            Turn("legal", "matched keyword 'contract' (1 message back)"),
+            Turn("legal", "matched keyword 'contract' (1 message back)", messages_back=1),
             id="inherits-the-inner-lookback",
         ),
         pytest.param(
             0,
             2,
-            Turn("legal", "matched keyword 'contract' (1 message back)"),
+            Turn("legal", "matched keyword 'contract' (1 message back)", messages_back=1),
             id="overrides-it-upwards",
         ),
         pytest.param(2, 0, fell_back("Logged"), id="overrides-it-downwards"),
@@ -793,22 +822,23 @@ async def test_a_wrapper_reads_its_inner_strategys_lookback_unless_it_sets_its_o
 ) -> None:
     """The router hands over as many previous messages as the wrapper asks for, and a built-in
     reads at most its own `lookback`. A wrapper that declares its inner strategy's `lookback`
-    makes the two agree; one that sets its own gives the inner strategy a copy that reads it."""
+    makes the two agree; one that sets its own gives the inner strategy a copy that reads it.
+    Handing back the inner strategy's choice hands back how far back it says it decided."""
     strategy = Logged(keyword_strategy(inner), lookback=wrapper)
 
     _, follow_up = await converse(make_router(strategy), convention, LEGAL_THEN_CODE[:2])
 
-    assert follow_up.decision == RoutingDecision(
-        route=expected.route, reason=expected.reason, strategy="Logged", fallback=expected.fallback
-    )
+    assert [follow_up.decision] == recorded([expected], "Logged", after="legal")
 
 
 @pytest.mark.parametrize("convention", ALL_CONVENTIONS)
 @pytest.mark.parametrize(
-    ("build", "follow_up"),
+    ("build", "follow_up", "back"),
     [
-        pytest.param(embedding_strategy, f"{similar_to('legal')} (1 message back)", id="embedding"),
-        pytest.param(classifier_strategy, classified("legal"), id="classifier"),
+        pytest.param(
+            embedding_strategy, f"{similar_to('legal')} (1 message back)", 1, id="embedding"
+        ),
+        pytest.param(classifier_strategy, classified("legal"), 0, id="classifier"),
     ],
 )
 @pytest.mark.parametrize(
@@ -822,6 +852,7 @@ async def test_a_wrapper_reads_its_inner_strategys_lookback_unless_it_sets_its_o
 async def test_a_wrapper_gives_a_model_calling_strategy_its_lookback_too(
     build: Callable[[int], RoutingStrategy],
     follow_up: str,
+    back: int,
     inner: int,
     wrapper: int | None,
     reads_back: bool,
@@ -833,10 +864,8 @@ async def test_a_wrapper_gives_a_model_calling_strategy_its_lookback_too(
 
     _, answered = await converse(make_router(strategy), convention, LEGAL_THEN_CODE[:2])
 
-    expected = Turn("legal", follow_up) if reads_back else fell_back("Logged")
-    assert answered.decision == RoutingDecision(
-        route=expected.route, reason=expected.reason, strategy="Logged", fallback=expected.fallback
-    )
+    expected = Turn("legal", follow_up, messages_back=back) if reads_back else fell_back("Logged")
+    assert [answered.decision] == recorded([expected], "Logged", after="legal")
 
 
 @pytest.mark.parametrize(

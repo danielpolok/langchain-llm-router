@@ -13,6 +13,9 @@ exist, is treated the same way, with a `FallbackWarning` and the cause recorded.
   strategy it was given asks for, and a built-in reads at most its own `lookback`. A strategy
   that hands the request to another one therefore declares that one's `lookback`, and
   `with_lookback` gives it a copy that reads a different number.
+- **A choice can say which message decided.** `RoutingChoice.messages_back` is how far back the
+  user message that decided was, as `lookback` counts; the router records it on the decision.
+  A wrapper keeps it by returning the inner strategy's choice, or a `dataclasses.replace` of it.
 - **Sync and async.** The router calls `decide` on sync paths and `adecide` on async ones.
   `adecide` defaults to `decide` in a worker thread, so `decide` must be thread-safe. A strategy
   that calls a model overrides `adecide` with a native async implementation.
@@ -30,17 +33,17 @@ The interface is the four names `langchain_llm_router` exports from here: `Routi
 `RoutingRequest`, `RoutingChoice` and `RoutingCallable` — their members and what each means.
 Versions follow semantic versioning; until 1.0, the minor version stands in for the major one.
 
-- **Minor release (compatible):** a new `RoutingRequest` field, added last with a default, as
-  `previous_requests` was; a new optional `RoutingStrategy` member whose default keeps today's
-  behaviour, as `wants_full_context`, `lookback` and `with_lookback` are; new values in
-  `modalities` as LangChain adds content-block types; new wording in the reasons the package
-  writes; a widened type that keeps accepting everything it accepts today, such as
+- **Minor release (compatible):** a new `RoutingRequest` or `RoutingChoice` field, added last with a
+  default, as `previous_requests` and `messages_back` were; a new optional `RoutingStrategy` member
+  whose default keeps today's behaviour, as `wants_full_context`, `lookback` and `with_lookback`
+  are; new values in `modalities` as LangChain adds content-block types; new wording in the reasons
+  the package writes; a widened type that keeps accepting everything it accepts today, such as
   `ClassVar[bool]` becoming `bool`.
 - **Major release (breaking):** removing or renaming anything above, or retyping it so that code
   which type-checks today no longer does; a new abstract method; changing what `None` or a bare
   route name means; changing the signature of `decide` or `adecide`; changing the default of
-  `wants_full_context` or `lookback`, what `lookback` counts, or the order of
-  `previous_requests`.
+  `wants_full_context` or `lookback`, what `lookback` or `messages_back` counts, or the order
+  of `previous_requests`.
 
 Everything else in this module — `as_strategy`, `strategy_name` and the underscore names — is
 the router's own and may change in any release.
@@ -155,15 +158,37 @@ class RoutingChoice:
         route: The name of the route to take. It should be one of `RoutingRequest.routes`; a
             name the router doesn't have is a fallback to the default route.
         reason: Why, in words, for a human reading a trace. It is recorded on the decision.
+        messages_back: How many of the user's messages back the message that decided was: `0`
+            for the current request, `1` for the one before it, and so on. It is recorded on
+            the decision, so a dashboard can count follow-ups decided by an earlier message
+            without reading the reason. `None`, the default, says nothing.
+
+    Raises:
+        RoutingError: if `messages_back` is neither `None` nor a non-negative integer.
 
     Example:
         ```python
         RoutingChoice(route="coder", reason="mentions a stack trace")
+        RoutingChoice("legal", "matched 'contract' (1 message back)", messages_back=1)
         ```
     """
 
     route: str
     reason: str
+    messages_back: int | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a `messages_back` that isn't a count.
+
+        Checked here rather than by the router: a strategy that builds a bad choice raises
+        inside `decide`, and the router falls back with the cause, as for any strategy error.
+        """
+        if self.messages_back is not None and not _is_count(self.messages_back):
+            msg = (
+                f"messages_back must be None or a non-negative integer, the number of the "
+                f"user's messages back that decided, got {self.messages_back!r}"
+            )
+            raise RoutingError(msg)
 
 
 class RoutingStrategy(ABC):

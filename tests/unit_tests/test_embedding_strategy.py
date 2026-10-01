@@ -206,6 +206,7 @@ def test_the_route_whose_example_reads_closest_decides() -> None:
     assert choice == RoutingChoice(
         route="support",
         reason="embedding similarity 1.00 >= 0.99 to 'reset my password' (route 'support')",
+        messages_back=0,
     )
 
 
@@ -219,6 +220,7 @@ def test_a_route_s_score_is_the_best_of_its_examples_not_diluted_by_the_others()
     assert choice == RoutingChoice(
         route="coder",
         reason="embedding similarity 1.00 >= 0.99 to 'refactor this function' (route 'coder')",
+        messages_back=0,
     )
 
 
@@ -255,6 +257,7 @@ def test_a_route_named_in_examples_but_not_the_router_s_is_returned_anyway() -> 
     assert choice == RoutingChoice(
         route="support",
         reason="embedding similarity 1.00 >= 0.99 to 'reset my password' (route 'support')",
+        messages_back=0,
     )
 
 
@@ -516,7 +519,7 @@ async def test_a_follow_up_goes_where_the_message_before_it_went(convention: str
 
     choice = strategy.decide(request) if convention == "decide" else await strategy.adecide(request)
 
-    assert choice == RoutingChoice("support", f"{SUPPORT} (1 message back)")
+    assert choice == RoutingChoice("support", f"{SUPPORT} (1 message back)", messages_back=1)
 
 
 def test_the_newest_message_that_clears_the_threshold_decides() -> None:
@@ -528,11 +531,11 @@ def test_the_newest_message_that_clears_the_threshold_decides() -> None:
 
     assert strategy.decide(
         conversation("reset my password", "fix this stack trace", UNMATCHED[0])
-    ) == RoutingChoice("coder", f"{CODER} (1 message back)")
+    ) == RoutingChoice("coder", f"{CODER} (1 message back)", messages_back=1)
     embeddings.queries.clear()
     assert strategy.decide(
         conversation("fix this stack trace", "reset my password")
-    ) == RoutingChoice("support", SUPPORT)
+    ) == RoutingChoice("support", SUPPORT, messages_back=0)
     # The first request stopped at the message that decided, so this one is new; and the
     # earlier message isn't read at all, since the current one decides.
     assert embeddings.queries == ["reset my password"]
@@ -552,7 +555,7 @@ def test_lookback_reaches_as_far_as_it_says_and_passes_over_messages_with_no_tex
     request = conversation("reset my password", "   ", UNMATCHED[0])
 
     assert strategy_with(2).decide(request) == RoutingChoice(
-        "support", f"{SUPPORT} (2 messages back)"
+        "support", f"{SUPPORT} (2 messages back)", messages_back=2
     )
     assert strategy_with(1).decide(request) is None
     assert strategy_with(0).decide(request) is None
@@ -563,7 +566,7 @@ def test_the_strategy_reads_its_own_lookback_whatever_the_request_carries() -> N
 
     assert strategy_with(1).decide(request) is None
     assert strategy_with(2).decide(request) == RoutingChoice(
-        "support", f"{SUPPORT} (2 messages back)"
+        "support", f"{SUPPORT} (2 messages back)", messages_back=2
     )
 
 
