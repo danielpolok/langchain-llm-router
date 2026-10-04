@@ -20,11 +20,19 @@ from __future__ import annotations
 import asyncio
 import gc
 import warnings
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel, LanguageModelInput
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, ToolCall
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    ToolCall,
+    convert_to_openai_messages,
+)
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable, RunnableConfig, RunnableMap
 from langchain_core.tools import tool
@@ -44,7 +52,7 @@ from langchain_llm_router import (
 )
 from langchain_llm_router import decision as decision_module
 from langchain_llm_router.decision import ROUTING_KEY
-from tests.conventions import CONVENTIONS, Convention, respond
+from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, AnyConvention, Convention, respond
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 
 if TYPE_CHECKING:
@@ -310,8 +318,8 @@ async def test_every_entry_point_answers_with_the_record(
     assert routing_decision(message) == expected
 
 
-def test_the_record_is_the_six_field_schema() -> None:
-    """What rides on the message is the pinned schema — those six fields, in
+def test_the_record_is_the_eight_field_schema() -> None:
+    """What rides on the message is the pinned schema — those eight fields, in
     that order, and nothing else."""
     record = RoutingDecision(route="cheap", reason="why").as_dict()
 
@@ -322,8 +330,19 @@ def test_the_record_is_the_six_field_schema() -> None:
         "fallback": False,
         "forced": False,
         "diverted_from": None,
+        "previous_route": None,
+        "messages_back": None,
     }
-    assert tuple(record) == ("route", "reason", "strategy", "fallback", "forced", "diverted_from")
+    assert tuple(record) == (
+        "route",
+        "reason",
+        "strategy",
+        "fallback",
+        "forced",
+        "diverted_from",
+        "previous_route",
+        "messages_back",
+    )
 
 
 # --- the same record is on the trace, where it is placed ---
@@ -335,7 +354,7 @@ async def test_the_trace_carries_the_whole_record_in_each_of_d9_s_places(
     convention: Convention, strategy: RoutingStrategy | None, expected: RoutingDecision
 ) -> None:
     """The strategy run's output, the router run's outputs and the selected
-    route's run metadata each hold the same record, all six fields of it — and it is on no
+    route's run metadata each hold the same record, all eight fields of it — and it is on no
     run's *start* metadata, because the router's run opens before the decision is made. A
     diverted decision is no exception: `_divert` runs inside `_decide`, before the
     strategy run closes, so its output is the diverted record too, not the undiverted choice."""
@@ -695,9 +714,27 @@ def test_a_foreign_routing_value_is_not_read_as_a_record(foreign: object) -> Non
     assert routing_decision(message) is None
 
 
+def test_a_record_an_older_release_wrote_reads_back_with_the_new_fields_unset() -> None:
+    """A conversation stored before `previous_route` and `messages_back` existed still reads
+    back: the six fields it has, and the defaults for the two it doesn't."""
+    older = {
+        "route": "frontier",
+        "reason": "frontier is better at this",
+        "strategy": "Chooses",
+        "fallback": False,
+        "forced": False,
+        "diverted_from": None,
+    }
+    message = AIMessage(content="hello", response_metadata={ROUTING_KEY: older})
+
+    assert routing_decision(message) == DECIDED
+    assert DECIDED.previous_route is None
+    assert DECIDED.messages_back is None
+
+
 def test_a_record_with_keys_this_version_does_not_know_reads_back_anyway() -> None:
-    """A record written by a later release — one with a seventh field — still reads back
-    as the six fields this release has, rather than raising in the caller's code."""
+    """A record written by a later release — one with a ninth field — still reads back
+    as the eight fields this release has, rather than raising in the caller's code."""
     message = AIMessage(
         content="hello",
         response_metadata={ROUTING_KEY: {**DECIDED.as_dict(), "confidence": 0.91}},
@@ -716,6 +753,180 @@ def test_the_record_round_trips_through_the_dict_it_rides_as() -> None:
         fallback=True,
         forced=True,
         diverted_from="frontier",
+        previous_route="cheap",
+        messages_back=2,
     )
 
     assert RoutingDecision.from_dict(decided.as_dict()) == decided
+
+
+# --- The conversation's previous route, and the message that decided ---
+
+
+def answered_by(route: str) -> AIMessage:
+    """An answer from an earlier turn, carrying the record a router put on it."""
+    record = RoutingDecision(route=route, reason="an earlier turn")
+    return AIMessage(content=f"{route} answer", response_metadata={ROUTING_KEY: record.as_dict()})
+
+
+@pytest.mark.parametrize("convention", ALL_CONVENTIONS)
+async def test_a_follow_up_records_the_route_that_answered_the_turn_before(
+    convention: AnyConvention,
+) -> None:
+    """A conversation passed back as messages carries each answer's record, so the next turn's
+    record names the route that answered before it — under every calling convention. The first
+    turn has none. A switch shows as `previous_route` set and different from `route`."""
+    router = router_with(by_name)
+
+    first = await respond(router, convention, [HumanMessage("frontier")])
+    second = await respond(
+        router, convention, [HumanMessage("frontier"), first, HumanMessage("cheap")]
+    )
+
+    assert record_of(first).previous_route is None
+    assert record_of(second) == RoutingDecision(
+        route="cheap",
+        reason="by_name chose 'cheap'",
+        strategy="by_name",
+        previous_route="frontier",
+    )
+
+
+def test_a_conversation_passed_back_as_openai_style_dicts_has_no_previous_route() -> None:
+    """An OpenAI-style message is a role and content: the answer's `response_metadata`, and
+    the record in it, is dropped on the way, so there is no previous route to read."""
+    router = router_with(by_name)
+    first = router.invoke("frontier")
+    history = convert_to_openai_messages([HumanMessage("frontier"), first])
+
+    second = router.invoke([*history, {"role": "user", "content": "cheap"}])
+
+    assert record_of(second).previous_route is None
+
+
+@pytest.mark.parametrize(
+    ("strategy", "config", "expected"),
+    [
+        pytest.param(
+            Abstains(),
+            None,
+            replace(FELL_BACK, previous_route="frontier"),
+            id="fell back",
+        ),
+        pytest.param(
+            Chooses(),
+            {"configurable": {"route": "cheap"}},
+            RoutingDecision(
+                route="cheap",
+                reason="forced via runtime config",
+                forced=True,
+                previous_route="frontier",
+            ),
+            id="forced",
+        ),
+        pytest.param(None, None, replace(NO_STRATEGY, previous_route="frontier"), id="no strategy"),
+    ],
+)
+def test_the_previous_route_is_recorded_however_this_turn_was_settled(
+    strategy: RoutingStrategy | None, config: RunnableConfig | None, expected: RoutingDecision
+) -> None:
+    """The previous route is what the history says, so a fallback, a forced route and a router
+    with no strategy record it as a strategy's choice does. None of them names a message that
+    decided."""
+    conversation = [HumanMessage("first"), answered_by("frontier"), HumanMessage("second")]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FallbackWarning)
+        message = router_with(strategy).invoke(conversation, config)
+
+    assert record_of(message) == expected
+    assert expected.messages_back is None
+
+
+def test_the_newest_record_naming_one_of_this_router_s_routes_is_the_previous_route() -> None:
+    """Answers with no record, with someone else's `"routing"` value, or naming a route this
+    router doesn't have are passed over, and the newest answer that names one of its routes is
+    the one read."""
+    conversation = [
+        HumanMessage("first"),
+        answered_by("frontier"),
+        HumanMessage("second"),
+        answered_by("elsewhere"),
+        AIMessage("no record"),
+        AIMessage("someone else's", response_metadata={ROUTING_KEY: "eu-west"}),
+        HumanMessage("cheap"),
+    ]
+
+    message = router_with(by_name).invoke(conversation)
+
+    assert record_of(message).previous_route == "frontier"
+
+
+def test_inside_a_router_the_previous_route_is_the_outer_router_s() -> None:
+    """The outer router's record replaces the inner one's on every answer, so the history is
+    the outer router's. The outer router reads its own route back from it; the inner router
+    finds only the outer router's route names there, none of them its own, and records `None`
+    on its run in the trace."""
+    inner = ChatRouter(routes=two_routes(), default_route="cheap", strategy=by_name)
+    outer = ChatRouter(routes={"inner": inner}, default_route="inner")
+    collector = RunCollectorCallbackHandler()
+
+    first = outer.invoke([HumanMessage("frontier")])
+    second = outer.invoke(
+        [HumanMessage("frontier"), first, HumanMessage("cheap")], {"callbacks": [collector]}
+    )
+
+    assert record_of(second) == RoutingDecision(
+        route="inner", reason="no strategy configured", previous_route="inner"
+    )
+    (outer_run,) = collector.traced_runs
+    (inner_run,) = outer_run.child_runs
+    assert (inner_run.outputs or {})[ROUTING_KEY] == RoutingDecision(
+        route="cheap", reason="by_name chose 'cheap'", strategy="by_name"
+    ).as_dict()
+
+
+class SaysHowFarBack(RoutingStrategy):
+    """Chooses `frontier`, saying the message one back decided."""
+
+    def decide(self, request: RoutingRequest) -> RoutingChoice:
+        return RoutingChoice("frontier", "the message before decided", messages_back=1)
+
+
+def test_the_record_carries_how_far_back_the_strategy_says_it_decided() -> None:
+    """`RoutingChoice.messages_back` is recorded as the strategy gave it, and survives a
+    diversion: the message decided, and the diversion came after."""
+    router = router_with(SaysHowFarBack())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ToolSupportWarning)
+        tooled = router.bind_tools([get_weather])
+        diverted = tooled.invoke("anything")
+
+    assert record_of(router.invoke("anything")).messages_back == 1
+    assert record_of(diverted).diverted_from == "frontier"
+    assert record_of(diverted).messages_back == 1
+
+
+class MiscountsTheDistance(RoutingStrategy):
+    """Builds a choice whose `messages_back` is not a count."""
+
+    def decide(self, request: RoutingRequest) -> RoutingChoice:
+        return RoutingChoice("frontier", "why", messages_back=-1)
+
+
+def test_a_choice_with_a_distance_that_is_not_a_count_falls_back() -> None:
+    """`RoutingChoice` refuses the value when the strategy builds it, so the strategy raised,
+    and the router falls back with the cause, as for any strategy that raises."""
+    with pytest.warns(FallbackWarning):
+        message = router_with(MiscountsTheDistance()).invoke("anything")
+
+    assert record_of(message) == RoutingDecision(
+        route="cheap",
+        reason=(
+            "MiscountsTheDistance raised RoutingError: messages_back must be None or a "
+            "non-negative integer, the number of the user's messages back that decided, got -1; "
+            "fell back to the default route"
+        ),
+        strategy="MiscountsTheDistance",
+        fallback=True,
+    )

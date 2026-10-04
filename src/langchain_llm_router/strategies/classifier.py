@@ -102,8 +102,9 @@ still `None`. Messages with no text are left out; if the latest request has none
 earlier message with text is the one classified, in the light of those before it, and the reason
 says how far back it was, `(1 message back)`, as every built-in strategy does. Otherwise the
 reason is the same as without `lookback`: the model weighed every message, and no one of them
-decided on its own. With no earlier message to show, the prompt is exactly the one without
-`lookback`.
+decided on its own. Either way `RoutingChoice.messages_back` is the distance of the message
+classified, `0` for the latest request. With no earlier message to show, the prompt is exactly
+the one without `lookback`.
 
 **Cost.** The earlier messages are input tokens on every classification: up to N more messages
 in each prompt, still one call per request.
@@ -294,7 +295,7 @@ class ClassifierStrategy(RoutingStrategy):
             f"the classifier chose {route!r}: {self.route_descriptions[route]}"
             f"{how_far_back(distance)}"
         )
-        return RoutingChoice(route=route, reason=reason)
+        return RoutingChoice(route=route, reason=reason, messages_back=distance)
 
 
 def _checked_route_descriptions(route_descriptions: Mapping[str, str]) -> Mapping[str, str]:

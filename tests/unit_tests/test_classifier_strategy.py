@@ -170,6 +170,7 @@ def test_a_valid_classification_decides() -> None:
         route="coder",
         reason="the classifier chose 'coder': programming help: code, debugging, stack "
         "traces, refactors",
+        messages_back=0,
     )
 
 
@@ -477,6 +478,7 @@ async def test_the_prompt_shows_the_earlier_messages_oldest_first_as_context(
     assert choice == RoutingChoice(
         "coder",
         "the classifier chose 'coder': programming help: code, debugging, stack traces, refactors",
+        messages_back=0,
     )
 
 
@@ -509,6 +511,7 @@ def test_a_latest_message_with_no_text_classifies_the_newest_one_with_text() -> 
         "coder",
         "the classifier chose 'coder': programming help: code, debugging, stack traces, "
         "refactors (1 message back)",
+        messages_back=1,
     )
 
 

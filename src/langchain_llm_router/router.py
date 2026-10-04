@@ -17,9 +17,10 @@ Every entry point runs the same pipeline, in this order:
    `ForcedRouteError` or `ForcedRouteWarning` standing in for `FallbackWarning`. `_divert`
    then applies tool-aware routing to whatever settled the decision: a request whose route
    can't use the tools bound to it goes to the default route instead (or, if that can't use
-   them either, the first route in declaration order that can), recorded as a diversion —
-   before the strategy run closes, so its output is the same record the router run and the
-   route run end up with.
+   them either, the first route in declaration order that can), recorded as a diversion.
+   `_settle` does that and adds `previous_route`, the route the history says answered the
+   previous turn — before the strategy run closes, so its output is the same record the router
+   run and the route run end up with.
 3. `_route_call` prepares the selected route's call: nested under the router's run, with the
    decision in its metadata, and the caller's tool or structured-output binding replayed on
    the route itself.
@@ -83,6 +84,7 @@ from langchain_llm_router.decision import (
     RoutingDecision,
     discard_decision,
     record_decision,
+    routing_decision,
 )
 from langchain_llm_router.errors import (
     FallbackWarning,
@@ -984,7 +986,7 @@ class ChatRouter(BaseChatModel):
         Any call the strategy makes with `request.config` — or without it, through the context
         config — nests under the strategy's run, so it is traced and costed there.
 
-        `_divert` is applied at every return path, before the strategy run closes: the
+        `_settle` is applied at every return path, before the strategy run closes: the
         decision is one record in three places — the strategy run's output, the
         router run's output, the route run's metadata — and a diversion is part of settling
         the decision, not something layered on afterwards. The strategy run still ends a
@@ -995,7 +997,7 @@ class ChatRouter(BaseChatModel):
         """
         pending = self._plan(messages, config, kwargs)
         if isinstance(pending, RoutingDecision):
-            return self._divert(pending, kwargs)
+            return self._settle(pending, messages, kwargs)
         strategy_run = run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
@@ -1007,11 +1009,11 @@ class ChatRouter(BaseChatModel):
             strategy_run.on_chain_error(error)
             if not isinstance(error, Exception):
                 raise
-            return self._divert(self._conclude(pending, error), kwargs)
+            return self._settle(self._conclude(pending, error), messages, kwargs)
         try:
-            decision = self._divert(self._conclude(pending, choice), kwargs)
+            decision = self._settle(self._conclude(pending, choice), messages, kwargs)
         except BaseException as error:
-            # `_conclude` or `_divert` warns, and an application may have escalated that
+            # `_conclude` or `_settle` warns, and an application may have escalated that
             # warning to an error; the strategy's run has to close either way.
             strategy_run.on_chain_error(error)
             raise
@@ -1028,7 +1030,7 @@ class ChatRouter(BaseChatModel):
         """Async `_decide`: awaits `adecide`, so the strategy never blocks the loop."""
         pending = self._plan(messages, config, kwargs)
         if isinstance(pending, RoutingDecision):
-            return self._divert(pending, kwargs)
+            return self._settle(pending, messages, kwargs)
         strategy_run = await run_manager.get_child().on_chain_start(
             None, pending.inputs, name=pending.name
         )
@@ -1040,9 +1042,9 @@ class ChatRouter(BaseChatModel):
             await strategy_run.on_chain_error(error)
             if not isinstance(error, Exception):
                 raise
-            return self._divert(self._conclude(pending, error), kwargs)
+            return self._settle(self._conclude(pending, error), messages, kwargs)
         try:
-            decision = self._divert(self._conclude(pending, choice), kwargs)
+            decision = self._settle(self._conclude(pending, choice), messages, kwargs)
         except BaseException as error:
             # As in `_decide`: a warning escalated to an error must still close the run.
             await strategy_run.on_chain_error(error)
@@ -1059,7 +1061,10 @@ class ChatRouter(BaseChatModel):
         """
         if isinstance(outcome, RoutingChoice) and outcome.route in self.routes:
             return RoutingDecision(
-                route=outcome.route, reason=outcome.reason, strategy=pending.name
+                route=outcome.route,
+                reason=outcome.reason,
+                strategy=pending.name,
+                messages_back=outcome.messages_back,
             )
         if outcome is None:
             cause = "could not decide"
@@ -1070,6 +1075,28 @@ class ChatRouter(BaseChatModel):
         else:
             cause = f"returned {type(outcome).__name__}, not a RoutingChoice"
         return self._fallback(f"{pending.name} {cause}", strategy=pending.name)
+
+    def _settle(
+        self, decision: RoutingDecision, messages: list[BaseMessage], kwargs: dict[str, Any]
+    ) -> RoutingDecision:
+        """The decision as it is recorded: diverted if it must be, and with `previous_route`."""
+        diverted = self._divert(decision, kwargs)
+        return replace(diverted, previous_route=self._previous_route(messages))
+
+    def _previous_route(self, messages: list[BaseMessage]) -> str | None:
+        """The route that answered the previous turn, as the history records it, or `None`.
+
+        The newest AI message whose record names one of this router's routes. A record naming
+        some other route is passed over: inside a router that is itself a route, the history
+        holds the outer router's records, and their routes are not this router's. Nothing else
+        is asked of the record — whichever way that turn's route was settled, it answered.
+        """
+        for message in reversed(messages):
+            if isinstance(message, AIMessage):
+                record = routing_decision(message)
+                if record is not None and record.route in self.routes:
+                    return record.route
+        return None
 
     def _fallback(self, cause: str, *, strategy: str | None) -> RoutingDecision:
         """The default route, with one `FallbackWarning` and the cause recorded."""
@@ -1163,15 +1190,14 @@ class ChatRouter(BaseChatModel):
         asked for, and it happens per request, so it is per request that the application
         hears about it. `diverted_from` keeps the route it came from.
 
-        Called from `_decide` / `_adecide`, before the strategy's run closes: the decision
-        is one record in three places, so the strategy run's output is the *diverted* record
-        too, the same as the router run's outputs and the route run's metadata — not what the
+        Called through `_settle` from `_decide` / `_adecide`, before the strategy's run closes: the
+        decision is one record in three places, so the strategy run's output is the *diverted*
+        record too, the same as the router run's outputs and the route run's metadata — not what the
         strategy chose before the diversion stepped in. The `forced` guard runs earlier, in `_plan`:
-        a forced route that can't use the bound tools is refused —
-        `ForcedRouteError`, or `ForcedRouteWarning` under `on_unavailable_forced_route`'s
-        `"fallback"` setting — before a request ever gets here, so this never has to tell a
-        forced route from any other. Whatever a forced route's refusal falls back to is
-        diverted like any other decision.
+        a forced route that can't use the bound tools is refused — `ForcedRouteError`, or
+        `ForcedRouteWarning` under `on_unavailable_forced_route`'s `"fallback"` setting — before a
+        request ever gets here, so this never has to tell a forced route from any other. Whatever a
+        forced route's refusal falls back to is diverted like any other decision.
         """
         if not tools_are_bound(kwargs) or self._supports_tools(decision.route):
             return decision

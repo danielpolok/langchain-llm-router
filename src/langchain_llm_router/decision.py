@@ -12,6 +12,12 @@ A route may itself be a `ChatRouter`. The inner router records its decision on i
 the outer router then replaces it with its own, so the message and `last_routing_decision()`
 both report the *outermost* decision — the one the caller made. Nothing is lost: the inner
 router's chain run carries its own record on the trace, as every router's run does.
+
+The history passed back is therefore a history of the outer router's decisions, and
+`previous_route` reads it that way: a router takes the previous route from the newest record that
+names one of its *own* routes. The outer router finds its own route there; the inner one finds
+only the outer router's route names, and so records `None` — unless the two routers share a route
+name, since a record names its route and nothing else, and then it reads the outer router's.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ ROUTING_KEY = "routing"
 
 @dataclass(frozen=True)
 class RoutingDecision:
-    """Which route ran, and why. These six fields are the whole schema.
+    """Which route ran, and why. These eight fields are the whole schema.
 
     Attributes:
         route: The route that ran.
@@ -42,6 +48,9 @@ class RoutingDecision:
         fallback: Whether the default route ran because the strategy could not decide.
         forced: Whether the route came from runtime config.
         diverted_from: The tool-incapable route the request was diverted from, if any.
+        previous_route: The route that answered the conversation's previous turn, if the
+            history records one.
+        messages_back: How far back the user message that decided was, if the strategy says.
 
     Example:
         ```python
@@ -74,17 +83,39 @@ class RoutingDecision:
     diverted_from: str | None = None
     """The tool-incapable route the request was diverted from."""
 
+    previous_route: str | None = None
+    """The route that answered the conversation's previous turn.
+
+    Read from the newest AI message in the input whose routing record names one of this
+    router's routes — so inside an agent's tool loop, the loop's previous call. However this
+    turn's route was settled — chosen, forced or fallen back to — the history says the same.
+    `None` on a conversation's first turn, and when the history carries no record: a
+    conversation passed back as OpenAI-style dicts drops `response_metadata`, and the record
+    with it. A route switch is `previous_route` set and different from `route`."""
+
+    messages_back: int | None = None
+    """How many of the user's messages back the message that decided was.
+
+    `0` when the current request decided, `1` when the one before it did, and so on — what
+    `lookback` counts. Reported by the strategy (`RoutingChoice.messages_back`), as every
+    built-in one does whenever one message decided. `None` when no strategy decided — the route
+    was forced, or the default route answered — or when the strategy doesn't say. A diverted
+    request keeps it: the message decided, and the diversion came after."""
+
     def as_dict(self) -> dict[str, Any]:
         """The record as it rides under `response_metadata["routing"]` and on the trace.
 
         Returns:
-            A plain dict of the six fields, safe to serialize.
+            A plain dict of the eight fields, safe to serialize.
         """
         return asdict(self)
 
     @classmethod
     def from_dict(cls, record: Mapping[str, Any]) -> RoutingDecision:
-        """Rebuild a record from `as_dict()` output. Unknown keys are ignored.
+        """Rebuild a record from `as_dict()` output.
+
+        Unknown keys are ignored, and missing ones take their defaults, so a record written by an
+        older or a newer release reads back too.
 
         Args:
             record: A mapping holding at least `route` and `reason`.

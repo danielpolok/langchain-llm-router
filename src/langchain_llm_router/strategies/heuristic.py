@@ -381,7 +381,11 @@ class HeuristicStrategy(RoutingStrategy):
             len(self.thresholds),
         )
         reason = self._reason(hardest.score, tier, hardest.contributions)
-        return RoutingChoice(route=self.tiers[tier], reason=reason + how_far_back(hardest.distance))
+        return RoutingChoice(
+            route=self.tiers[tier],
+            reason=reason + how_far_back(hardest.distance),
+            messages_back=hardest.distance,
+        )
 
     def _reason(self, score: float, tier: int, contributions: Mapping[str, float]) -> str:
         """The score, the band it fell in, and the signals that made it."""
