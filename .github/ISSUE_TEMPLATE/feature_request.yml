@@ -1,0 +1,38 @@
+name: Feature request
+description: A routing need the router doesn't meet yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The router picks one model before the call, using a policy you define. Learning from
+        traffic, cascades, budgets and running as a proxy are
+        [out of scope](https://github.com/danielpolok/langchain-model-router#scope).
+        A new strategy often works best as your own first; see
+        [Your own strategy](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#your-own-strategy).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The application, the models you route between and the policy you want.
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: What gets in the way today
+      description: What you tried, and where the router or its strategies fall short.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How you'd like to use it, in code if you can.
+      render: python
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to open a pull request for this.

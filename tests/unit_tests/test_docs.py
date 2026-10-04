@@ -16,12 +16,12 @@ import langchain_model_router
 from tests.docs import (
     PAGES,
     README,
-    ROOT,
     URL,
     Block,
     anchors,
     check_imports,
     links,
+    local,
     python_blocks,
     relative,
 )
@@ -36,13 +36,13 @@ def test_python_blocks_compile_and_their_imports_resolve(block: Block) -> None:
 
 
 @pytest.mark.parametrize("page", PAGES, ids=relative)
-def test_relative_links_resolve(page: Path) -> None:
+def test_links_into_the_repository_resolve(page: Path) -> None:
     broken = []
     for target in links(page):
-        if URL.match(target):
-            continue  # http(s), mailto: not checked offline
-        path, _, fragment = target.partition("#")
-        destination = (page.parent / path).resolve() if path else page
+        resolved = local(page, target)
+        if resolved is None:
+            continue  # external links are not checked offline
+        destination, fragment = resolved
         missing_anchor = (
             bool(fragment) and destination.suffix == ".md" and fragment not in anchors(destination)
         )
@@ -51,12 +51,16 @@ def test_relative_links_resolve(page: Path) -> None:
     assert not broken, f"{relative(page)} has broken links: {broken}"
 
 
+def test_readme_links_work_on_pypi() -> None:
+    # PyPI shows the README with no repository around it, so a relative link there is broken.
+    relative_links = [
+        target for target in links(README) if not URL.match(target) and not target.startswith("#")
+    ]
+    assert not relative_links, f"README.md needs absolute repository URLs: {relative_links}"
+
+
 def test_every_docs_page_is_linked_from_the_readme() -> None:
-    linked = {
-        (ROOT / target.partition("#")[0]).resolve()
-        for target in links(README)
-        if not URL.match(target)
-    }
+    linked = {resolved[0] for target in links(README) if (resolved := local(README, target))}
     unlinked = [relative(page) for page in PAGES if page != README and page not in linked]
     assert not unlinked, f"not linked from README.md: {unlinked}"
 

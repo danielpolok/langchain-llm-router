@@ -1,22 +1,33 @@
 [project]
 name = "langchain-model-router"
-version = "0.0.0"
+version = "0.1.0"
 description = "In-process model routing for LangChain: a chat model that picks one of several candidate chat models per request."
 authors = [{ name = "Daniel Polok" }]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["langchain", "llm", "routing", "chat-model", "model-router"]
+keywords = [
+    "langchain",
+    "langgraph",
+    "llm",
+    "routing",
+    "chat-model",
+    "model-router",
+    "model-routing",
+]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 requires-python = ">=3.10"
@@ -26,8 +37,11 @@ requires-python = ">=3.10"
 dependencies = ["langchain-core>=1.2.21,<2"]
 
 [project.urls]
+Homepage = "https://github.com/danielpolok/langchain-model-router"
+Documentation = "https://github.com/danielpolok/langchain-model-router#documentation"
 Repository = "https://github.com/danielpolok/langchain-model-router"
 Issues = "https://github.com/danielpolok/langchain-model-router/issues"
+Changelog = "https://github.com/danielpolok/langchain-model-router/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

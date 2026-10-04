@@ -1,8 +1,10 @@
 # langchain-model-router
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
+[![PyPI](https://img.shields.io/pypi/v/langchain-model-router)](https://pypi.org/project/langchain-model-router/)
+[![Python](https://img.shields.io/pypi/pyversions/langchain-model-router)](https://pypi.org/project/langchain-model-router/)
+[![CI](https://github.com/danielpolok/langchain-model-router/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/danielpolok/langchain-model-router/actions/workflows/ci.yml)
 [![LangChain](https://img.shields.io/badge/langchain--core-%E2%89%A51.2.21%2C%20%3C2-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/danielpolok/langchain-model-router/blob/main/LICENSE)
 
 **Send each request to the right model, by rules you control, from one LangChain chat model.**
 
@@ -72,7 +74,8 @@ frontier Compare the trade-offs of quicksort and mergesort on linked lists.
 ```
 
 The simple fact question went to the small model. Comparing trade-offs takes reasoning, so that
-question went to the frontier model. [Routing strategies](docs/strategies.md#heuristicstrategy-route-on-difficulty)
+question went to the frontier model.
+[Routing strategies](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#heuristicstrategy-route-on-difficulty)
 explains how the difficulty is judged.
 
 `response` is the chosen model's own answer, unchanged, so you read its text, tool calls and token
@@ -80,7 +83,7 @@ usage as usual. `routing_decision(response)` tells you which route answered and 
 
 ## How it works
 
-<img alt="A request enters ChatRouter. Its strategy picks one of the routes (a small model, a frontier model or a code model), or the default route if it can't decide. The chosen model's answer comes back with which route answered and why." src="docs/images/how-it-works.svg" width="820">
+<img alt="A request enters ChatRouter. Its strategy picks one of the routes (a small model, a frontier model or a code model), or the default route if it can't decide. The chosen model's answer comes back with which route answered and why." src="https://raw.githubusercontent.com/danielpolok/langchain-model-router/main/docs/images/how-it-works.svg" width="820">
 
 1. The strategy looks at the **current request**, meaning the user's latest message. It ignores
    tool output and the rest of the conversation, so an agent's tool loop can't change the route.
@@ -91,28 +94,33 @@ usage as usual. `routing_decision(response)` tells you which route answered and 
 
 | Strategy | Decides by | Extra cost per request | Good for |
 | --- | --- | --- | --- |
-| [`HeuristicStrategy`](docs/strategies.md#heuristicstrategy-route-on-difficulty) | A difficulty score: length, code, several questions, reasoning words, images | None | Cheap model for easy requests, strong model for hard ones |
-| [`KeywordStrategy`](docs/strategies.md#keywordstrategy-route-on-words) | Words in the request | None | Topics with telltale words, such as "SQL" or "invoice" |
-| [`ConfigurableStrategy`](docs/strategies.md#configurablestrategy-combine-rules) | Your rules, combining keywords, scores, media and tools | None | A policy with several conditions |
-| [`EmbeddingStrategy`](docs/strategies.md#embeddingstrategy-route-on-meaning) | Similarity to example requests | One embedding call | Topics without telltale words |
-| [`ClassifierStrategy`](docs/strategies.md#classifierstrategy-let-a-small-model-choose) | A small model reads route descriptions and picks one | One small-model call | Subtle distinctions, when accuracy matters most |
-| [Your own function](docs/strategies.md#your-own-strategy) | Your code | Whatever your code costs | Business rules, an existing classifier |
+| [`HeuristicStrategy`](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#heuristicstrategy-route-on-difficulty) | A difficulty score: length, code, several questions, reasoning words, images | None | Cheap model for easy requests, strong model for hard ones |
+| [`KeywordStrategy`](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#keywordstrategy-route-on-words) | Words in the request | None | Topics with telltale words, such as "SQL" or "invoice" |
+| [`ConfigurableStrategy`](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#configurablestrategy-combine-rules) | Your rules, combining keywords, scores, media and tools | None | A policy with several conditions |
+| [`EmbeddingStrategy`](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#embeddingstrategy-route-on-meaning) | Similarity to example requests | One embedding call | Topics without telltale words |
+| [`ClassifierStrategy`](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#classifierstrategy-let-a-small-model-choose) | A small model reads route descriptions and picks one | One small-model call | Subtle distinctions, when accuracy matters most |
+| [Your own function](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#your-own-strategy) | Your code | Whatever your code costs | Business rules, an existing classifier |
 
 Start with a strategy that makes no extra call. Reach for embeddings or a classifier when words and
 rules can't tell your routes apart. They read meaning, but they add a call to every request.
 
 ## Documentation
 
-- **[Routing strategies](docs/strategies.md)** covers how each strategy decides, with examples,
-  tuning and how to write your own.
-- **[Using the router](docs/guide.md)** covers reading the decision, streaming, tools, structured
-  output, agents, forcing a route for A/B tests, tracing and cost, retries and caching.
-- **[Examples](examples/README.md)** has one runnable script per use case, each a small
-  real-world scenario on the same models as these pages.
-- **[Benchmark](benchmark/README.md)** compares the strategies on cost and answer quality over a
-  mixed workload, and shows how to rerun it with your own models.
-- **[Design notes](docs/design.md)** explain why the router is built the way it is. Read these
-  before contributing.
+- **[Routing strategies](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md)**
+  covers how each strategy decides, with examples, tuning and how to write your own.
+- **[Using the router](https://github.com/danielpolok/langchain-model-router/blob/main/docs/guide.md)**
+  covers reading the decision, streaming, tools, structured output, agents, forcing a route for
+  A/B tests, tracing and cost, retries and caching.
+- **[Examples](https://github.com/danielpolok/langchain-model-router/blob/main/examples/README.md)**
+  has one runnable script per use case, each a small real-world scenario on the same models as
+  these pages.
+- **[Benchmark](https://github.com/danielpolok/langchain-model-router/blob/main/benchmark/README.md)**
+  compares the strategies on cost and answer quality over a mixed workload, and shows how to rerun
+  it with your own models.
+- **[Design notes](https://github.com/danielpolok/langchain-model-router/blob/main/docs/design.md)**
+  explain why the router is built the way it is. Read these before contributing.
+- **[Changelog](https://github.com/danielpolok/langchain-model-router/blob/main/CHANGELOG.md)**
+  lists what changed in each release.
 
 ## Scope
 
@@ -122,24 +130,27 @@ Inside `create_agent`, a choice that depends on agent state belongs in
 [`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware), which
 can use the router as its model.
 
-> [!TIP]
 > **Provider prompt caching.** Moving a conversation between models loses the prompt prefix that
 > the provider has cached. For long conversations, you can
-> [keep each conversation on one route](docs/strategies.md#a-strategy-class).
+> [keep each conversation on one route](https://github.com/danielpolok/langchain-model-router/blob/main/docs/strategies.md#a-strategy-class).
 
 ## Contributing
 
-Development uses [uv](https://docs.astral.sh/uv/) (Python 3.12; the package supports 3.10+):
+Bug reports, ideas and pull requests are welcome. Development uses [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
-uv run pytest
-uv run ruff check . && uv run ruff format --check . && uv run mypy
+make test   # offline unit tests
+make lint   # ruff and mypy
 ```
 
-See [AGENTS.md](AGENTS.md) for the repository layout and conventions, and
-[GitHub Issues](https://github.com/danielpolok/langchain-model-router/issues) for open work.
+[CONTRIBUTING.md](https://github.com/danielpolok/langchain-model-router/blob/main/CONTRIBUTING.md)
+explains how to propose a change, and
+[AGENTS.md](https://github.com/danielpolok/langchain-model-router/blob/main/AGENTS.md)
+describes the repository layout and conventions. Open work is in
+[GitHub Issues](https://github.com/danielpolok/langchain-model-router/issues). To report a security
+problem, follow [SECURITY.md](https://github.com/danielpolok/langchain-model-router/blob/main/SECURITY.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/danielpolok/langchain-model-router/blob/main/LICENSE)
