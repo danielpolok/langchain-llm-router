@@ -5,7 +5,7 @@ Gemini, not Ollama: the local Ollama server this suite's other live tests use an
 requests but was not started with `--embeddings` and has no embedding model pulled — its
 `/api/embed` refuses every request in this environment. Gemini's Developer API always serves
 embeddings, so it is the real provider available here; override the model with
-`LLM_ROUTER_GEMINI_EMBED_MODEL`. Skips without `GEMINI_API_KEY` (`requires_env`, root
+`MODEL_ROUTER_GEMINI_EMBED_MODEL`. Skips without `GEMINI_API_KEY` (`requires_env`, root
 `conftest.py`).
 
 Real embeddings are semantically meaningful, unlike `DeterministicFakeEmbedding`'s unit-test
@@ -23,11 +23,11 @@ import pytest
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from langchain_llm_router import ChatRouter, routing_decision
-from langchain_llm_router.strategies.embedding import EmbeddingStrategy
+from langchain_model_router import ChatRouter, routing_decision
+from langchain_model_router.strategies.embedding import EmbeddingStrategy
 from tests.fakes import FakeChatModel
 
-EMBED_MODEL = os.environ.get("LLM_ROUTER_GEMINI_EMBED_MODEL", "gemini-embedding-2-preview")
+EMBED_MODEL = os.environ.get("MODEL_ROUTER_GEMINI_EMBED_MODEL", "gemini-embedding-2-preview")
 
 EXAMPLES = {
     "coder": [

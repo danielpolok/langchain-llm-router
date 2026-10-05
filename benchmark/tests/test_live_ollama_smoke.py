@@ -17,8 +17,8 @@ from benchmark.dataset import WorkloadItem, load_dataset
 from benchmark.judge import JudgeVerdict
 from benchmark.runner import run_item
 from benchmark.tests.fakes import FakeJudge
-from langchain_llm_router import ChatRouter
-from langchain_llm_router.strategies import HeuristicStrategy
+from langchain_model_router import ChatRouter
+from langchain_model_router.strategies import HeuristicStrategy
 
 pytestmark = pytest.mark.requires_ollama
 

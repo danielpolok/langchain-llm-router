@@ -36,7 +36,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,
@@ -46,9 +46,9 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router._extraction import build_request
-from langchain_llm_router.strategies import embedding
-from langchain_llm_router.strategies.embedding import EmbeddingStrategy
+from langchain_model_router._extraction import build_request
+from langchain_model_router.strategies import embedding
+from langchain_model_router.strategies.embedding import EmbeddingStrategy
 from tests.conventions import Convention, respond
 from tests.fakes import CountingEmbeddings, FakeChatModel
 from tests.tracing import StartLog

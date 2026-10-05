@@ -29,7 +29,7 @@ exist, is treated the same way, with a `FallbackWarning` and the cause recorded.
 
 Stability promise
 -----------------
-The interface is the four names `langchain_llm_router` exports from here: `RoutingStrategy`,
+The interface is the four names `langchain_model_router` exports from here: `RoutingStrategy`,
 `RoutingRequest`, `RoutingChoice` and `RoutingCallable` — their members and what each means.
 Versions follow semantic versioning; until 1.0, the minor version stands in for the major one.
 
@@ -62,7 +62,7 @@ from typing import ClassVar, TypeAlias, TypeVar
 from langchain_core.messages import BaseMessage, ContentBlock
 from langchain_core.runnables import RunnableConfig, run_in_executor
 
-from langchain_llm_router.errors import RoutingError
+from langchain_model_router.errors import RoutingError
 
 __all__ = [
     "RoutingCallable",

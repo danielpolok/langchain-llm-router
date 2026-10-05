@@ -11,7 +11,7 @@ The examples on this page share one router:
 ```python
 from langchain.chat_models import init_chat_model
 
-from langchain_llm_router import ChatRouter, HeuristicStrategy, routing_decision
+from langchain_model_router import ChatRouter, HeuristicStrategy, routing_decision
 
 router = ChatRouter(
     routes={
@@ -140,7 +140,7 @@ the current thread or task:
 ```python
 from pydantic import BaseModel
 
-from langchain_llm_router import last_routing_decision
+from langchain_model_router import last_routing_decision
 
 
 class Location(BaseModel):
@@ -320,7 +320,7 @@ example, turn it into an error:
 ```python
 import warnings
 
-from langchain_llm_router import FallbackWarning
+from langchain_model_router import FallbackWarning
 
 warnings.filterwarnings("error", category=FallbackWarning)
 ```

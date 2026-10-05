@@ -105,9 +105,9 @@ from collections.abc import Callable, Mapping, Sequence
 from types import MappingProxyType
 from typing import NamedTuple, TypeAlias
 
-from langchain_llm_router.errors import RoutingError
-from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
-from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_model_router.errors import RoutingError
+from langchain_model_router.strategies._lookback import checked_lookback, considered, how_far_back
+from langchain_model_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 __all__ = [
     "DEFAULT_LENGTH_RANGE",

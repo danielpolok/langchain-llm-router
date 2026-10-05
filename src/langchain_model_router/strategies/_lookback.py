@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from langchain_llm_router.errors import RoutingError
-from langchain_llm_router.strategy import RoutingRequest
+from langchain_model_router.errors import RoutingError
+from langchain_model_router.strategy import RoutingRequest
 
 
 def checked_lookback(lookback: object) -> int:

@@ -34,7 +34,7 @@ from langchain_core.runnables.utils import ConfigurableFieldSpec
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from langchain_llm_router.router import ChatRouter
+    from langchain_model_router.router import ChatRouter
 
 __all__ = [
     "BINDING_KEY",
@@ -47,7 +47,7 @@ __all__ = [
     "tools_are_bound",
 ]
 
-BINDING_KEY = "__llm_router_binding"
+BINDING_KEY = "__model_router_binding"
 """The call kwarg that carries a `ToolBinding` or `StructuredOutputBinding` to the router.
 
 An ordinary key in `RunnableBinding.kwargs`, so it survives `bind`, `with_config` and every

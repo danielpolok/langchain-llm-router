@@ -18,9 +18,9 @@ load_dotenv()
 # `.env` switches LangSmith tracing on for interactive use. Under pytest that would upload a trace
 # of every fake-model call to the developer's account, and count against its quota, as soon as the
 # key is valid — so tracing is off for the suite. The live tests hand a `LangChainTracer` to each
-# call explicitly and need neither setting; `LLM_ROUTER_TRACE_TESTS=1` turns it back on for
+# call explicitly and need neither setting; `MODEL_ROUTER_TRACE_TESTS=1` turns it back on for
 # everything.
-if not os.environ.get("LLM_ROUTER_TRACE_TESTS"):
+if not os.environ.get("MODEL_ROUTER_TRACE_TESTS"):
     os.environ["LANGSMITH_TRACING"] = "false"
     for _legacy in ("LANGCHAIN_TRACING_V2", "LANGCHAIN_TRACING", "LANGSMITH_TRACING_V2"):
         os.environ.pop(_legacy, None)

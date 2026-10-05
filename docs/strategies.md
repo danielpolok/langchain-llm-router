@@ -26,7 +26,7 @@ question and prints the route that answered it, with the reason.
 ```python
 from langchain.chat_models import init_chat_model
 
-from langchain_llm_router import ChatRouter, routing_decision
+from langchain_model_router import ChatRouter, routing_decision
 
 small = init_chat_model("google_genai:gemini-3.5-flash-lite")
 frontier = init_chat_model("google_genai:gemini-3.8-flash")
@@ -44,7 +44,7 @@ difficulty from signals it can compute instantly, without calling a model, and a
 a **difficulty score**.
 
 ```python
-from langchain_llm_router import HeuristicStrategy
+from langchain_model_router import HeuristicStrategy
 
 router = ChatRouter(
     routes={"small": small, "frontier": frontier},
@@ -119,7 +119,7 @@ code_heavy = HeuristicStrategy("small", "frontier", weights={"code": 2.0, "lengt
 from 0 to 1. Add it to the default set with `signals=`:
 
 ```python
-from langchain_llm_router.strategies.heuristic import DEFAULT_SIGNALS
+from langchain_model_router.strategies.heuristic import DEFAULT_SIGNALS
 
 
 def mentions_money(request):
@@ -160,7 +160,7 @@ the examples below, programming questions go to the `coder` route and everything
 `general`.
 
 ```python
-from langchain_llm_router import KeywordStrategy
+from langchain_model_router import KeywordStrategy
 
 router = ChatRouter(
     routes={"general": small, "coder": frontier},
@@ -201,8 +201,8 @@ to the frontier model, and everything else goes to the small one". Each `Rule` n
 condition and optionally a name for the reason:
 
 ```python
-from langchain_llm_router import ConfigurableStrategy
-from langchain_llm_router.strategies.configurable import (
+from langchain_model_router import ConfigurableStrategy
+from langchain_model_router.strategies.configurable import (
     Rule,
     always,
     any_of,
@@ -210,7 +210,7 @@ from langchain_llm_router.strategies.configurable import (
     modality,
     signal_at_least,
 )
-from langchain_llm_router.strategies.heuristic import code_signal
+from langchain_model_router.strategies.heuristic import code_signal
 
 router = ChatRouter(
     routes={"small": small, "frontier": frontier},
@@ -269,7 +269,7 @@ works. This example uses Gemini's:
 ```python
 from langchain.embeddings import init_embeddings
 
-from langchain_llm_router import EmbeddingStrategy
+from langchain_model_router import EmbeddingStrategy
 
 embeddings = init_embeddings("google_genai:gemini-embedding-001")
 
@@ -326,7 +326,7 @@ most accurate way to separate subtle topics. It costs one extra model call per r
 a small, fast model:
 
 ```python
-from langchain_llm_router import ClassifierStrategy
+from langchain_model_router import ClassifierStrategy
 
 router = ChatRouter(
     routes={"general": small, "coder": frontier},
@@ -633,7 +633,7 @@ That way a follow-up question stays with the model that has the context, and kee
 prompt cache warm:
 
 ```python
-from langchain_llm_router import RoutingChoice, RoutingStrategy
+from langchain_model_router import RoutingChoice, RoutingStrategy
 
 
 class Sticky(RoutingStrategy):

@@ -12,7 +12,7 @@ Two threads run through the module:
   check is not vacuous.
 - **Public surface only** — nothing below reaches into the package: the strategy is built,
 configured and
-  routed with names `langchain_llm_router` exports. (`_extraction.build_request` is the one
+  routed with names `langchain_model_router` exports. (`_extraction.build_request` is the one
   exception, and it is the *router's* work, done here so the requests under test are the ones a
   router would really hand over.)
 
@@ -35,8 +35,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.context import register_configure_hook
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-import langchain_llm_router
-from langchain_llm_router import (
+import langchain_model_router
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,
@@ -46,8 +46,8 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router._extraction import build_request
-from langchain_llm_router.strategies.heuristic import (
+from langchain_model_router._extraction import build_request
+from langchain_model_router.strategies.heuristic import (
     DEFAULT_LENGTH_RANGE,
     DEFAULT_SIGNALS,
     DEFAULT_THRESHOLD,
@@ -714,8 +714,8 @@ def test_the_builtin_is_an_ordinary_public_strategy() -> None:
     strategy = HeuristicStrategy(*TIERS)
 
     assert isinstance(strategy, RoutingStrategy)
-    assert langchain_llm_router.HeuristicStrategy is HeuristicStrategy
-    assert "HeuristicStrategy" in langchain_llm_router.__all__
+    assert langchain_model_router.HeuristicStrategy is HeuristicStrategy
+    assert "HeuristicStrategy" in langchain_model_router.__all__
     assert strategy.wants_full_context is False
 
 

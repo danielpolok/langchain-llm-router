@@ -34,7 +34,7 @@ from langchain_core.tracers.schemas import Run
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     NoToolCapableRouteError,
@@ -47,8 +47,8 @@ from langchain_llm_router import (
     last_routing_decision,
     routing_decision,
 )
-from langchain_llm_router._tools import BINDING_KEY, supports_tools
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router._tools import BINDING_KEY, supports_tools
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, Convention, generated, respond
 from tests.fakes import (
     FakeChatModel,

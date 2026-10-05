@@ -80,7 +80,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 
-from langchain_llm_router.strategy import RoutingRequest
+from langchain_model_router.strategy import RoutingRequest
 
 _USER_ROLES = frozenset({"human", "user"})
 """`ChatMessage` roles that make it a user message, as LangChain's own role mapping has them."""

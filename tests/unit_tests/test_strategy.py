@@ -33,20 +33,20 @@ from langchain_core.runnables.config import set_config_context
 from langchain_core.runnables.utils import coro_with_context
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-import langchain_llm_router
-from langchain_llm_router import (
+import langchain_model_router
+from langchain_model_router import (
     RoutingCallable,
     RoutingChoice,
     RoutingError,
     RoutingRequest,
     RoutingStrategy,
 )
-from langchain_llm_router._extraction import build_request
-from langchain_llm_router.strategy import as_strategy, strategy_name
+from langchain_model_router._extraction import build_request
+from langchain_model_router.strategy import as_strategy, strategy_name
 from tests.fakes import FakeChatModel
 from tests.tracing import async_calls_inherit_the_context, model_runs
 
-PACKAGE = "langchain_llm_router"
+PACKAGE = "langchain_model_router"
 ROUTES = ("small", "coder")
 
 
@@ -426,7 +426,7 @@ def _is_strategy_subclass(value: object) -> TypeGuard[type[RoutingStrategy]]:
 
 def _published_strategies() -> list[type[RoutingStrategy]]:
     """Every public `RoutingStrategy` subclass the package ships. Built-ins join as they land."""
-    modules = [langchain_llm_router]
+    modules = [langchain_model_router]
     if importlib.util.find_spec(f"{PACKAGE}.strategies") is not None:
         package = importlib.import_module(f"{PACKAGE}.strategies")
         modules.append(package)
@@ -476,10 +476,10 @@ def _public_surface() -> set[str]:
     module of the package — importing `errors` as a module is as public as importing a name."""
     modules = {
         info.name
-        for info in pkgutil.iter_modules([str(Path(langchain_llm_router.__file__).parent)])
+        for info in pkgutil.iter_modules([str(Path(langchain_model_router.__file__).parent)])
         if not info.name.startswith("_")
     }
-    return set(langchain_llm_router.__all__) | modules | {f"{PACKAGE}.{name}" for name in modules}
+    return set(langchain_model_router.__all__) | modules | {f"{PACKAGE}.{name}" for name in modules}
 
 
 def _identifiers(source: str) -> set[str]:
@@ -553,8 +553,8 @@ def test_a_builtin_is_a_public_strategy_like_any_other(cls: type[RoutingStrategy
 
     assert issubclass(cls, RoutingStrategy)
     assert not inspect.isabstract(cls)
-    assert cls.__name__ in langchain_llm_router.__all__
-    assert getattr(langchain_llm_router, cls.__name__) is cls
+    assert cls.__name__ in langchain_model_router.__all__
+    assert getattr(langchain_model_router, cls.__name__) is cls
     assert _core_imports(source) - _public_surface() == set()
 
 
@@ -562,7 +562,7 @@ def test_a_builtin_is_a_public_strategy_like_any_other(cls: type[RoutingStrategy
 def test_the_core_never_names_a_builtin(cls: type[RoutingStrategy]) -> None:
     """No module outside `strategies/` (bar the package's re-exports) refers to a
     built-in, so the router can only reach it through the `RoutingStrategy` interface."""
-    core = Path(langchain_llm_router.__file__).parent
+    core = Path(langchain_model_router.__file__).parent
 
     naming = [
         path.name
@@ -578,21 +578,21 @@ def test_the_builtin_checks_catch_what_they_look_for() -> None:
     """The two source checks above are not vacuous while no built-in exists — a
     private name or module is caught, an exported name or a public module is not."""
     source = (
-        "from langchain_llm_router import RoutingChoice, RoutingStrategy\n"
-        "from langchain_llm_router import errors\n"
-        "from langchain_llm_router._extraction import build_request\n"
+        "from langchain_model_router import RoutingChoice, RoutingStrategy\n"
+        "from langchain_model_router import errors\n"
+        "from langchain_model_router._extraction import build_request\n"
         "from ..strategy import as_strategy\n"
         "from .configurable import ConfigurableStrategy\n"
-        "import langchain_llm_router.decision\n"
-        "import langchain_llm_router._extraction\n"
-        "import langchain_llm_router.strategies.keyword as keyword\n"
+        "import langchain_model_router.decision\n"
+        "import langchain_model_router._extraction\n"
+        "import langchain_model_router.strategies.keyword as keyword\n"
         "isinstance(strategy, keyword.KeywordStrategy)\n"
     )
 
     assert _core_imports(source) - _public_surface() == {
         "build_request",
         "as_strategy",
-        "langchain_llm_router._extraction",
+        "langchain_model_router._extraction",
     }
     assert {"KeywordStrategy", "ConfigurableStrategy"} <= _identifiers(source)
     assert "KeywordStrategy" not in _identifiers('"""Unlike KeywordStrategy, ..."""\n')

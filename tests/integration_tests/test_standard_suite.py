@@ -18,10 +18,10 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 from langchain_tests.integration_tests import ChatModelIntegrationTests
 
-from langchain_llm_router import ChatRouter
+from langchain_model_router import ChatRouter
 
-GEMINI_MODEL = os.environ.get("LLM_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
-OLLAMA_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+GEMINI_MODEL = os.environ.get("MODEL_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
+OLLAMA_MODEL = os.environ.get("MODEL_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
 
 
 class _RouterIntegrationTests(ChatModelIntegrationTests):

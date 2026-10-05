@@ -17,7 +17,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.outputs import ChatResult
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,

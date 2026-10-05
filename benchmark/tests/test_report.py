@@ -8,7 +8,7 @@ from benchmark.costing import CostBreakdown
 from benchmark.judge import JudgeVerdict
 from benchmark.report import BASELINE_ARM, render_markdown, summarize
 from benchmark.runner import ItemResult
-from langchain_llm_router import RoutingDecision
+from langchain_model_router import RoutingDecision
 
 
 def _result(

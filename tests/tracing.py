@@ -21,7 +21,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages.ai import add_usage
 from langchain_core.runnables.utils import coro_with_context
 
-from langchain_llm_router import RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_model_router import RoutingChoice, RoutingRequest, RoutingStrategy
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

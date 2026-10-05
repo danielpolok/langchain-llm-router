@@ -16,7 +16,7 @@ from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain.tools import tool
 
-from langchain_llm_router import ChatRouter, HeuristicStrategy, routing_decision
+from langchain_model_router import ChatRouter, HeuristicStrategy, routing_decision
 
 small = init_chat_model("google_genai:gemini-3.5-flash-lite")
 frontier = init_chat_model("google_genai:gemini-3.8-flash")

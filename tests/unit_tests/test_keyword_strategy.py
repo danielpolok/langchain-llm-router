@@ -28,7 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tracers.context import register_configure_hook
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     KeywordStrategy,

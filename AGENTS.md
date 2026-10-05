@@ -1,4 +1,4 @@
-# Development guidelines for `langchain-llm-router`
+# Development guidelines for `langchain-model-router`
 
 Guidance for anyone — or any coding agent — working in this repository. For the user-facing
 picture, read [README.md](README.md); for why the code is shaped the way it is, read
@@ -6,7 +6,7 @@ picture, read [README.md](README.md); for why the code is shaped the way it is, 
 
 ## What this is
 
-`ChatRouter` (PyPI `langchain-llm-router`, MIT) is a LangChain 1.x chat model (`BaseChatModel`,
+`ChatRouter` (PyPI `langchain-model-router`, MIT) is a LangChain 1.x chat model (`BaseChatModel`,
 `langchain-core` 1.x) that, per request, picks one of several named candidate chat models and
 returns that model's response unchanged plus a record of the routing decision. The routing
 *policy* lives in the application's code; a *strategy* applies it.
@@ -23,7 +23,7 @@ hosted proxy, and replacing `@wrap_model_call` agent middleware. See the
 
 | Path | Holds |
 | --- | --- |
-| `src/langchain_llm_router/router.py` | `ChatRouter` — the pipeline, and every calling convention |
+| `src/langchain_model_router/router.py` | `ChatRouter` — the pipeline, and every calling convention |
 | `.../strategy.py` | the strategy interface (`RoutingStrategy`, `RoutingRequest`, `RoutingChoice`) and its stability promise |
 | `.../_extraction.py` | current-request extraction |
 | `.../decision.py` | the decision record, and `last_routing_decision()` |
@@ -56,7 +56,7 @@ Tests that call real providers are marked `@pytest.mark.requires_env("GEMINI_API
 `@pytest.mark.requires_ollama`, and skip when a named variable is unset or the local Ollama server
 is unreachable (hooks in the root `conftest.py`, which also loads `.env`). The real providers are
 Gemini (cloud, `google_genai:gemini-3-flash-preview`) and Ollama (local, `ollama:qwen3:8b`); set
-`LLM_ROUTER_GEMINI_MODEL` / `LLM_ROUTER_OLLAMA_MODEL` to override. Offline tests use fake models
+`MODEL_ROUTER_GEMINI_MODEL` / `MODEL_ROUTER_OLLAMA_MODEL` to override. Offline tests use fake models
 such as `GenericFakeChatModel`.
 
 ## Conventions

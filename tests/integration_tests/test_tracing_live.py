@@ -33,14 +33,14 @@ from langsmith import Client
 from langsmith.schemas import Run
 from langsmith.utils import LangSmithNotFoundError
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     RoutingChoice,
     RoutingDecision,
     RoutingRequest,
     RoutingStrategy,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, respond
 from tests.fakes import FakeChatModel
 
@@ -49,7 +49,7 @@ pytestmark = [
     pytest.mark.filterwarnings("ignore:.*removed after Jan 31, 2027"),
 ]
 
-PROJECT = "llm-router-tests"
+PROJECT = "model-router-tests"
 """Where the traces go, so they can be looked at afterwards. LangSmith creates it on first use.
 
 Nothing here deletes what it writes -- that's the point (see above) -- so the project grows by

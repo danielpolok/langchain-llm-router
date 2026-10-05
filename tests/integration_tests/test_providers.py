@@ -8,8 +8,8 @@ import os
 import pytest
 from langchain.chat_models import init_chat_model
 
-GEMINI_MODEL = os.environ.get("LLM_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
-OLLAMA_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+GEMINI_MODEL = os.environ.get("MODEL_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
+OLLAMA_MODEL = os.environ.get("MODEL_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
 
 
 @pytest.mark.requires_env("GEMINI_API_KEY")

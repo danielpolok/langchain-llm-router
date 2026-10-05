@@ -16,7 +16,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 DEFAULT_JUDGE_MODEL = os.environ.get(
-    "LLM_ROUTER_BENCHMARK_JUDGE_MODEL", "google_genai:gemini-3.1-pro-preview"
+    "MODEL_ROUTER_BENCHMARK_JUDGE_MODEL", "google_genai:gemini-3.1-pro-preview"
 )
 
 

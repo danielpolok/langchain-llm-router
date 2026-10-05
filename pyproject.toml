@@ -1,5 +1,5 @@
 [project]
-name = "langchain-llm-router"
+name = "langchain-model-router"
 version = "0.0.0"
 description = "In-process model routing for LangChain: a chat model that picks one of several candidate chat models per request."
 authors = [{ name = "Daniel Polok" }]
@@ -26,8 +26,8 @@ requires-python = ">=3.10"
 dependencies = ["langchain-core>=1.2.21,<2"]
 
 [project.urls]
-Repository = "https://github.com/danielpolok/langchain-llm-router"
-Issues = "https://github.com/danielpolok/langchain-llm-router/issues"
+Repository = "https://github.com/danielpolok/langchain-model-router"
+Issues = "https://github.com/danielpolok/langchain-model-router/issues"
 
 [dependency-groups]
 dev = [

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from langchain_llm_router import RoutingWarning
+from langchain_model_router import RoutingWarning
 from tests.docs import EXAMPLES, ROOT, example_output, relative
 
 ROUTER_WARNINGS = [cls.__name__ for cls in (RoutingWarning, *RoutingWarning.__subclasses__())]

@@ -30,7 +30,7 @@ from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langchain_core.tracers.schemas import Run
 from pydantic import ConfigDict, Field
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,
@@ -41,7 +41,7 @@ from langchain_llm_router import (
     last_routing_decision,
     routing_decision,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import generated, prompts, respond
 from tests.fakes import FakeChatModel, call_log
 from tests.tracing import PricedCall, StartLog, model_runs, priced_calls

@@ -25,7 +25,7 @@ from benchmark.dataset import load_dataset
 from benchmark.judge import JudgeVerdict, judge_model
 from benchmark.report import render_markdown, summarize
 from benchmark.runner import ItemResult, run_arm
-from langchain_llm_router import RoutingDecision
+from langchain_model_router import RoutingDecision
 
 RESULTS_DIR = Path(__file__).parent / "results"
 

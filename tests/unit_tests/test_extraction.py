@@ -36,8 +36,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from langchain_llm_router import RoutingRequest
-from langchain_llm_router._extraction import build_request
+from langchain_model_router import RoutingRequest
+from langchain_model_router._extraction import build_request
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 
 ROUTES = ("small", "frontier")
