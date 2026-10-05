@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/danielpolok/langchain-model-router/discussions
+    about: Ask how to route something, or share how you use the router.
+  - name: Security vulnerability
+    url: https://github.com/danielpolok/langchain-model-router/security/advisories/new
+    about: Report it privately, not in a public issue.

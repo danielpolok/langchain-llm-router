@@ -37,6 +37,8 @@ hosted proxy, and replacing `@wrap_model_call` agent middleware. See the
 | `examples/` | one runnable script per use case, a real-world scenario on the same real models as the docs |
 | `benchmark/` | the cost/quality benchmark — a versioned harness and dataset; see its README |
 | `docs/` | user documentation — `strategies.md` (every strategy, and writing your own) and `guide.md` (everything else) — and `design.md`; `README.md` is the landing page and the index |
+| `CHANGELOG.md` | what changed in each release; new entries go under **Unreleased** |
+| `.github/workflows/` | `ci.yml` (lint, tests, the built package) and `release.yml` (publishing a `vX.Y.Z` tag) |
 
 ## Commands
 
@@ -90,6 +92,10 @@ such as `GenericFakeChatModel`.
   mismatch. Refresh the output when a script changes.
 - **Tests** exercise behaviour through the public API and every calling convention
   (`tests/conventions.py`), not internals.
+- **Changelog and releases:** a change a user would notice gets a line under **Unreleased** in
+  `CHANGELOG.md`. Releases are cut by pushing a version tag; CONTRIBUTING.md has the steps. The
+  README is also the PyPI page, so its links into the repository are absolute URLs
+  (`tests/unit_tests/test_docs.py` checks them against the files).
 - **Cost and tracing:** the router's own run is a chain run, never a model run, so tokens are
   counted once. Any change to how the router calls a route must keep
   `tests/unit_tests/test_cost.py` and `test_tracing.py` passing.

@@ -1,10 +1,12 @@
-# Lint, type-check and test every push to main and every pull request.
+# Lint, type-check and test every push to main and every pull request, and check the package
+# PyPI would get. The release workflow runs this whole workflow on the tagged commit first.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -32,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         # 3.10 is where async callbacks only propagate through an explicit config.
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
@@ -108,3 +110,41 @@ jobs:
             --exclude-newer-package langchain-google-genai=2026-03-24 \
             --exclude-newer-package langchain-ollama=2026-03-24 \
             pytest tests -q
+
+  # What PyPI gets: the built distributions, checked for a valid PyPI page, installed on their own
+  # to show they need nothing beyond langchain-core, and tested as installed rather than from
+  # `src/`, so a module or file missing from the wheel fails here instead of for a user.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv build
+      - name: Check the README renders as the PyPI page
+        run: uvx twine check --strict dist/*
+      - name: Install the wheel alone; it must add nothing beyond langchain-core
+        run: |
+          uv venv -q /tmp/router
+          uv pip install -q --python /tmp/router dist/*.whl
+          core=$(uv pip show --python /tmp/router langchain-core | sed -n 's/^Version: //p')
+          uv venv -q /tmp/core
+          uv pip install -q --python /tmp/core "langchain-core==$core"
+          names() { uv pip freeze --python "$1" | sed -E 's/[ =].*//' | grep -vx langchain-model-router; }
+          diff <(names /tmp/router) <(names /tmp/core)
+          /tmp/router/bin/python -c "import langchain_model_router"
+      - name: Run the unit tests against the installed wheel
+        run: |
+          uv sync --locked --no-install-project
+          uv pip install dist/*.whl
+          uv run --no-sync python -c "
+          import langchain_model_router
+          assert 'site-packages' in langchain_model_router.__file__, langchain_model_router.__file__
+          "
+          uv run --no-sync pytest tests/unit_tests benchmark/tests -q
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/

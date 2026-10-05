@@ -29,6 +29,12 @@ LINK = re.compile(r"!?\[[^\]]*\]\((?P<target>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 SOURCE = re.compile(r"\b(?:src|srcset)=\"(?P<target>[^\"]+)\"")  # <img> and <picture> images
 HEADING = re.compile(r"^#{1,6}\s+(?P<title>.+?)\s*$", re.MULTILINE)
 URL = re.compile(r"[a-z][a-z0-9+.-]*:")
+# The README is also the PyPI page, where a relative link has nothing to resolve against, so it
+# links into the repository by absolute URL. These prefixes map such a link back to its file.
+REPOSITORY = (
+    "https://github.com/danielpolok/langchain-model-router/blob/main/",
+    "https://raw.githubusercontent.com/danielpolok/langchain-model-router/main/",
+)
 PRINTS = re.compile(r"^# It prints\b.*", re.DOTALL | re.MULTILINE)
 
 
@@ -98,6 +104,18 @@ def links(page: Path) -> list[str]:
     """Every link and image target on the page, outside code blocks."""
     text = FENCE.sub("", page.read_text(encoding="utf-8"))
     return [match.group("target") for pattern in (LINK, SOURCE) for match in pattern.finditer(text)]
+
+
+def local(page: Path, target: str) -> tuple[Path, str] | None:
+    """The file and anchor a link points to in this repository, or `None` for an external link."""
+    for prefix in REPOSITORY:
+        if target.startswith(prefix):
+            path, _, fragment = target.removeprefix(prefix).partition("#")
+            return (ROOT / path).resolve(), fragment
+    if URL.match(target):
+        return None
+    path, _, fragment = target.partition("#")
+    return ((page.parent / path).resolve() if path else page), fragment
 
 
 def slug(title: str) -> str:

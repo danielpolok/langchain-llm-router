@@ -7,5 +7,6 @@
 - [ ] `make test`, `make lint` and `make type-check` pass
 - [ ] Behaviour changes have tests through the public API and the calling conventions
 - [ ] Public docstrings updated (Google style: `Args`, `Returns`, `Raises`, `Example`)
+- [ ] A line under **Unreleased** in `CHANGELOG.md`, if a user would notice the change
 - [ ] No breaking change to the strategy interface without the version bump its stability promise names
 - [ ] If any part was written with an AI assistant, I have read and understood all of it

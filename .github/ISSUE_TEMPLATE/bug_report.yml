@@ -1,0 +1,50 @@
+name: Bug report
+description: The router did something wrong, or something that works on a chat model fails on it.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A small example we can run makes it much
+        quicker to fix. Fake models such as `GenericFakeChatModel` are fine as routes.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and this hasn't been reported.
+          required: true
+        - label: I'm on the latest release of `langchain-model-router`.
+          required: false
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal example
+      description: The shortest code that shows the problem, with the routes and strategy you used.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: >-
+        The output, warning or full traceback. If routing went to the wrong model, include
+        `routing_decision(response)`.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: "Paste the output of: `pip list | grep -i -E 'langchain|langgraph'` and `python --version`."
+      render: text
+    validations:
+      required: true
