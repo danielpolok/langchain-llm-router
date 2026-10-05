@@ -10,7 +10,7 @@ does. The routing strategy interface carries a stricter
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-04
+## [0.1.0] - 2026-10-05
 
 The first release.
 
