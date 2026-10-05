@@ -2,7 +2,7 @@
 
 Prices drift; these are a snapshot, not a live lookup — `PRICING_SOURCE` and `PRICING_ASOF` say
 where they came from and when, so a reader can tell whether to re-check them before trusting an
-old report. Override a figure with `LLM_ROUTER_BENCHMARK_PRICE_OVERRIDES` (see below) rather than
+old report. Override a figure with `MODEL_ROUTER_BENCHMARK_PRICE_OVERRIDES` (see below) rather than
 editing this file for a one-off re-run with different assumptions.
 """
 
@@ -57,10 +57,10 @@ EMBEDDING_PRICE_PER_MILLION_TOKENS = 0.20
 
 
 def _apply_overrides(prices: dict[str, TokenPrice]) -> dict[str, TokenPrice]:
-    """`LLM_ROUTER_BENCHMARK_PRICE_OVERRIDES`: a JSON object of
+    """`MODEL_ROUTER_BENCHMARK_PRICE_OVERRIDES`: a JSON object of
     `{"model": {"input_per_million": x, "output_per_million": y}}`, merged over the defaults.
     """
-    raw = os.environ.get("LLM_ROUTER_BENCHMARK_PRICE_OVERRIDES")
+    raw = os.environ.get("MODEL_ROUTER_BENCHMARK_PRICE_OVERRIDES")
     if not raw:
         return prices
     overrides = json.loads(raw)

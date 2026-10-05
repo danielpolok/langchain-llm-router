@@ -689,7 +689,7 @@ wheels = [
 ]
 
 [[package]]
-name = "langchain-llm-router"
+name = "langchain-model-router"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [

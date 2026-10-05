@@ -38,7 +38,7 @@ from langchain_core.runnables import Runnable, RunnableConfig, RunnableMap
 from langchain_core.tools import tool
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingCallable,
@@ -50,8 +50,8 @@ from langchain_llm_router import (
     last_routing_decision,
     routing_decision,
 )
-from langchain_llm_router import decision as decision_module
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router import decision as decision_module
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, AnyConvention, Convention, respond
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 

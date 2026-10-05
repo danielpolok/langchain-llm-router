@@ -93,7 +93,7 @@ Five arms, over the same 32-item dataset (`data/workload.json`):
 
 Two candidate routes throughout, both Gemini so the whole benchmark runs from one API key with no
 local-server dependency: `"small"` (`gemini-3.5-flash-lite`) and `"frontier"` (`gemini-3.8-flash`)
-— override with `LLM_ROUTER_BENCHMARK_SMALL_MODEL` / `LLM_ROUTER_BENCHMARK_FRONTIER_MODEL`. The
+— override with `MODEL_ROUTER_BENCHMARK_SMALL_MODEL` / `MODEL_ROUTER_BENCHMARK_FRONTIER_MODEL`. The
 repository's other usual small/frontier pair (`ollama:qwen3:8b` / `gemini-3-flash-preview`) is what
 `test_live_ollama_smoke.py` uses for its free, budget-independent sanity check — see "Testing this
 harness itself". `arms.py` builds all five arms.
@@ -131,7 +131,7 @@ agent item names a real tool) every time it loads.
 `DEFAULT_JUDGE_MODEL` (`judge.py`) is `gemini-3.1-pro-preview` — a separate, stronger Gemini model
 than either candidate route, so it never grades its own answer under the "frontier" name. It is
 never added to any arm's `routes=`; nothing in `runner.py` ever routes to it. Override with
-`LLM_ROUTER_BENCHMARK_JUDGE_MODEL` if you'd rather point it at a different provider (e.g. an
+`MODEL_ROUTER_BENCHMARK_JUDGE_MODEL` if you'd rather point it at a different provider (e.g. an
 Anthropic model, for a judge with no shared vendor with either route at all — this needs
 `langchain-anthropic` and its own API key, neither of which this repo installs by default).
 
@@ -140,9 +140,9 @@ Anthropic model, for a judge with no shared vendor with either route at all — 
 - **`EmbeddingStrategy`'s threshold** (`EMBEDDING_THRESHOLD` in `arms.py`, default `0.5`) —
   `embedding.py` ships no default at all, because a number that's silently wrong is worse than one
   the caller has to supply, and a real threshold needs real similarity scores from a live run to
-  calibrate against. Override with `LLM_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD`.
+  calibrate against. Override with `MODEL_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD`.
 - **`HeuristicStrategy`'s defaults** (`DEFAULT_WEIGHTS`, `DEFAULT_THRESHOLD`,
-  `DEFAULT_LENGTH_RANGE` in `src/langchain_llm_router/strategies/heuristic.py`) are used as
+  `DEFAULT_LENGTH_RANGE` in `src/langchain_model_router/strategies/heuristic.py`) are used as
   shipped (all weights equal, threshold `1.0`). If a future run shows a clear miss — say the
   heuristic arm's routing accuracy is poor on one signal — edit those constants and rerun to check
   the fix, following that module's own notes on what a benchmark result should retune.

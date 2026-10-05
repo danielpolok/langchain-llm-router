@@ -17,8 +17,8 @@ from benchmark.judge import JudgeVerdict
 from benchmark.runner import run_arm, run_item
 from benchmark.tests.fakes import FakeJudge, RaisingModel
 from benchmark.tools import ALL_TOOLS
-from langchain_llm_router import ChatRouter
-from langchain_llm_router.strategies import (
+from langchain_model_router import ChatRouter
+from langchain_model_router.strategies import (
     ClassifierStrategy,
     EmbeddingStrategy,
     HeuristicStrategy,

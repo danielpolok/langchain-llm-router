@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from pydantic import ValidationError
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     FallbackWarning,
     RoutingChoice,
@@ -29,7 +29,7 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import CONVENTIONS, Convention, respond
 from tests.fakes import FakeChatModel, call_log
 from tests.tracing import model_name_of, model_runs

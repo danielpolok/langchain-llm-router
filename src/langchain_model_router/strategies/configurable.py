@@ -193,11 +193,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
-from langchain_llm_router.errors import RoutingError
-from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
-from langchain_llm_router.strategies.heuristic import Signal
-from langchain_llm_router.strategies.keyword import _whole_word, _written
-from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_model_router.errors import RoutingError
+from langchain_model_router.strategies._lookback import checked_lookback, considered, how_far_back
+from langchain_model_router.strategies.heuristic import Signal
+from langchain_model_router.strategies.keyword import _whole_word, _written
+from langchain_model_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 __all__ = [
     "Condition",

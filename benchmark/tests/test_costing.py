@@ -11,7 +11,7 @@ from langchain_core.messages.ai import UsageMetadata
 
 from benchmark.costing import chat_cost, cost_of, estimate_embedding_cost
 from benchmark.pricing import EMBEDDING_PRICE_PER_MILLION_TOKENS, TokenPrice, price_for
-from langchain_llm_router.strategies.embedding import _CHARS_PER_TOKEN
+from langchain_model_router.strategies.embedding import _CHARS_PER_TOKEN
 
 
 def _usage(input_tokens: int, output_tokens: int) -> UsageMetadata:

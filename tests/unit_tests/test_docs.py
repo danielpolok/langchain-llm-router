@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import langchain_llm_router
+import langchain_model_router
 from tests.docs import (
     PAGES,
     README,
@@ -63,7 +63,7 @@ def test_every_docs_page_is_linked_from_the_readme() -> None:
 
 def test_every_public_name_is_documented() -> None:
     docs = "\n".join(page.read_text(encoding="utf-8") for page in PAGES)
-    missing = [name for name in langchain_llm_router.__all__ if f"`{name}" not in docs]
+    missing = [name for name in langchain_model_router.__all__ if f"`{name}" not in docs]
     assert not missing, f"public names missing from the documentation: {missing}"
 
 

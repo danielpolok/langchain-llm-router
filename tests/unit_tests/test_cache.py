@@ -39,8 +39,8 @@ from langchain_core.runnables import RunnableBinding
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from langchain_llm_router import ChatRouter, RoutingError
-from langchain_llm_router.strategies.keyword import KeywordStrategy
+from langchain_model_router import ChatRouter, RoutingError
+from langchain_model_router.strategies.keyword import KeywordStrategy
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel, call_log
 
 

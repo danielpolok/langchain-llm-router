@@ -139,9 +139,9 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from pydantic import BaseModel, Field, create_model
 
-from langchain_llm_router.errors import RoutingError
-from langchain_llm_router.strategies._lookback import checked_lookback, considered, how_far_back
-from langchain_llm_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_model_router.errors import RoutingError
+from langchain_model_router.strategies._lookback import checked_lookback, considered, how_far_back
+from langchain_model_router.strategy import RoutingChoice, RoutingRequest, RoutingStrategy
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

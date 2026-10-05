@@ -67,9 +67,9 @@ from langchain_core.runnables.utils import ConfigurableFieldSpec, coro_with_cont
 from langchain_core.tools import BaseTool
 from pydantic import Field, field_validator, model_validator
 
-from langchain_llm_router._extraction import build_request
-from langchain_llm_router._profile import resolve_profile
-from langchain_llm_router._tools import (
+from langchain_model_router._extraction import build_request
+from langchain_model_router._profile import resolve_profile
+from langchain_model_router._tools import (
     BINDING_KEY,
     StructuredOutput,
     StructuredOutputBinding,
@@ -79,14 +79,14 @@ from langchain_llm_router._tools import (
     supports_tools,
     tools_are_bound,
 )
-from langchain_llm_router.decision import (
+from langchain_model_router.decision import (
     ROUTING_KEY,
     RoutingDecision,
     discard_decision,
     record_decision,
     routing_decision,
 )
-from langchain_llm_router.errors import (
+from langchain_model_router.errors import (
     FallbackWarning,
     ForcedRouteError,
     ForcedRouteWarning,
@@ -94,7 +94,7 @@ from langchain_llm_router.errors import (
     RoutingError,
     ToolSupportWarning,
 )
-from langchain_llm_router.strategy import (
+from langchain_model_router.strategy import (
     RoutingCallable,
     RoutingChoice,
     RoutingRequest,
@@ -109,7 +109,7 @@ __all__ = ["ChatRouter"]
 AnswerT = TypeVar("AnswerT")
 """What a routed call answers with: a message, or a structured-output payload."""
 
-_LIBRARY_MODULES = ("langchain_llm_router", "langchain_core", "langchain", "langgraph")
+_LIBRARY_MODULES = ("langchain_model_router", "langchain_core", "langchain", "langgraph")
 """Module-name prefixes `_stacklevel` walks past to find the application's own frame.
 
 Matched on the dot (`name == prefix or name.startswith(prefix + ".")`), so `langchain_myapp` —
@@ -218,7 +218,7 @@ class ChatRouter(BaseChatModel):
 
     Example:
         ```python
-        from langchain_llm_router import ChatRouter, KeywordStrategy, routing_decision
+        from langchain_model_router import ChatRouter, KeywordStrategy, routing_decision
 
         router = ChatRouter(
             routes={"small": small_model, "coder": coder_model},

@@ -19,8 +19,8 @@ from langchain.chat_models import init_chat_model
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
-from langchain_llm_router import ChatRouter
-from langchain_llm_router.strategies import (
+from langchain_model_router import ChatRouter
+from langchain_model_router.strategies import (
     ClassifierStrategy,
     EmbeddingStrategy,
     HeuristicStrategy,
@@ -28,21 +28,21 @@ from langchain_llm_router.strategies import (
 )
 
 FRONTIER_MODEL = os.environ.get(
-    "LLM_ROUTER_BENCHMARK_FRONTIER_MODEL", "google_genai:gemini-3.8-flash"
+    "MODEL_ROUTER_BENCHMARK_FRONTIER_MODEL", "google_genai:gemini-3.8-flash"
 )
 SMALL_MODEL = os.environ.get(
-    "LLM_ROUTER_BENCHMARK_SMALL_MODEL", "google_genai:gemini-3.5-flash-lite"
+    "MODEL_ROUTER_BENCHMARK_SMALL_MODEL", "google_genai:gemini-3.5-flash-lite"
 )
-EMBED_MODEL = os.environ.get("LLM_ROUTER_GEMINI_EMBED_MODEL", "gemini-embedding-2-preview")
-OLLAMA_SMOKE_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+EMBED_MODEL = os.environ.get("MODEL_ROUTER_GEMINI_EMBED_MODEL", "gemini-embedding-2-preview")
+OLLAMA_SMOKE_MODEL = os.environ.get("MODEL_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
 """Not one of the benchmark's own arms — only `test_live_ollama_smoke.py`'s free, local,
 budget-independent sanity check uses this."""
 
 # Uncalibrated pending a real run (embedding.py: EmbeddingStrategy's threshold has no shipped
 # default by design). Override with
-# LLM_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD once a live run's similarity scores say what a good
+# MODEL_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD once a live run's similarity scores say what a good
 # bar actually is; see benchmark/README.md.
-EMBEDDING_THRESHOLD = float(os.environ.get("LLM_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD", "0.5"))
+EMBEDDING_THRESHOLD = float(os.environ.get("MODEL_ROUTER_BENCHMARK_EMBEDDING_THRESHOLD", "0.5"))
 
 # Calibration examples for EmbeddingStrategy and KeywordStrategy — deliberately *not* drawn from
 # benchmark/data/workload.json: reusing graded items as the strategy's own few-shot examples

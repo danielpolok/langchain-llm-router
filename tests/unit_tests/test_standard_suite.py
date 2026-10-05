@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_tests.unit_tests import ChatModelUnitTests
 
-from langchain_llm_router import ChatRouter
+from langchain_model_router import ChatRouter
 from tests.fakes import NativeStructuredFakeChatModel
 
 

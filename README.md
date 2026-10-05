@@ -1,10 +1,12 @@
-# langchain-llm-router
+# langchain-model-router
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![LangChain](https://img.shields.io/badge/langchain--core-%E2%89%A51.2.21%2C%20%3C2-1c3c3c)](https://docs.langchain.com/oss/python/langchain/overview)
 
 **Send each request to the right model, by rules you control, from one LangChain chat model.**
+
+*A community package, not affiliated with or endorsed by LangChain.*
 
 `ChatRouter` is a drop-in LangChain chat model. You give it a few named models and a **strategy**.
 For each request, the strategy picks one of the models. The router returns that model's own
@@ -32,7 +34,7 @@ Whatever the policy, the router behaves the same way:
 ## Get started
 
 ```bash
-pip install langchain-llm-router
+pip install langchain-model-router
 ```
 
 It needs Python 3.10 or later and `langchain-core` 1.2.21 or later within 1.x (`>=1.2.21,<2`).
@@ -45,7 +47,7 @@ depending on how hard it looks.
 ```python
 from langchain.chat_models import init_chat_model
 
-from langchain_llm_router import ChatRouter, HeuristicStrategy, routing_decision
+from langchain_model_router import ChatRouter, HeuristicStrategy, routing_decision
 
 router = ChatRouter(
     routes={
@@ -136,7 +138,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
 See [AGENTS.md](AGENTS.md) for the repository layout and conventions, and
-[GitHub Issues](https://github.com/danielpolok/langchain-llm-router/issues) for open work.
+[GitHub Issues](https://github.com/danielpolok/langchain-model-router/issues) for open work.
 
 ## License
 

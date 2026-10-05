@@ -27,7 +27,7 @@ from langchain_core.tools import tool
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from pydantic import BaseModel, Field
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     ForcedRouteError,
     ForcedRouteWarning,
@@ -39,7 +39,7 @@ from langchain_llm_router import (
     ToolSupportWarning,
     routing_decision,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, Convention, generated, respond
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel, call_log
 

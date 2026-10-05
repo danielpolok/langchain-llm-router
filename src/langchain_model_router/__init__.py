@@ -4,8 +4,8 @@
 returns that model's response unchanged, plus a record of the routing decision.
 """
 
-from langchain_llm_router.decision import RoutingDecision, last_routing_decision, routing_decision
-from langchain_llm_router.errors import (
+from langchain_model_router.decision import RoutingDecision, last_routing_decision, routing_decision
+from langchain_model_router.errors import (
     FallbackWarning,
     ForcedRouteError,
     ForcedRouteWarning,
@@ -14,15 +14,15 @@ from langchain_llm_router.errors import (
     RoutingWarning,
     ToolSupportWarning,
 )
-from langchain_llm_router.router import ChatRouter
-from langchain_llm_router.strategies import (
+from langchain_model_router.router import ChatRouter
+from langchain_model_router.strategies import (
     ClassifierStrategy,
     ConfigurableStrategy,
     EmbeddingStrategy,
     HeuristicStrategy,
     KeywordStrategy,
 )
-from langchain_llm_router.strategy import (
+from langchain_model_router.strategy import (
     RoutingCallable,
     RoutingChoice,
     RoutingRequest,

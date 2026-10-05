@@ -34,8 +34,8 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tracers.context import register_configure_hook
 
-import langchain_llm_router
-from langchain_llm_router import (
+import langchain_model_router
+from langchain_model_router import (
     ChatRouter,
     ConfigurableStrategy,
     FallbackWarning,
@@ -48,8 +48,8 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router._extraction import build_request
-from langchain_llm_router.strategies.configurable import (
+from langchain_model_router._extraction import build_request
+from langchain_model_router.strategies.configurable import (
     Condition,
     Rule,
     all_of,
@@ -62,7 +62,7 @@ from langchain_llm_router.strategies.configurable import (
     signal_at_least,
     tools_bound,
 )
-from langchain_llm_router.strategies.heuristic import (
+from langchain_model_router.strategies.heuristic import (
     Signal,
     analysis_signal,
     code_signal,
@@ -1760,8 +1760,8 @@ def test_the_component_is_an_ordinary_public_strategy() -> None:
     strategy = cost_tiering()
 
     assert isinstance(strategy, RoutingStrategy)
-    assert langchain_llm_router.ConfigurableStrategy is ConfigurableStrategy
-    assert "ConfigurableStrategy" in langchain_llm_router.__all__
+    assert langchain_model_router.ConfigurableStrategy is ConfigurableStrategy
+    assert "ConfigurableStrategy" in langchain_model_router.__all__
     assert isinstance(keywords("python"), Condition)
 
 

@@ -21,7 +21,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-from langchain_llm_router import ChatRouter, RoutingChoice, RoutingRequest, RoutingStrategy
+from langchain_model_router import ChatRouter, RoutingChoice, RoutingRequest, RoutingStrategy
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, generated, prompts, respond
 from tests.fakes import FakeChatModel, call_log
 from tests.tracing import (

@@ -6,7 +6,7 @@ A caller has three ways to the record, in the order they are worth reaching for:
 structured output without `include_raw=True`, which returns a parsed object.
 
 `record_decision` and `discard_decision` are the router's own, not public API; everything
-`langchain_llm_router` exports from here is.
+`langchain_model_router` exports from here is.
 
 A route may itself be a `ChatRouter`. The inner router records its decision on its answer, and
 the outer router then replaces it with its own, so the message and `last_routing_decision()`
@@ -185,7 +185,7 @@ _order = itertools.count(1)
 stamp would decide nothing this docstring does not already leave undefined."""
 
 _in_context: ContextVar[_Published | None] = ContextVar(
-    "langchain_llm_router_last_decision", default=None
+    "langchain_model_router_last_decision", default=None
 )
 """The record for the context that routed — per call and per task, and discarded with a copy."""
 

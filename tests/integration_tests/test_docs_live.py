@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from langchain_llm_router import RoutingWarning
+from langchain_model_router import RoutingWarning
 from tests.docs import PAGES, python_blocks, relative
 
 ROUTER_WARNINGS = [cls.__name__ for cls in (RoutingWarning, *RoutingWarning.__subclasses__())]

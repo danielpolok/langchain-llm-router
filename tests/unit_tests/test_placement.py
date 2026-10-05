@@ -27,7 +27,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     RoutingChoice,
     RoutingDecision,

@@ -22,7 +22,7 @@ from benchmark.costing import CostBreakdown, cost_of
 from benchmark.dataset import WorkloadItem
 from benchmark.judge import JudgeVerdict, grade
 from benchmark.tools import ALL_TOOLS, BY_NAME
-from langchain_llm_router import RoutingDecision, routing_decision
+from langchain_model_router import RoutingDecision, routing_decision
 
 
 @dataclass

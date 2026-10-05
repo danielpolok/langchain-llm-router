@@ -5,7 +5,7 @@ measured this against `qwen3:8b`.
 A small local model is flaky in what it *says*, so these assert on structure — that a tool call
 happened, that the record is where it belongs — never on wording, and the prompts stay trivial.
 Skips unless a local Ollama server answers (`requires_ollama`, root `conftest.py`); override the
-model with `LLM_ROUTER_OLLAMA_MODEL`.
+model with `MODEL_ROUTER_OLLAMA_MODEL`.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
 from pydantic import BaseModel
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     RoutingChoice,
     RoutingRequest,
@@ -29,7 +29,7 @@ from langchain_llm_router import (
 )
 from tests.fakes import FakeChatModel
 
-OLLAMA_MODEL = os.environ.get("LLM_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
+OLLAMA_MODEL = os.environ.get("MODEL_ROUTER_OLLAMA_MODEL", "ollama:qwen3:8b")
 
 pytestmark = pytest.mark.requires_ollama
 

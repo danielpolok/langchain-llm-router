@@ -22,7 +22,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     RoutingChoice,
     RoutingDecision,
@@ -30,7 +30,7 @@ from langchain_llm_router import (
     RoutingStrategy,
     routing_decision,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, respond
 from tests.fakes import FakeChatModel
 from tests.tracing import (

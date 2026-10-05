@@ -5,7 +5,7 @@ all, is routed by what the conversation is about once the classifier reads the u
 messages. "Which article of the civil code covers this?" contains "code", and "this doesn't work,
 try again" contains nothing. The routes are fakes, since only the classifier's choice is under
 test. Skips without `GEMINI_API_KEY` (`requires_env`, root `conftest.py`); override the model with
-`LLM_ROUTER_GEMINI_MODEL`.
+`MODEL_ROUTER_GEMINI_MODEL`.
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ import pytest
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from langchain_llm_router import ChatRouter, ClassifierStrategy, routing_decision
+from langchain_model_router import ChatRouter, ClassifierStrategy, routing_decision
 from tests.fakes import FakeChatModel
 
-GEMINI_MODEL = os.environ.get("LLM_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
+GEMINI_MODEL = os.environ.get("MODEL_ROUTER_GEMINI_MODEL", "google_genai:gemini-3-flash-preview")
 
 ROUTE_DESCRIPTIONS = {
     "general": "anything that isn't programming or law",

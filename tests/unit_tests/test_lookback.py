@@ -40,7 +40,7 @@ from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     ClassifierStrategy,
     ConfigurableStrategy,
@@ -56,7 +56,7 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router.strategies.configurable import Rule, keywords
+from langchain_model_router.strategies.configurable import Rule, keywords
 from tests.conventions import ALL_CONVENTIONS, CONVENTIONS, AnyConvention, Convention, respond
 from tests.fakes import (
     CountingEmbeddings,

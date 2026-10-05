@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from langchain_core.messages.ai import UsageMetadata
 
 from benchmark.pricing import EMBEDDING_PRICE_PER_MILLION_TOKENS, chat_prices, price_for
-from langchain_llm_router.strategies.embedding import _CHARS_PER_TOKEN
+from langchain_model_router.strategies.embedding import _CHARS_PER_TOKEN
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from langchain_core.language_models import BaseChatModel, ModelProfile
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, ValidationError
 
-from langchain_llm_router import ChatRouter, RoutingError
+from langchain_model_router import ChatRouter, RoutingError
 from tests.fakes import FakeChatModel, ToolCallingFakeChatModel
 
 

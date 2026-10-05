@@ -23,7 +23,7 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import ConfigDict
 
-from langchain_llm_router import (
+from langchain_model_router import (
     ChatRouter,
     RoutingChoice,
     RoutingDecision,
@@ -32,7 +32,7 @@ from langchain_llm_router import (
     RoutingWarning,
     routing_decision,
 )
-from langchain_llm_router.decision import ROUTING_KEY
+from langchain_model_router.decision import ROUTING_KEY
 from tests.conventions import ALL_CONVENTIONS, AnyConvention, respond
 from tests.fakes import FakeChatModel, GenerateOnlyFakeChatModel, call_log
 
