@@ -15,9 +15,11 @@ Every entry point runs the same pipeline, in this order:
    did into a `RoutingDecision`, falling back to the default route when it can't;
    `_forced_decision` does the same for a forced route that can't be used, with
    `ForcedRouteError` or `ForcedRouteWarning` standing in for `FallbackWarning`. `_divert`
-   then applies tool-aware routing to whatever settled the decision: a request whose route
-   can't use the tools bound to it goes to the default route instead (or, if that can't use
-   them either, the first route in declaration order that can), recorded as a diversion.
+   then checks whatever settled the decision against what the request needs: a request whose
+   route can't use the tools bound to it, or whose profile says it can't take the
+   conversation's images, audio, video or PDFs, goes to the default route instead (or, if that
+   can't serve it either, the first route in declaration order that can), recorded as a
+   diversion.
    `_settle` does that and adds `previous_route`, the route the history says answered the
    previous turn — before the strategy run closes, so its output is the same record the router
    run and the route run end up with.
@@ -67,6 +69,7 @@ from langchain_core.runnables.utils import ConfigurableFieldSpec, coro_with_cont
 from langchain_core.tools import BaseTool
 from pydantic import Field, field_validator, model_validator
 
+from langchain_model_router._content import content_needs, describe, missing_content
 from langchain_model_router._extraction import build_request
 from langchain_model_router._profile import resolve_profile
 from langchain_model_router._tools import (
@@ -87,9 +90,11 @@ from langchain_model_router.decision import (
     routing_decision,
 )
 from langchain_model_router.errors import (
+    ContentSupportWarning,
     FallbackWarning,
     ForcedRouteError,
     ForcedRouteWarning,
+    NoContentCapableRouteError,
     NoToolCapableRouteError,
     RoutingError,
     ToolSupportWarning,
@@ -109,8 +114,17 @@ __all__ = ["ChatRouter"]
 AnswerT = TypeVar("AnswerT")
 """What a routed call answers with: a message, or a structured-output payload."""
 
-_LIBRARY_MODULES = ("langchain_model_router", "langchain_core", "langchain", "langgraph")
+_LIBRARY_MODULES = (
+    "langchain_model_router",
+    "langchain_core",
+    "langchain",
+    "langgraph",
+    "pydantic",
+)
 """Module-name prefixes `_stacklevel` walks past to find the application's own frame.
+
+`pydantic` is among them because a warning raised while the router is constructed comes from a
+validator, which pydantic's own frames call.
 
 Matched on the dot (`name == prefix or name.startswith(prefix + ".")`), so `langchain_myapp` —
 someone's own package that merely starts with the same letters as `langchain` — is never
@@ -193,10 +207,11 @@ class ChatRouter(BaseChatModel):
         strategy: A `RoutingStrategy`, or a plain function of a `RoutingRequest`. `None`
             always uses the default route.
         on_unavailable_forced_route: What happens when a route forced through runtime config
-            is unknown or can't use bound tools: `"error"` (the default) raises, `"fallback"`
-            warns and uses the default route.
-        tool_support_overrides: Per-route override of tool-capability detection, by route
-            name; it always wins.
+            is unknown or can't serve the request: `"error"` (the default) raises,
+            `"fallback"` warns and uses the default route.
+        tool_support_overrides: Deprecated: per-route override of tool-capability detection,
+            by route name; it always wins. Give the route its own
+            `profile={"tool_calling": ...}` instead.
 
     Returns:
         The router is itself a chat model: `invoke`, `stream`, `batch` and their async
@@ -211,10 +226,12 @@ class ChatRouter(BaseChatModel):
             `pydantic.ValidationError`.
         TypeError: for a `strategy` that is neither a strategy instance nor a synchronous
             callable.
-        ForcedRouteError: at call time, for a forced route that doesn't exist or can't use the
-            bound tools.
+        ForcedRouteError: at call time, for a forced route that doesn't exist or can't serve
+            the request.
         NoToolCapableRouteError: from `bind_tools` / `with_structured_output`, or at call
             time, when no route can use the bound tools.
+        NoContentCapableRouteError: at call time, when no route can take the conversation's
+            images, audio, video or PDFs.
 
     Example:
         ```python
@@ -250,10 +267,14 @@ class ChatRouter(BaseChatModel):
     Kept out of serialization: a strategy is code, not configuration."""
 
     on_unavailable_forced_route: Literal["error", "fallback"] = "error"
-    """What happens when a forced route is unknown or can't use bound tools."""
+    """What happens when a forced route is unknown or can't serve the request."""
 
     tool_support_overrides: dict[str, bool] = Field(default_factory=dict)
-    """Per-route override of capability detection; always wins."""
+    """Deprecated: per-route override of tool-capability detection; always wins.
+
+    LangChain's own `profile=` on the route does the same job, and is the one mechanism for
+    both tools and content: `init_chat_model(..., profile={"tool_calling": True})`. Unlike
+    this field, it also reaches the router's own `profile`."""
 
     @field_validator("routes", mode="before")
     @classmethod
@@ -358,6 +379,14 @@ class ChatRouter(BaseChatModel):
                 f"the routes are {_names(self.routes)}"
             )
             raise RoutingError(msg)
+        if self.tool_support_overrides:
+            warnings.warn(
+                "tool_support_overrides is deprecated and will be removed in a future release; "
+                "set the route's own profile instead, for example "
+                'init_chat_model(..., profile={"tool_calling": True})',
+                DeprecationWarning,
+                stacklevel=_stacklevel(),
+            )
         return self
 
     @property
@@ -917,7 +946,7 @@ class ChatRouter(BaseChatModel):
         """
         forced = config.get("configurable", {}).get("route")
         if forced is not None:
-            return self._forced_decision(cast("str", forced), kwargs)
+            return self._forced_decision(cast("str", forced), messages, kwargs)
         # `_coerce_strategy` has wrapped any plain callable.
         strategy = cast("RoutingStrategy | None", self.strategy)
         if strategy is None:
@@ -938,7 +967,9 @@ class ChatRouter(BaseChatModel):
             return self._fallback("the request has no user message to route on", strategy=None)
         return _StrategyCall(strategy, strategy_name(strategy), request)
 
-    def _forced_decision(self, route: str, kwargs: dict[str, Any]) -> RoutingDecision:
+    def _forced_decision(
+        self, route: str, messages: list[BaseMessage], kwargs: dict[str, Any]
+    ) -> RoutingDecision:
         """What a forced route resolves to.
 
         Itself, when it can serve this call, or whatever `on_unavailable_forced_route` says to
@@ -950,7 +981,7 @@ class ChatRouter(BaseChatModel):
         `_divert`'s own docstring) — this only rules out the one case the router must refuse
         first: the forced route itself being unusable.
         """
-        problem = self._forced_route_problem(route, kwargs)
+        problem = self._forced_route_problem(route, messages, kwargs)
         if problem is None:
             return RoutingDecision(route=route, reason="forced via runtime config", forced=True)
         if self.on_unavailable_forced_route == "error":
@@ -960,19 +991,20 @@ class ChatRouter(BaseChatModel):
             )
         return self._forced_fallback(problem)
 
-    def _forced_route_problem(self, route: str, kwargs: dict[str, Any]) -> str | None:
+    def _forced_route_problem(
+        self, route: str, messages: list[BaseMessage], kwargs: dict[str, Any]
+    ) -> str | None:
         """Why a forced route can't be used, or `None` when it can.
 
-        Existence first. Tool capability only when something is bound — tools, or a schema,
-        which LangChain builds on tool binding — using the same signal `_divert` uses for every
-        other route: with nothing bound, a forced route is always available on that
-        count, and only its existence is ever in question.
+        Existence first, then what `_divert` checks for every other route, by the same
+        signals: tool capability when something is bound — tools, or a schema, which LangChain
+        builds on tool binding — and whether its profile says it can't take the conversation's
+        images, audio, video or PDFs.
         """
         if route not in self.routes:
             return f"forced route {route!r} is not one of the routes: {_names(self.routes)}"
-        if tools_are_bound(kwargs) and not self._supports_tools(route):
-            return f"forced route {route!r} can't use the bound tools"
-        return None
+        cause = self._why_not(route, kwargs, content_needs(messages))
+        return None if cause is None else f"forced route {route!r} {cause}"
 
     def _decide(
         self,
@@ -1080,7 +1112,7 @@ class ChatRouter(BaseChatModel):
         self, decision: RoutingDecision, messages: list[BaseMessage], kwargs: dict[str, Any]
     ) -> RoutingDecision:
         """The decision as it is recorded: diverted if it must be, and with `previous_route`."""
-        diverted = self._divert(decision, kwargs)
+        diverted = self._divert(decision, kwargs, content_needs(messages))
         return replace(diverted, previous_route=self._previous_route(messages))
 
     def _previous_route(self, messages: list[BaseMessage]) -> str | None:
@@ -1139,11 +1171,37 @@ class ChatRouter(BaseChatModel):
             fallback=True,
         )
 
-    # --- 3. Tool capability ---
+    # --- 3. Tool and content capability ---
 
     def _supports_tools(self, route: str) -> bool:
         """Whether `route` can use tools, by the signals `supports_tools` documents."""
         return supports_tools(self.routes[route], override=self.tool_support_overrides.get(route))
+
+    def _why_not(self, route: str, kwargs: dict[str, Any], needs: frozenset[str]) -> str | None:
+        """Why `route` can't serve this request, or `None` when it can.
+
+        It can when it can use the bound tools, if any are, and its profile doesn't say it
+        can't take some of the content in `needs` (`_content.py` has the rules).
+        """
+        causes = []
+        if tools_are_bound(kwargs) and not self._supports_tools(route):
+            causes.append("can't use the bound tools")
+        missing = missing_content(self.routes[route], needs)
+        if missing:
+            causes.append(f"can't take {describe(missing)}")
+        return " and ".join(causes) or None
+
+    def _capable_route(self, kwargs: dict[str, Any], needs: frozenset[str]) -> str | None:
+        """Where a request diverted off a route that can't serve it goes, or `None` if nowhere.
+
+        The same order as for tools alone (`_tool_capable_route`): the default route when it
+        can serve the request, otherwise the first route in declaration order that can.
+        """
+        if self._why_not(self.default_route, kwargs, needs) is None:
+            return self.default_route
+        return next(
+            (name for name in self.routes if self._why_not(name, kwargs, needs) is None), None
+        )
 
     def _tool_capable_route(self) -> str | None:
         """Where a request diverted off a tool-incapable route goes, or `None` if nowhere.
@@ -1178,13 +1236,22 @@ class ChatRouter(BaseChatModel):
             stacklevel=_stacklevel(),
         )
 
-    def _divert(self, decision: RoutingDecision, kwargs: dict[str, Any]) -> RoutingDecision:
-        """What tool-aware routing allows: a tool-incapable route gives way to a capable one.
+    def _divert(
+        self, decision: RoutingDecision, kwargs: dict[str, Any], needs: frozenset[str]
+    ) -> RoutingDecision:
+        """A route that can't serve the request gives way to one that can.
 
-        Only when something is bound — tools, or a schema, which LangChain builds on tool
-        binding. The strategy is not consulted again: it has decided, a second run would
+        A route can't serve it when something is bound — tools, or a schema, which LangChain
+        builds on tool binding — and it can't use tools, or when its profile says it can't take
+        some of the conversation's content (`needs`). A route the request goes to must pass
+        both. The strategy is not consulted again: it has decided, a second run would
         buy a second call under the strategies that make them, and re-deciding could
         divert in a loop.
+
+        When no route can serve it, the request fails before any route is called:
+        `NoToolCapableRouteError` when no route can use the bound tools, and otherwise
+        `NoContentCapableRouteError`. A route whose profile says it can't take an image would
+        fail on it or, worse, quietly answer without it.
 
         One warning per diverted request: a diversion is not the route the policy
         asked for, and it happens per request, so it is per request that the application
@@ -1199,17 +1266,27 @@ class ChatRouter(BaseChatModel):
         request ever gets here, so this never has to tell a forced route from any other. Whatever a
         forced route's refusal falls back to is diverted like any other decision.
         """
-        if not tools_are_bound(kwargs) or self._supports_tools(decision.route):
+        why_not = self._why_not(decision.route, kwargs, needs)
+        if why_not is None:
             return decision
-        target = self._tool_capable_route()
+        target = self._capable_route(kwargs, needs)
         if target is None:
-            # Unreachable through `bind_tools`, which refuses at bind time; reachable by
-            # putting tools straight into the call kwargs with `bind(tools=...)`.
-            raise NoToolCapableRouteError(_no_tool_capable_route(self.routes))
-        cause = f"{decision.route!r} can't use the bound tools"
-        warnings.warn(
-            f"{cause}; diverted to {target!r}", ToolSupportWarning, stacklevel=_stacklevel()
-        )
+            if tools_are_bound(kwargs) and self._tool_capable_route() is None:
+                # Unreachable through `bind_tools`, which refuses at bind time; reachable by
+                # putting tools straight into the call kwargs with `bind(tools=...)`.
+                raise NoToolCapableRouteError(_no_tool_capable_route(self.routes))
+            reasons = "; ".join(
+                f"{name!r} {self._why_not(name, kwargs, needs)}" for name in self.routes
+            )
+            raise NoContentCapableRouteError(
+                f"no route can take this conversation's content: {reasons}. A route can take "
+                "it unless its profile says it can't, so a wrong profile is corrected on the "
+                "route itself, with profile="
+            )
+        cause = f"{decision.route!r} {why_not}"
+        tools_diverted = tools_are_bound(kwargs) and not self._supports_tools(decision.route)
+        category = ToolSupportWarning if tools_diverted else ContentSupportWarning
+        warnings.warn(f"{cause}; diverted to {target!r}", category, stacklevel=_stacklevel())
         return replace(
             decision,
             route=target,
@@ -1376,7 +1453,8 @@ def _no_tool_capable_route(routes: Iterable[str]) -> str:
     """The message for a router none of whose routes can use tools."""
     return (
         f"no route can use tools: {_names(routes)}; binding tools or structured output needs "
-        "at least one tool-capable route — tool_support_overrides can name one"
+        "at least one tool-capable route — a route's own profile can name one, with "
+        'profile={"tool_calling": True}'
     )
 
 

@@ -9,9 +9,11 @@ as `pydantic.ValidationError` (pydantic wraps `ValueError`), while a call-time f
 from __future__ import annotations
 
 __all__ = [
+    "ContentSupportWarning",
     "FallbackWarning",
     "ForcedRouteError",
     "ForcedRouteWarning",
+    "NoContentCapableRouteError",
     "NoToolCapableRouteError",
     "RoutingError",
     "RoutingWarning",
@@ -51,6 +53,20 @@ class ToolSupportWarning(RoutingWarning):
         import warnings
 
         warnings.filterwarnings("ignore", category=ToolSupportWarning)
+        ```
+    """
+
+
+class ContentSupportWarning(RoutingWarning):
+    """A request was diverted off a route that can't take the conversation's content.
+
+    The route's profile says it can't take the images, audio, video or PDFs in the conversation.
+
+    Example:
+        ```python
+        import warnings
+
+        warnings.filterwarnings("ignore", category=ContentSupportWarning)
         ```
     """
 
@@ -96,8 +112,26 @@ class NoToolCapableRouteError(RoutingError):
     """
 
 
+class NoContentCapableRouteError(RoutingError):
+    """The conversation holds images, audio, video or PDFs that no route can take.
+
+    Raised at call time, before any route is called, when every route's profile explicitly says
+    it can't take some of the content — or can't take it together with the bound tools.
+
+    Example:
+        ```python
+        try:
+            router.invoke(conversation_with_an_image)
+        except NoContentCapableRouteError as error:
+            print(error)
+        ```
+    """
+
+
 class ForcedRouteError(RoutingError):
-    """The forced route doesn't exist, or can't use the bound tools.
+    """The forced route doesn't exist, or can't serve the request.
+
+    It can't use the bound tools, or can't take the conversation's images, audio, video or PDFs.
 
     Raised at call time, and only under the default `on_unavailable_forced_route="error"`.
 
