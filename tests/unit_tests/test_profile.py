@@ -1,4 +1,5 @@
-"""The router's own `.profile` — the intersection of its routes'.
+"""The router's own `.profile` — the intersection of its routes', except for what it serves by
+diverting.
 
 `_resolve_model_profile` (`router.py`) and the reduction it calls (`_profile.resolve_profile`)
 are tested per value kind first (one case per bullet of the reduction rule), then end to end through
@@ -37,12 +38,35 @@ def router_of(**profiles: dict[str, object] | None) -> ChatRouter:
 
 
 def test_booleans_are_anded() -> None:
-    """A boolean key is kept only if every route says `True`."""
-    both_true = router_of(a={"tool_calling": True}, b={"tool_calling": True})
-    one_false = router_of(a={"tool_calling": True}, b={"tool_calling": False})
+    """A boolean key is `True` only if every route says `True`."""
+    both_true = router_of(a={"structured_output": True}, b={"structured_output": True})
+    one_false = router_of(a={"structured_output": True}, b={"structured_output": False})
 
-    assert both_true.profile == {"tool_calling": True}
-    assert one_false.profile == {"tool_calling": False}
+    assert both_true.profile == {"structured_output": True}
+    assert one_false.profile == {"structured_output": False}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "tool_calling",
+        "image_inputs",
+        "image_url_inputs",
+        "image_tool_message",
+        "audio_inputs",
+        "video_inputs",
+        "pdf_inputs",
+        "pdf_tool_message",
+    ],
+)
+def test_what_the_router_serves_by_diverting_is_ored(key: str) -> None:
+    """Tools and content go to a route that can take them, so the router can when any route
+    can — and says `False` only when none can."""
+    one_true = router_of(a={key: False}, b={key: True})
+    none_true = router_of(a={key: False}, b={key: False})
+
+    assert one_true.profile == {key: True}
+    assert none_true.profile == {key: False}
 
 
 def test_ints_are_minimised() -> None:
@@ -104,12 +128,12 @@ def test_bool_and_falsy_int_keys_are_reduced_separately_and_correctly() -> None:
     would still have to get both of these right independently to pass.
     """
     router = router_of(
-        a={"tool_calling": True, "max_output_tokens": 1},
-        b={"tool_calling": False, "max_output_tokens": 0},
+        a={"structured_output": True, "max_output_tokens": 1},
+        b={"structured_output": False, "max_output_tokens": 0},
     )
 
-    assert router.profile == {"tool_calling": False, "max_output_tokens": 0}
-    assert router.profile["tool_calling"] is False  # AND, not min() coincidentally agreeing
+    assert router.profile == {"structured_output": False, "max_output_tokens": 0}
+    assert router.profile["structured_output"] is False  # AND, not min() coincidentally agreeing
     assert type(router.profile["max_output_tokens"]) is int  # min(), not bool logic
     assert router.profile["max_output_tokens"] == 0
 
@@ -132,14 +156,14 @@ def test_explicit_profile_wins_over_the_intersection() -> None:
     `_resolve_model_profile()`'s result when `profile is None`; confirmed empirically rather
     than assumed, per the brief."""
     routes: dict[str, BaseChatModel] = {
-        "a": route({"tool_calling": True}),
-        "b": route({"tool_calling": False}),
+        "a": route({"structured_output": True}),
+        "b": route({"structured_output": False}),
     }
     given: ModelProfile = {"tool_calling": True, "structured_output": True}
 
     router = ChatRouter(routes=routes, default_route="a", profile=given)
 
-    assert router.profile == given  # not {"tool_calling": False}, the intersection
+    assert router.profile == given  # not {"structured_output": False}, the intersection
 
 
 def test_empty_routes_is_rejected_before_profile_resolution_would_run() -> None:

@@ -17,6 +17,12 @@ does. The routing strategy interface carries a stricter
   `ContentSupportWarning` says so, and `NoContentCapableRouteError` is raised when no route can
   take them.
 
+### Changed
+
+- The router's own `profile` reports tool calling and image, audio, video and PDF input as
+  supported when any route supports them, since the router sends such requests to a route that
+  does. A router used as another router's route is no longer skipped for them.
+
 ### Deprecated
 
 - `tool_support_overrides`. Set the route's own `profile`, for example

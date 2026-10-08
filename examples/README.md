@@ -3,7 +3,9 @@
 One runnable script per use case, each a small real-world scenario: an assistant, a support
 queue, an order-support agent, a model comparison. Every script calls the same two real models as
 the rest of the documentation, a small one and a frontier one, and prints which of them answered
-each request, with the start of its answer. Each opens with what it's for and ends with what it
+each request, with the start of its answer. The one exception is `image_follow_ups.py`, which
+declares a local text-only Ollama model next to Gemini but never calls it, so it needs only the
+Gemini key too. Each opens with what it's for and ends with what it
 printed, so you can read one without running it.
 
 ## Running them
@@ -32,4 +34,5 @@ top of a script; nothing else in it depends on the provider.
 | [`custom_strategy.py`](custom_strategy.py) | A support team's own ticket classifier picks the model | [A function as the strategy](../docs/strategies.md#a-function) |
 | [`agent_backbone.py`](agent_backbone.py) | An order-support agent keeps each customer's tool loop on one model | [The router inside an agent](../docs/guide.md#inside-an-agent) |
 | [`agent_middleware.py`](agent_middleware.py) | Middleware sends long conversations to the frontier model, and the router picks for the rest | [`@wrap_model_call` middleware](https://docs.langchain.com/oss/python/langchain/middleware) with the router |
+| [`image_follow_ups.py`](image_follow_ups.py) | Follow-up questions about a chart stay on the model that can see it, never a local text-only one | [Images, audio, video and PDFs](../docs/guide.md#images-audio-video-and-pdfs) |
 | [`experimentation.py`](experimentation.py) | Both models answer the same questions, to compare answers and cost before switching | [Forcing a route](../docs/guide.md#forcing-a-route) |

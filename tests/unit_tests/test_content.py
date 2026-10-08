@@ -343,3 +343,29 @@ async def test_a_refused_forced_route_falls_back_when_told_to() -> None:
         fallback=True,
     )
     assert [w.category for w in caught] == [ForcedRouteWarning]
+
+
+# --- a router as a route ---
+
+
+async def test_a_router_as_a_route_takes_what_any_of_its_routes_can() -> None:
+    """The inner router diverts an image to its vision route itself, so it reports
+    `image_inputs: True` and the outer router sends it the request rather than skipping it."""
+    inner_routes = {
+        "text": route("text", image_inputs=False),
+        "vision": route("vision", image_inputs=True),
+    }
+    inner = ChatRouter(routes=inner_routes, default_route="text")
+    outer = ChatRouter(
+        routes={"inner": inner, "other": route("other", image_inputs=False)},
+        default_route="other",
+        strategy=always("inner"),
+    )
+
+    answer, caught = await answered(outer, "invoke", follow_up(IMAGE))
+
+    assert answer.content == "vision answer"
+    assert routing_decision(answer) == RoutingDecision(
+        route="inner", reason="always 'inner'", strategy="decide"
+    )
+    assert [str(w.message) for w in caught] == ["'text' can't take images; diverted to 'vision'"]

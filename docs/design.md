@@ -83,8 +83,12 @@ use tools, binding is an error. Structured output counts as tool binding.
 - **Profile:** the router reports the *intersection* of its routes' profiles (booleans AND-ed,
   numbers minimised, differing values dropped, `None` if any route reports none), because
   `create_agent` picks a structured-output strategy from `model.profile` and must not pick one a
-  route can't serve. This is why the package needs `langchain-core>=1.2.21`: that is the first
-  release whose `BaseChatModel` asks a subclass for its profile (`_resolve_model_profile`).
+  route can't serve. The exception is what the router serves itself by diverting — `tool_calling`
+  and the content keys below — which it reports when *any* route has it: reported as "every
+  route", a router used as another router's route would be skipped for tools or content it would
+  have diverted to a capable route itself. `create_agent` reads neither. This is why the package
+  needs `langchain-core>=1.2.21`: that is the first release whose `BaseChatModel` asks a subclass
+  for its profile (`_resolve_model_profile`).
 
 ## Images, audio, video and PDFs
 
