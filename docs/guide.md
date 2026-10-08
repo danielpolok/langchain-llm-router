@@ -131,7 +131,9 @@ records the skipped route in `diverted_from`. If no route can use tools, `bind_t
 `NoToolCapableRouteError`.
 
 The router detects tool support from each model's `profile`. If a model reports it wrongly, correct
-it with `ChatRouter(..., tool_support_overrides={"local": False})`.
+the profile on the model itself, with LangChain's own `profile=`:
+`init_chat_model("ollama:qwen3:8b", profile={"tool_calling": True})`. The router's older
+`tool_support_overrides` setting does the same, but is deprecated.
 
 **Structured output** works the same way. A parsed object has nowhere to carry the decision, so
 read it with `last_routing_decision()`, which returns the decision of the last routed call made in
@@ -159,6 +161,80 @@ small
 
 With `include_raw=True`, the raw message is returned as well, and `routing_decision()` reads the
 decision from it.
+
+## Images, audio, video and PDFs
+
+A model receives the whole conversation, not only the newest message. A text follow-up to a
+question about a picture still carries the picture, so it must not go to a model that can't read
+images. The router checks every message against each model's `profile` and, like a route that
+can't use tools, skips a model that can't take what the conversation holds.
+
+Here the local model reads only text. Ollama models report no profile, so the example says so with
+`profile=`:
+
+```python
+from langchain_core.messages import HumanMessage
+
+from langchain_model_router import ConfigurableStrategy
+from langchain_model_router.strategies.configurable import Rule, always, modality
+
+RED_SQUARE = (
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mO4oKBAU8QwasGoBaMWjFowasGoBaMWjFow"
+    "asGoBaMWDBULAE7YQD2B7wk2AAAAAElFTkSuQmCC"
+)
+
+photo_router = ChatRouter(
+    routes={
+        "local": init_chat_model("ollama:qwen3:8b", profile={"image_inputs": False}),
+        "vision": init_chat_model("google_genai:gemini-3.5-flash-lite"),
+    },
+    default_route="local",
+    strategy=ConfigurableStrategy(
+        [
+            Rule("vision", modality("image"), name="has an image"),
+            Rule("local", always(), name="text only"),
+        ]
+    ),
+)
+
+conversation = [
+    HumanMessage(
+        [
+            {"type": "text", "text": "What is in this picture?"},
+            {"type": "image", "base64": RED_SQUARE, "mime_type": "image/png"},
+        ]
+    )
+]
+answer = photo_router.invoke(conversation)
+print(routing_decision(answer).route, "|", answer.text)
+
+conversation += [answer, HumanMessage("What colour is it?")]
+answer = photo_router.invoke(conversation)
+decision = routing_decision(answer)
+print(decision.route, "|", answer.text)
+print(decision.diverted_from, "|", decision.reason)
+```
+
+```text
+vision | Based on the image provided, it is just a solid red square. There are no other objects, details, or features visible.
+ContentSupportWarning: 'local' can't take images; diverted to 'vision'
+vision | It is red.
+local | rule 'text only' matched: always; 'local' can't take images, so it was diverted to 'vision'
+```
+
+The follow-up has no image of its own, so the strategy chose the local model. The router sent it to
+the vision model instead, and the decision records the skipped route in `diverted_from`.
+
+- **What is checked:** images, audio, video and PDFs, in user, AI and tool messages, against the
+  profile's `image_inputs`, `audio_inputs`, `video_inputs` and `pdf_inputs`. An image given by URL
+  also needs `image_url_inputs`, and an image or PDF in a tool result needs `image_tool_message`
+  or `pdf_tool_message`.
+- **Only a "no" counts.** A model is skipped only when its profile says `False`. A model with no
+  profile, or no entry for that content, is assumed to take it.
+- **Where the request goes:** to the default route, or to the first route that can take the content
+  if the default can't. With tools bound, that route must be able to use them too.
+- **When no route can take it**, the request raises `NoContentCapableRouteError` before any model is
+  called. A forced route that can't take it raises `ForcedRouteError`.
 
 ## Inside an agent
 
@@ -308,11 +384,13 @@ can't answer as asked.
 | --- | --- | --- |
 | `FallbackWarning` | warning | The strategy abstained, failed, or named a route that doesn't exist, so the default route answered |
 | `ToolSupportWarning` | warning | Some routes can't use the tools you bound, so they will be skipped for tool calls |
+| `ContentSupportWarning` | warning | The chosen route can't take the conversation's images, audio, video or PDFs, so another route answered |
 | `ForcedRouteWarning` | warning | A forced route couldn't be used, and `on_unavailable_forced_route="fallback"` sent the request to the default route |
-| `RoutingWarning` | warning | The base class of the three above |
+| `RoutingWarning` | warning | The base class of the four above |
 | `RoutingError` | error | The router or a strategy is misconfigured, reported when it is built. It is a `ValueError` |
 | `NoToolCapableRouteError` | error | Tools are bound but no route can use them |
-| `ForcedRouteError` | error | A forced route doesn't exist or can't use the bound tools |
+| `NoContentCapableRouteError` | error | The conversation holds images, audio, video or PDFs that no route can take |
+| `ForcedRouteError` | error | A forced route doesn't exist, can't use the bound tools, or can't take the conversation's content |
 
 Warnings use Python's `warnings` module. To make an unexpected fallback fail your tests, for
 example, turn it into an error:

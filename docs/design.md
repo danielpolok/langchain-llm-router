@@ -72,7 +72,8 @@ use tools, binding is an error. Structured output counts as tool binding.
 - **Capability:** a route can use tools if its `profile["tool_calling"]` says so; when the profile
   is silent (`None` or `{}`) the router falls back to whether the route's class overrides
   `BaseChatModel.bind_tools`, because the base implementation only fails at call time — the late
-  failure this check exists to pre-empt. A per-route override wins over both.
+  failure this check exists to pre-empt. The deprecated `tool_support_overrides` wins over both;
+  the route's own `profile=` is the way to correct it.
 - **Diversion order:** a request diverted off a tool-incapable route goes to the default route if
   it can use tools, otherwise to the first tool-capable route in declaration order. It is
   deterministic and explainable, and it does not re-run the strategy, which under the opt-in
@@ -85,14 +86,45 @@ use tools, binding is an error. Structured output counts as tool binding.
   route can't serve. This is why the package needs `langchain-core>=1.2.21`: that is the first
   release whose `BaseChatModel` asks a subclass for its profile (`_resolve_model_profile`).
 
+## Images, audio, video and PDFs
+
+A route receives the whole conversation, so what it must be able to take is decided by every
+message in it, not by the request the strategy routed on. A follow-up with no image of its own still
+carries the earlier image. The check belongs to the router, after the decision, because it is a hard
+requirement whatever the strategy chose, and `lookback` sees only a few messages.
+
+- **Signal:** LangChain's own `profile` keys — `image_inputs`, `audio_inputs`, `video_inputs` and
+  `pdf_inputs` — read against every message's `content_blocks`. Only an explicit `False` rules a
+  route out. Profiles are beta and often missing (Ollama models report none), and skipping every
+  model that is silent would divert far more requests wrongly than rightly.
+- **The narrower keys apply too.** An image given by URL also needs `image_url_inputs`, and an image
+  or PDF inside a tool result needs `image_tool_message` or `pdf_tool_message`: a provider can take
+  an image from the user and still reject one in a tool result. They cost nothing when they are
+  missing, by the rule above. A `file` block counts as a PDF unless its `mime_type` says otherwise,
+  because PDFs are the only files a profile describes and they often arrive untyped.
+- **Diversion** works as for tools, and the two are combined: the default route if it can serve the
+  request, else the first route in declaration order that can, where serving means both using the
+  bound tools and taking the content. The warning is `ContentSupportWarning`, or
+  `ToolSupportWarning` when the chosen route couldn't use the tools.
+- **No capable route is an error,** `NoContentCapableRouteError`, raised before any route is called.
+  The alternative, warning and sending the request anyway, gives the outcome the check exists to
+  prevent: a provider error or, worse, an answer that silently ignored the image. Routers that check
+  capabilities, such as OpenRouter, refuse in the same case. The error is a `RoutingError`, so
+  `with_fallbacks` can catch it.
+- **A wrong profile is corrected on the route,** with `profile=`, LangChain's own mechanism, which
+  also reaches the router's own profile. For the same reason `tool_support_overrides` is deprecated:
+  `profile={"tool_calling": ...}` does its job, and one mechanism covers tools and content alike.
+- **Not checked:** conversation length against `max_input_tokens`, which needs token counting.
+
 ## Forced routes
 
 A route pinned through runtime config is never silently swapped. It travels under the configurable
 key `route`, declared through `config_specs`, so `with_config`, `config={"configurable": …}` and
 config-schema introspection all work through LangChain's standard mechanism. A forced route skips
 the strategy entirely — its answer would be discarded, and running it costs money under the opt-in
-strategies. If the forced route doesn't exist or can't serve the request, the call errors by
-default; falling back is an explicit setting.
+strategies. If the forced route doesn't exist or can't serve the request — it can't use the bound
+tools or take the conversation's content — the call errors by default; falling back is an explicit
+setting.
 
 ## The decision record
 
