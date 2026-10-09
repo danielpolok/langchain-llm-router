@@ -47,7 +47,8 @@ class RoutingDecision:
         strategy: The strategy's name, or `None` when no strategy decided or was to blame.
         fallback: Whether the default route ran because the strategy could not decide.
         forced: Whether the route came from runtime config.
-        diverted_from: The tool-incapable route the request was diverted from, if any.
+        diverted_from: The route the request was diverted from because it couldn't serve it,
+            if any.
         previous_route: The route that answered the conversation's previous turn, if the
             history records one.
         messages_back: How far back the user message that decided was, if the strategy says.
@@ -81,7 +82,10 @@ class RoutingDecision:
     """The route came from runtime config."""
 
     diverted_from: str | None = None
-    """The tool-incapable route the request was diverted from."""
+    """The route the request was diverted from, because it couldn't serve it.
+
+    It couldn't use the bound tools, or its profile says it can't take the conversation's
+    images, audio, video or PDFs; `reason` says which."""
 
     previous_route: str | None = None
     """The route that answered the conversation's previous turn.

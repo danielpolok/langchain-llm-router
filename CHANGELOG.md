@@ -10,6 +10,24 @@ does. The routing strategy interface carries a stricter
 
 ## [Unreleased]
 
+### Added
+
+- Requests are diverted away from a route that can't take the images, audio, video or PDFs in
+  the conversation, including ones from earlier turns, as its `profile` reports. A
+  `ContentSupportWarning` says so, and `NoContentCapableRouteError` is raised when no route can
+  take them.
+
+### Changed
+
+- The router's own `profile` reports tool calling and image, audio, video and PDF input as
+  supported when any route supports them, since the router sends such requests to a route that
+  does. A router used as another router's route is no longer skipped for them.
+
+### Deprecated
+
+- `tool_support_overrides`. Set the route's own `profile`, for example
+  `init_chat_model(..., profile={"tool_calling": True})`.
+
 ## [0.1.0] - 2026-10-05
 
 The first release.

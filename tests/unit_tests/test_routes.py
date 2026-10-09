@@ -7,6 +7,7 @@ constructor accepts, and the runs one call opens.
 from __future__ import annotations
 
 import copy
+import inspect
 import sys
 import warnings
 from typing import Any, ClassVar, cast
@@ -141,6 +142,29 @@ def test_tool_support_overrides_must_name_routes() -> None:
         "tool_support_overrides names routes that don't exist: 'gpt-9'; "
         "the routes are 'cheap', 'frontier'"
     )
+
+
+def test_tool_support_overrides_is_deprecated_and_points_at_the_constructing_line() -> None:
+    """Setting it warns once, at the application's own line rather than inside pydantic, and
+    names its replacement; leaving it unset says nothing."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ChatRouter(routes=fake_routes("cheap"), default_route="cheap")
+        line = inspect.currentframe().f_lineno + 1  # type: ignore[union-attr]
+        ChatRouter(
+            routes=fake_routes("cheap"),
+            default_route="cheap",
+            tool_support_overrides={"cheap": True},
+        )
+
+    (warning,) = caught
+    assert warning.category is DeprecationWarning
+    assert str(warning.message) == (
+        "tool_support_overrides is deprecated and will be removed in a future release; set the "
+        'route\'s own profile instead, for example init_chat_model(..., profile={"tool_calling": '
+        "True})"
+    )
+    assert (warning.filename, warning.lineno) == (__file__, line)
 
 
 def test_the_pinned_fields_have_their_pinned_defaults() -> None:

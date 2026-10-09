@@ -6,9 +6,11 @@ returns that model's response unchanged, plus a record of the routing decision.
 
 from langchain_model_router.decision import RoutingDecision, last_routing_decision, routing_decision
 from langchain_model_router.errors import (
+    ContentSupportWarning,
     FallbackWarning,
     ForcedRouteError,
     ForcedRouteWarning,
+    NoContentCapableRouteError,
     NoToolCapableRouteError,
     RoutingError,
     RoutingWarning,
@@ -33,12 +35,14 @@ __all__ = [
     "ChatRouter",
     "ClassifierStrategy",
     "ConfigurableStrategy",
+    "ContentSupportWarning",
     "EmbeddingStrategy",
     "FallbackWarning",
     "ForcedRouteError",
     "ForcedRouteWarning",
     "HeuristicStrategy",
     "KeywordStrategy",
+    "NoContentCapableRouteError",
     "NoToolCapableRouteError",
     "RoutingCallable",
     "RoutingChoice",

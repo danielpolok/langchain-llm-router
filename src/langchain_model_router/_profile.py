@@ -1,4 +1,4 @@
-"""What the router reports about itself: the intersection of its routes' capabilities.
+"""What the router reports about itself: what it can promise on its routes' behalf.
 
 `create_agent` reads `model.profile` to decide whether a chat model can serve structured output
 through the provider's own strategy rather than a bound tool (`_supports_provider_strategy`,
@@ -8,6 +8,11 @@ match that a router — which has no `model`/`model_name`/`model_id` of its own 
 either way). A router that claimed a capability only some of its routes have would have a
 strategy picked for it that a route can't serve, so the router answers only for
 what every route can do.
+
+The exception is what the router serves itself by diverting: tool calling, and taking images,
+audio, video and PDFs. A request a route can't serve goes to one that can, so the router can
+serve it when *any* route can. Reported as "every route", a router used as another router's route
+would be skipped by the outer one for content or tools it would have handled.
 
 This module holds the reduction (`resolve_profile`); `ChatRouter._resolve_model_profile`
 (`router.py`) is the one line that calls it. `BaseChatModel._resolve_model_profile`
@@ -27,6 +32,20 @@ from langchain_core.language_models import BaseChatModel, ModelProfile
 
 __all__ = ["resolve_profile"]
 
+_ANY_ROUTE = frozenset(
+    {
+        "tool_calling",
+        "image_inputs",
+        "image_url_inputs",
+        "image_tool_message",
+        "audio_inputs",
+        "video_inputs",
+        "pdf_inputs",
+        "pdf_tool_message",
+    }
+)
+"""Capabilities the router has when any route has them: it diverts a request to that route."""
+
 
 def resolve_profile(routes: Mapping[str, BaseChatModel]) -> ModelProfile | None:
     """The intersection of every route's own `.profile`.
@@ -36,11 +55,11 @@ def resolve_profile(routes: Mapping[str, BaseChatModel]) -> ModelProfile | None:
     *every* route's profile (a key one route doesn't report is dropped, not defaulted to a worst
     case it never claimed):
 
-    - Both `bool`: AND-ed. Checked before the `int` case below — `bool` is a subclass of `int`
-      in Python, so a bare `isinstance(value, int)` test would catch a boolean too, and a
-      boolean pair would take the `int` branch's `min()` instead of this one's `all()` (the two
-      happen to agree for a genuine boolean pair, since Python orders `False < True`, but the
-      point is to compute the claim the spec names, not to rely on that coincidence).
+    - Both `bool`: OR-ed for the capabilities in `_ANY_ROUTE`, which the router serves by
+      diverting to a route that has them, and AND-ed otherwise. Checked before the `int` case
+      below — `bool` is a subclass of `int` in Python, so a bare `isinstance(value, int)` test
+      would catch a boolean too, and a boolean pair would take the `int` branch's `min()`
+      instead of this one's `all()` or `any()`.
     - Both `int` (and not `bool`, by the `elif` above already having failed): the minimum — the
       more conservative of the two claims.
     - Otherwise (a `str`, a `list`, or a route pair that disagrees on a value neither `bool` nor
@@ -61,7 +80,7 @@ def resolve_profile(routes: Mapping[str, BaseChatModel]) -> ModelProfile | None:
     for key in set.intersection(*(set(profile) for profile in known)):
         values = [profile[key] for profile in known]
         if all(isinstance(value, bool) for value in values):
-            shared[key] = all(values)
+            shared[key] = any(values) if key in _ANY_ROUTE else all(values)
         elif all(isinstance(value, int) for value in values):
             shared[key] = min(values)
         elif all(value == values[0] for value in values):

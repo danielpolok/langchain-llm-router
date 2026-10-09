@@ -295,12 +295,13 @@ async def test_tool_support_overrides_change_what_the_router_does_with_a_route()
         "pinned": capable("pinned"),
         "revived": capable("revived", profile={"tool_calling": False}),
     }
-    router = ChatRouter(
-        routes=routes,
-        default_route="frontier",
-        strategy=ByText(),
-        tool_support_overrides={"pinned": False, "revived": True},
-    )
+    with pytest.warns(DeprecationWarning, match="tool_support_overrides is deprecated"):
+        router = ChatRouter(
+            routes=routes,
+            default_route="frontier",
+            strategy=ByText(),
+            tool_support_overrides={"pinned": False, "revived": True},
+        )
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -386,18 +387,43 @@ def test_binding_when_no_route_can_use_tools_is_an_error(binder: Binder) -> None
 
     assert str(raised.value) == (
         "no route can use tools: 'a', 'b'; binding tools or structured output needs at least "
-        "one tool-capable route — tool_support_overrides can name one"
+        "one tool-capable route — a route's own profile can name one, with "
+        'profile={"tool_calling": True}'
     )
     assert routing_warnings(caught) == []
     assert [call_log(route) for route in routes.values()] == [[], []]
 
 
 @pytest.mark.parametrize("binder", BINDERS)
-def test_an_override_can_make_a_route_the_one_that_can_use_tools(binder: Binder) -> None:
-    """The error is about what the router believes, and the override is
+def test_a_route_s_profile_can_make_it_the_one_that_can_use_tools(binder: Binder) -> None:
+    """The error is about what the router believes, and the route's own profile is
     how an application corrects that belief — with it, binding succeeds and warns about the
     other route."""
-    router, _ = router_of({"a": False, "b": False}, default="a", tool_support_overrides={"b": True})
+    routes: dict[str, BaseChatModel] = {
+        "a": incapable("a"),
+        "b": incapable("b").model_copy(update={"profile": {"tool_calling": True}}),
+    }
+    router = ChatRouter(routes=routes, default_route="a")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        binder.bind(router)
+
+    (warning,) = routing_warnings(caught)
+    assert str(warning.message) == (
+        "routes that can't use tools: 'a'; a request routed to one of them goes to 'b' instead"
+    )
+
+
+@pytest.mark.parametrize("binder", BINDERS)
+def test_a_deprecated_override_still_makes_a_route_the_one_that_can_use_tools(
+    binder: Binder,
+) -> None:
+    """`tool_support_overrides` still works while it is deprecated."""
+    with pytest.warns(DeprecationWarning, match="tool_support_overrides is deprecated"):
+        router, _ = router_of(
+            {"a": False, "b": False}, default="a", tool_support_overrides={"b": True}
+        )
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
